@@ -61,13 +61,13 @@ export const STRUCTURE_PROFILE: ViewProfile = {
 };
 
 /**
- * Functional view (WB-097): from an Object, the functions it performs and their decomposition, flow and
- * requirements; from a Function, who performs it, its parent and sub-functions, what comes before and
- * after it, and the requirements it satisfies.
+ * Functional view (WB-097, amended by WB-103): from an Object, the functions it performs and their
+ * decomposition and flow; from a Function, who performs it, its parent and sub-functions, and what comes
+ * before and after it. The requirements a function satisfies are left to the Requirements view.
  */
 export const FUNCTIONAL_PROFILE: ViewProfile = {
   name: "Functional",
-  description: "Functions of an Object, or a Function with its performer, sub-functions, order and requirements.",
+  description: "Functions of an Object, or a Function with its performer, parent, sub-functions and order.",
   startTypes: ["Object", "Function"],
   steps: [
     { field: "performs", direction: "out", from: ["Object"], to: ["Function"], atStartOnly: true, undefinedOk: true },
@@ -76,7 +76,6 @@ export const FUNCTIONAL_PROFILE: ViewProfile = {
     { field: "hasChild", direction: "out", from: ["Function"], to: ["Function"] },
     { field: "precedes", direction: "in", from: ["Function"], to: ["Function"], undefinedOk: false },
     { field: "precedes", direction: "out", from: ["Function"], to: ["Function"], undefinedOk: true },
-    { field: "satisfies", direction: "out", from: ["Function"], to: ["Requirement"], undefinedOk: true },
   ],
   depth: 2,
   nodeCap: 80,

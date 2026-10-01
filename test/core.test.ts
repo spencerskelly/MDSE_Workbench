@@ -237,15 +237,16 @@ function functionalIndex() {
   ]);
 }
 
-test("functional view from an Object: its functions, their sub-functions, flow and requirements (WB-097)", () => {
+test("functional view from an Object: its functions, their sub-functions and flow, no requirements (WB-097, WB-103)", () => {
   const idx = functionalIndex();
   const v = traverse(idx, ["Pump.md"], FUNCTIONAL_PROFILE);
-  assert.deepEqual([...v.depthOf].map(([p, d]) => `${d}:${p}`).sort(), ["0:Pump.md", "1:Cool.md", "1:Move.md", "2:Lift.md", "2:Other.md", "2:Req1.md", "2:Req2.md"]);
+  assert.deepEqual([...v.depthOf].map(([p, d]) => `${d}:${p}`).sort(), ["0:Pump.md", "1:Cool.md", "1:Move.md", "2:Lift.md", "2:Other.md"]);
+  assert.ok(![...v.depthOf.keys()].some((k) => k.startsWith("Req")), "satisfied requirements are not shown (WB-103)");
   assert.ok(!v.depthOf.has("Nope.md"), "an Object's own hasChild is not followed");
   assert.equal(v.depthOf.get("Other.md"), 2, "a function also performed by another Object shows that Object (shared allocation)");
 });
 
-test("functional view from a Function: performer, parent, sub-functions, before and after, with arrows in the stored direction (WB-097)", () => {
+test("functional view from a Function: performer, parent, sub-functions, before and after, with arrows in the stored direction (WB-097, WB-103)", () => {
   const idx = indexOf(schema, [
     note("Top.md", "Function", { hasChild: ["Mid.md"] }),
     note("Mid.md", "Function", { hasChild: ["Low.md"], precedes: ["After.md"], satisfies: ["R.md"] }),
@@ -257,24 +258,24 @@ test("functional view from a Function: performer, parent, sub-functions, before 
     note("R.md", "Requirement"),
   ]);
   const v = traverse(idx, ["Mid.md"], FUNCTIONAL_PROFILE);
-  assert.deepEqual([...v.depthOf.keys()].sort(), ["After.md", "Before.md", "Low.md", "Mid.md", "Pump.md", "R.md", "Top.md"]);
+  assert.deepEqual([...v.depthOf.keys()].sort(), ["After.md", "Before.md", "Low.md", "Mid.md", "Pump.md", "Top.md"]);
   assert.ok(!v.depthOf.has("Elsewhere.md"));
   const c = toCanvas(idx, v, FUNCTIONAL_PROFILE);
-  const idOfFile = (f: string) => c.nodes.find((n) => n.file === f)!.id;
+  const idOfFile = (f: string) => c.nodes.find((n) => n.file === f)?.id;
   const edge = (a: string, b: string) => c.edges.find((e) => e.fromNode === idOfFile(a) && e.toNode === idOfFile(b));
   assert.equal(edge("Pump.md", "Mid.md")?.label, "performs", "performer to function");
   assert.equal(edge("Top.md", "Mid.md")?.label, "hasChild", "parent to sub-function");
   assert.equal(edge("Before.md", "Mid.md")?.label, "precedes");
   assert.equal(edge("Mid.md", "After.md")?.label, "precedes");
   assert.equal(edge("Mid.md", "Low.md")?.label, "hasChild");
-  assert.equal(edge("Mid.md", "R.md")?.label, "satisfies");
+  assert.equal(edge("Mid.md", "R.md"), undefined, "no satisfies link in the Functional view");
   assert.ok(c.edges.every((e) => e.fromNode && e.toNode), "no unfilled edge ends");
 });
 
-test("functional view: a missing requirement or function shows as undefined, a missing child of unknown type does not (WB-097, WB-092)", () => {
+test("functional view: a missing function shows as undefined, a missing child of unknown type or a missing requirement does not (WB-097, WB-103, WB-092)", () => {
   const f = { ...note("F.md", "Function", {}), broken: [{ field: "satisfies", link: "Req gone" }, { field: "hasChild", link: "Thing gone" }, { field: "precedes", link: "Next gone" }] };
   const v = traverse(indexOf(schema, [f]), ["F.md"], FUNCTIONAL_PROFILE);
-  assert.deepEqual([...v.depthOf.keys()].filter((k) => k !== "F.md").sort(), ["undefined:Next gone", "undefined:Req gone"]);
+  assert.deepEqual([...v.depthOf.keys()].filter((k) => k !== "F.md").sort(), ["undefined:Next gone"]);
 });
 
 test("functional view: starts only from an Object or a Function; stale signature differs between profiles", () => {
