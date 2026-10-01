@@ -79,6 +79,6 @@ npm run bench:generate -- 60000 && npm run bench
 
 `test/fixtures/` holds copies of the vault's `relationships.yaml` (schema 1.35) and `element-types.yaml`. Refresh them when the schema changes.
 
-The CI and release workflows are in `ci-workflows/` until the access token can write workflow files; move them to `.github/workflows/` to turn them on.
+The CI and release workflows are in `ci-workflows/` because the access token used so far cannot write workflow files (it lacks the Workflows permission; GitHub refuses the push). With a token that has it, move both files to `.github/workflows/`. CI then runs the tests and the build on every push to `main` and on pull requests; the release workflow runs when a tag `v<version>` is pushed, checks the tag against `manifest.json`, builds, and publishes `main.js`, `manifest.json`, `styles.css` and the 60,000-note synthetic vault as a GitHub release. Both files parse, and the commands they run (`npm ci`, `npm test`, `npm run build`, `npm run bench:generate`) work here; neither workflow has run on GitHub yet.
 
 To release: bump `version` in `manifest.json`, `package.json` and `versions.json`, commit, and push a tag `v<version>`.
