@@ -37,7 +37,7 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
 
 - **Show diagnostics**: index size and timings, Review counts (missing inverses, inverses with no forward link, links that break endpoint rules, provisional `tracesTo` links, unresolved links), schema versions and warnings.
 - **Rebuild index**
-- **Explore structure of current note**: follows `hasPart`, `hasChild`, `includes`, `hasPort`, `exposes`, `hasFlow` two levels down as a left-to-right tree. Each note shows up to 12 children; the 80-note limit is shared evenly across each level and wins over depth (WB-082); "+N more" shows what was left out. One label per relationship group, colored by relationship.
+- **Explore structure of current note**: follows `hasPart`, `hasChild`, `hasState`, `includes`, `hasPort`, `exposes`, `hasFlow` two levels down as a left-to-right tree. Each note shows up to 12 children; the 80-note limit is shared evenly across each level and wins over depth (WB-082); "+N more" shows what was left out. One label per relationship group, colored by relationship.
 - **Check whether this view is current**: compares the open generated view with the model and offers to refresh it.
 - **Relate current note to another note**: pick the other note by name (type and id shown beside it), then pick from only the relationships the endpoint rules allow, in either direction. `tracesTo` is offered last, as the provisional relationship (W-288).
 - **Undo last relationship change**: reverses both notes of the last relate, and refuses if either note was edited since. Use this, not Cmd/Ctrl-Z, which only undoes one open note and can leave a pair half-written. Give it a hotkey under Settings → Hotkeys. History is kept in memory and clears when Obsidian restarts.
@@ -65,7 +65,7 @@ npm run build       # typecheck and bundle main.js
 npm run bench:generate -- 60000 && npm run bench
 ```
 
-`test/fixtures/` holds copies of the vault's `relationships.yaml` (schema 1.34) and `element-types.yaml`. Refresh them when the schema changes.
+`test/fixtures/` holds copies of the vault's `relationships.yaml` (schema 1.35) and `element-types.yaml`. Refresh them when the schema changes.
 
 The CI and release workflows are in `ci-workflows/` until the access token can write workflow files; move them to `.github/workflows/` to turn them on.
 

@@ -29,6 +29,7 @@ export const STRUCTURE_PROFILE: ViewProfile = {
   steps: [
     { field: "hasPart", direction: "out" },
     { field: "hasChild", direction: "out" },
+    { field: "hasState", direction: "out" },
     { field: "includes", direction: "out" },
     { field: "hasPort", direction: "out" },
     { field: "exposes", direction: "out" },

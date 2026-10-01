@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { signature, toCanvas, traverse, type ViewProfile } from "../src/core/views";
+import { signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "../src/core/views";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
 const schema = fixtureSchema();
@@ -181,11 +181,28 @@ test("hasState/stateOf (W-291): an Object or a State Machine has a State, and th
   assert.equal(def.inverse, "stateOf");
   assert.ok(schema.byInverse.has("stateOf"));
   assert.ok(allows(def, "Object", "State").ok);
+  assert.ok(allows(def, "Object", "State Machine").ok, "an Object has a State Machine (W-292)");
   assert.ok(allows(def, "State Machine", "State").ok);
+  assert.ok(!allows(def, "State Machine", "State Machine").ok);
   assert.ok(!allows(def, "Function", "State").ok);
   assert.ok(!allows(def, "Object", "Object").ok);
+  const child = schema.byField.get("hasChild")!;
+  for (const [o, c] of [["Object", "State"], ["Object", "State Machine"], ["State Machine", "State"]]) assert.ok(!allows(child, o, c).ok, `hasChild must not be used for ${o} to ${c}`);
+  assert.ok(allows(child, "Function", "State").ok);
   assert.ok(optionsBetween(schema, "Object", "State").some((o) => o.def.field === "hasState" && o.ownerIsFirst));
   const idx = indexOf(schema, [note("Obj.md", "Object", { hasState: ["S.md"] }), note("S.md", "State", { stateOf: ["Obj.md"] })]);
   const f = idx.findings();
   assert.equal(f.missingInverse.length + f.orphanInverse.length + f.offRule.length, 0);
+});
+
+test("Structure view: a State under an Object (hasState) is shown, with its relationship label (W-292)", () => {
+  const idx = indexOf(schema, [
+    note("Obj.md", "Object", { hasState: ["Idle.md", "Machine.md"] }),
+    note("Idle.md", "State", { stateOf: ["Obj.md"] }),
+    note("Machine.md", "State Machine", { stateOf: ["Obj.md"], hasState: ["Run.md"] }),
+    note("Run.md", "State", { stateOf: ["Machine.md"] }),
+  ]);
+  const v = traverse(idx, ["Obj.md"], STRUCTURE_PROFILE);
+  assert.deepEqual([...v.depthOf.keys()].sort(), ["Idle.md", "Machine.md", "Obj.md", "Run.md"]);
+  assert.ok(toCanvas(idx, v).edges.some((e) => e.label === "hasState"));
 });
