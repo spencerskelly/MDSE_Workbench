@@ -196,8 +196,8 @@ const ROW_H = 100;
 const MORE_W = 140;
 /** Cross links are drawn only when there are few enough to stay readable. */
 const MAX_CROSS = 40;
-/** Canvas colors 1–6, one per relationship in profile order. */
-const PALETTE = ["4", "5", "6", "2", "3", "1"];
+/** One color per relationship in profile order, all different from the undefined-card red (WB-096): Canvas colors 4, 5, 6, 2, 3, then two hex colors for the sixth and seventh. */
+const PALETTE = ["4", "5", "6", "2", "3", "#9aa0a6", "#b5835a"];
 
 export interface CanvasNode {
   id: string;

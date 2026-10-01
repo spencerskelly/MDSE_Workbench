@@ -206,3 +206,20 @@ test("Structure view: a State under an Object (hasState) is shown, with its rela
   assert.deepEqual([...v.depthOf.keys()].sort(), ["Idle.md", "Machine.md", "Obj.md", "Run.md"]);
   assert.ok(toCanvas(idx, v).edges.some((e) => e.label === "hasState"));
 });
+
+test("colors: every Structure relationship has its own edge color and none is the undefined-card red (WB-096)", () => {
+  const steps = STRUCTURE_PROFILE.steps.map((s) => s.field);
+  const idx = indexOf(schema, [
+    note("Top.md", "Object", { hasPart: ["A.md"], hasChild: ["B.md"], hasState: ["S.md"], includes: ["C.md"], hasPort: ["P.md"] }),
+    note("A.md", "Object"), note("B.md", "Function"), note("S.md", "State"), note("C.md", "Function"),
+    note("P.md", "Port", { exposes: ["Q.md"], hasFlow: ["F.md"] }),
+    note("Q.md", "Port"), note("F.md", "Item Flow"),
+  ]);
+  const v = traverse(idx, ["Top.md"], STRUCTURE_PROFILE);
+  const c = toCanvas(idx, v);
+  const byLabel = new Map(c.edges.map((e) => [e.label, e.color]));
+  assert.deepEqual([...byLabel.keys()].sort(), [...steps].sort());
+  const colors = [...byLabel.values()];
+  assert.equal(new Set(colors).size, steps.length, "one color per relationship");
+  assert.ok(!colors.includes("1"), "red is reserved for undefined cards");
+});
