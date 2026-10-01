@@ -12,10 +12,25 @@ export const undefinedId = (link: string) => `${UNDEFINED}${link}`;
 export const isUndefinedId = (id: string) => id.startsWith(UNDEFINED);
 const undefinedName = (id: string) => id.slice(UNDEFINED.length);
 
+export interface ViewStep {
+  field: string;
+  direction: Direction;
+  /** Only when the note being expanded has one of these types (WB-097). */
+  from?: string[];
+  /** Only notes of these types are followed (WB-097). */
+  to?: string[];
+  /** Only applies to the starting notes, not to notes reached later (WB-097). */
+  atStartOnly?: boolean;
+  /** Show a link to a missing note as an undefined card even though `to` filters by type: true when the schema allows only those types at that end (WB-097). */
+  undefinedOk?: boolean;
+}
+
 export interface ViewProfile {
   name: string;
   /** Relationship fields followed, in priority order. */
-  steps: Array<{ field: string; direction: Direction }>;
+  steps: ViewStep[];
+  /** Note types the view can start from; any when absent (WB-097). */
+  startTypes?: string[];
   depth: number;
   /** Node cap; it wins over depth (WB-082). */
   nodeCap: number;
@@ -40,10 +55,43 @@ export const STRUCTURE_PROFILE: ViewProfile = {
   perParent: 12,
 };
 
+/**
+ * Functional view (WB-097): from an Object, the functions it performs and their decomposition, flow and
+ * requirements; from a Function, who performs it, its parent and sub-functions, what comes before and
+ * after it, and the requirements it satisfies.
+ */
+export const FUNCTIONAL_PROFILE: ViewProfile = {
+  name: "Functional",
+  startTypes: ["Object", "Function"],
+  steps: [
+    { field: "performs", direction: "out", from: ["Object"], to: ["Function"], atStartOnly: true, undefinedOk: true },
+    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
+    { field: "hasChild", direction: "in", from: ["Function"], to: ["Function"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Function"], to: ["Function"] },
+    { field: "precedes", direction: "in", from: ["Function"], to: ["Function"], undefinedOk: false },
+    { field: "precedes", direction: "out", from: ["Function"], to: ["Function"], undefinedOk: true },
+    { field: "satisfies", direction: "out", from: ["Function"], to: ["Requirement"], undefinedOk: true },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+export const PROFILES: Record<string, ViewProfile> = { [STRUCTURE_PROFILE.name]: STRUCTURE_PROFILE, [FUNCTIONAL_PROFILE.name]: FUNCTIONAL_PROFILE };
+
+/** Does a step apply to a note of type `cur` reaching a note of type `nbr`? */
+function stepAllows(step: ViewStep, cur: string | undefined, nbr: string | undefined): boolean {
+  if (step.from && !(cur && step.from.includes(cur))) return false;
+  if (step.to && !(nbr && step.to.includes(nbr))) return false;
+  return true;
+}
+
 export interface TreeLink {
   parent: string;
   child: string;
   field: string;
+  /** "in": the stored link runs from the child to the parent, so the arrow is drawn child to parent (WB-097). */
+  direction: Direction;
   /** How many times the parent lists this child in the field (quantity, WB-091). 1 when listed once. */
   count: number;
 }
@@ -78,22 +126,26 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
   let frontier = [...new Set(starts)].filter((s) => index.notes.has(s));
   for (const s of frontier) depthOf.set(s, 0);
 
-  const neighbours = (p: string): Array<{ node: string; field: string; count?: number }> => {
+  type Nb = { node: string; field: string; direction: Direction; count?: number };
+  const typeOf = (p: string) => index.notes.get(p)?.type;
+  const neighbours = (p: string, dist: number): Nb[] => {
     const seen = new Set<string>();
-    const out: Array<{ node: string; field: string; count?: number }> = [];
+    const out: Nb[] = [];
     for (const step of profile.steps) {
+      if (step.atStartOnly && dist > 0) continue;
+      if (step.from && !step.from.includes(typeOf(p) ?? "")) continue;
       const edges = step.direction === "out" ? index.out(p) : index.in(p);
       const next = edges
         .filter((e) => e.field === step.field)
         .map((e) => (step.direction === "out" ? e.to : e.from))
-        .filter((n) => index.notes.has(n) && !seen.has(n))
+        .filter((n) => index.notes.has(n) && !seen.has(n) && stepAllows(step, typeOf(p), typeOf(n)))
         .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
       for (const n of next) {
         seen.add(n);
-        out.push({ node: n, field: step.field });
+        out.push({ node: n, field: step.field, direction: step.direction });
       }
       // Links to notes that do not exist yet: undefined cards, after the defined ones in this field (WB-092).
-      if (step.direction === "out") {
+      if (step.direction === "out" && (!step.to || step.undefinedOk)) {
         const missing = new Map<string, number>();
         for (const b of index.notes.get(p)?.broken ?? []) {
           if (b.field === step.field) missing.set(b.link, (missing.get(b.link) ?? 0) + 1);
@@ -102,7 +154,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
           const id = undefinedId(link);
           if (seen.has(id)) continue;
           seen.add(id);
-          out.push({ node: id, field: step.field, count });
+          out.push({ node: id, field: step.field, direction: "out", count });
         }
       }
     }
@@ -112,8 +164,8 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
 
   for (let d = 0; d < profile.depth && frontier.length; d++) {
     // Candidates per parent, in relationship order then name.
-    const queues = frontier.map((p) => ({ p, q: neighbours(p).filter((n) => !depthOf.has(n.node)), shown: 0 }));
-    const picked = new Map<string, Array<{ node: string; field: string; count?: number }>>();
+    const queues = frontier.map((p) => ({ p, q: neighbours(p, d).filter((n) => !depthOf.has(n.node)), shown: 0 }));
+    const picked = new Map<string, Nb[]>();
     // Round-robin across the parents of this level, so the node cap is shared fairly
     // instead of being spent on the first few parents.
     let progress = true;
@@ -141,7 +193,9 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
       }
       // Keep each parent's children in relationship-then-name order.
       for (const n of picked.get(s.p) ?? []) {
-        tree.push({ parent: s.p, child: n.node, field: n.field, count: n.count ?? index.notes.get(s.p)?.repeat?.get(`${n.field}|${n.node}`) ?? 1 });
+        const owner = n.direction === "out" ? s.p : n.node; // the note the field is written on
+        const target = n.direction === "out" ? n.node : s.p;
+        tree.push({ parent: s.p, child: n.node, field: n.field, direction: n.direction, count: n.count ?? index.notes.get(owner)?.repeat?.get(`${n.field}|${target}`) ?? 1 });
         next.push(n.node);
       }
     }
@@ -149,17 +203,20 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
   }
   // Depth bound: count what lies beyond the last layer.
   for (const p of frontier) {
-    const beyond = neighbours(p).filter((n) => !depthOf.has(n.node)).length;
+    const beyond = neighbours(p, profile.depth).filter((n) => !depthOf.has(n.node)).length;
     if (beyond) bump(p, beyond);
   }
 
-  const fields = new Set(profile.steps.map((s) => s.field));
   const treeKey = new Set(tree.flatMap((l) => [`${l.parent}|${l.field}|${l.child}`, `${l.child}|${l.field}|${l.parent}`]));
   const edges: Edge[] = [];
   const cross: Edge[] = [];
   for (const p of depthOf.keys()) {
     for (const e of index.out(p)) {
-      if (!fields.has(e.field) || !depthOf.has(e.to)) continue;
+      if (!depthOf.has(e.to)) continue;
+      const fits = profile.steps.some(
+        (s) => s.field === e.field && (s.direction === "out" ? stepAllows(s, typeOf(e.from), typeOf(e.to)) : stepAllows(s, typeOf(e.to), typeOf(e.from))),
+      );
+      if (!fits) continue;
       edges.push(e);
       if (!treeKey.has(`${e.from}|${e.field}|${e.to}`)) cross.push(e);
     }
@@ -231,7 +288,8 @@ export interface CanvasData {
  */
 export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfile = STRUCTURE_PROFILE): CanvasData {
   const nameOf = (p: string) => (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
-  const colorOf = new Map(profile.steps.map((s, i) => [s.field, PALETTE[i % PALETTE.length]]));
+  const colorOf = new Map<string, string>();
+  for (const s of profile.steps) if (!colorOf.has(s.field)) colorOf.set(s.field, PALETTE[colorOf.size % PALETTE.length]);
   const kids = new Map<string, TreeLink[]>();
   for (const l of view.tree) {
     let k = kids.get(l.parent);
@@ -249,18 +307,22 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
     const children = kids.get(p) ?? [];
     const more = view.omitted.get(p) ?? 0;
     const centres: number[] = [];
+    const mine: Array<{ edge: CanvasEdge; reverse: boolean }> = [];
     for (const l of children) {
       const c = place(l.child, depth + 1);
       centres.push(c);
-      edges.push({
+      const reverse = l.direction === "in"; // stored link runs child to parent: draw the arrow that way (WB-097)
+      const edge: CanvasEdge = {
         id: `e${edges.length}`,
-        fromNode: "", // filled once the parent has an id
-        toNode: idOf.get(l.child) as string,
-        fromSide: "right",
-        toSide: "left",
+        fromNode: reverse ? (idOf.get(l.child) as string) : "", // the other end is filled once the parent has an id
+        toNode: reverse ? "" : (idOf.get(l.child) as string),
+        fromSide: reverse ? "left" : "right",
+        toSide: reverse ? "right" : "left",
         label: edgeLabel(l.field, l.count),
         color: colorOf.get(l.field),
-      });
+      };
+      edges.push(edge);
+      mine.push({ edge, reverse });
     }
     let moreId: string | undefined;
     if (more) {
@@ -281,8 +343,11 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
     const y = Math.round(centre - NODE_H / 2);
     if (isUndefinedId(p)) nodes.push({ id, type: "text", text: `**${undefinedName(p)}**\n*undefined*`, x, y, width: NODE_W, height: NODE_H, color: UNDEFINED_COLOR });
     else nodes.push({ id, type: "file", file: p, x, y, width: NODE_W, height: NODE_H, color: depth === 0 ? "4" : undefined });
-    // Point this note's child edges (the last children.length edges added at this level) at it.
-    for (const e of edges) if (e.fromNode === "" && children.some((l) => idOf.get(l.child) === e.toNode)) e.fromNode = id;
+    // Point this note's child edges at it.
+    for (const m of mine) {
+      if (m.reverse) m.edge.toNode = id;
+      else m.edge.fromNode = id;
+    }
     if (moreId) edges.push({ id: `e${edges.length}`, fromNode: id, toNode: moreId, fromSide: "right", toSide: "left" });
     return centre;
   };
