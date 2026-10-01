@@ -29,15 +29,15 @@ M0 replaces the riskiest assumptions with measurements before more is built (WB-
 | Index memory | about 80 MB | under 300 MB |
 | Findings scan (missing inverses, off-rule, provisional) | 0.4 s | — |
 | Incremental update of one note | 0.2 ms | under 500 ms |
-| Structure view at the 150-note cap, with layout | 4–16 ms | under 3 s |
+| Structure view at the 80-note cap, with tree layout | 9–18 ms | under 3 s |
 
-These are the pure index in Node. The numbers that decide gate R0 are the ones **Show diagnostics** reports inside Obsidian.
+These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show diagnostics** reported an index build of 1.17 s and a findings scan of 212 ms, with every count at 0 as expected.
 
 ## Commands
 
 - **Show diagnostics**: index size and timings, Review counts (missing inverses, inverses with no forward link, links that break endpoint rules, provisional `tracesTo` links, unresolved links), schema versions and warnings.
 - **Rebuild index**
-- **Explore structure of current note**: follows `hasPart`, `hasChild`, `includes`, `hasPort`, `exposes`, `hasFlow` two levels down, stops at 150 notes (the cap wins over depth, WB-082) and shows what was left out.
+- **Explore structure of current note**: follows `hasPart`, `hasChild`, `includes`, `hasPort`, `exposes`, `hasFlow` two levels down as a left-to-right tree. Each note shows up to 12 children; the 80-note limit is shared evenly across each level and wins over depth (WB-082); "+N more" shows what was left out. One label per relationship group, colored by relationship.
 - **Check whether this view is current**: compares the open generated view with the model and offers to refresh it.
 - **Relate current note to another note**: pick the other note by name (type and id shown beside it), then pick from only the relationships the endpoint rules allow, in either direction. `tracesTo` is offered last, as the provisional relationship (W-288).
 - **Undo last relationship change**

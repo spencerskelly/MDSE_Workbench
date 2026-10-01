@@ -73,8 +73,9 @@ test("traversal: the node cap wins over depth and omissions are counted", () => 
   assert.equal(v.depthOf.size, 4);
   assert.ok(v.capReached);
   assert.equal(v.omitted.get("Top.md"), 7);
-  const c = toCanvas(idx, v);
-  assert.ok(c.nodes.some((n) => n.type === "text" && n.text === "7 more not shown"));
+  const c = toCanvas(idx, v, profile);
+  assert.ok(c.nodes.some((n) => n.type === "text" && n.text === "**+7 more**"));
+  assert.ok(c.edges.every((e) => e.fromNode && e.toNode), "every edge has both ends");
   assert.equal(signature(v), signature(traverse(idx, ["Top.md"], profile)), "deterministic");
 });
 
@@ -87,4 +88,31 @@ test("frontmatter: add, dedupe, sort and order properties", () => {
   assert.deepEqual(Object.keys(fm), ["type", "id", "tags", "satisfies", "custom"]);
   assert.ok(removeLink(fm, "satisfies", "Zeta"));
   assert.equal(linkTarget("[[A b|alias]]"), "A b");
+});
+
+test("layout: per-parent limit, one label per relationship group, children beside their parent", () => {
+  const ports = ["P1.md", "P2.md", "P3.md"];
+  const parts = Array.from({ length: 5 }, (_, i) => `C${i}.md`);
+  const idx = indexOf(schema, [
+    note("Top.md", "Object", { hasPart: parts, hasPort: ports }),
+    ...parts.map((p) => note(p, "Object")),
+    ...ports.map((p) => note(p, "Port")),
+  ]);
+  const profile: ViewProfile = {
+    name: "S",
+    steps: [{ field: "hasPart", direction: "out" }, { field: "hasPort", direction: "out" }],
+    depth: 1,
+    nodeCap: 100,
+    perParent: 6,
+  };
+  const v = traverse(idx, ["Top.md"], profile);
+  assert.equal(v.depthOf.size, 7, "Top + 6 children");
+  assert.equal(v.omitted.get("Top.md"), 2);
+  const c = toCanvas(idx, v, profile);
+  const labels = c.edges.map((e) => e.label).filter(Boolean);
+  assert.deepEqual(labels, ["hasPart", "hasPort"]);
+  const top = c.nodes.find((n) => n.file === "Top.md")!;
+  const ys = c.nodes.filter((n) => n.x > top.x).map((n) => n.y + n.height / 2);
+  const mid = (Math.min(...ys) + Math.max(...ys)) / 2;
+  assert.equal(top.y + top.height / 2, mid, "parent centred on its children");
 });
