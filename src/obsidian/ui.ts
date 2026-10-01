@@ -1,6 +1,7 @@
 import { App, FuzzySuggestModal, Modal, SuggestModal, type FuzzyMatch } from "obsidian";
 import type { NoteRecord } from "../core/model";
 import type { RelationshipOption } from "../core/rules";
+import type { ViewProfile } from "../core/views";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -53,6 +54,26 @@ export class RelationshipPicker extends SuggestModal<RelationshipOption> {
   }
   onChooseSuggestion(o: RelationshipOption): void {
     this.onPick(o);
+  }
+}
+
+/** Picks one of the views that can start from the current note (WB-102). */
+export class ViewPicker extends SuggestModal<ViewProfile> {
+  constructor(app: App, private readonly profiles: ViewProfile[], noteName: string, private readonly onPick: (p: ViewProfile) => void) {
+    super(app);
+    this.setPlaceholder(`View of ${noteName}…`);
+    this.emptyStateText = "No view starts from this kind of note.";
+  }
+  getSuggestions(query: string): ViewProfile[] {
+    const q = query.toLowerCase();
+    return this.profiles.filter((p) => `${p.name} ${p.description ?? ""}`.toLowerCase().includes(q));
+  }
+  renderSuggestion(p: ViewProfile, el: HTMLElement): void {
+    el.createEl("strong", { text: p.name });
+    el.createDiv({ cls: "mdse-option-meta", text: p.description ?? "" });
+  }
+  onChooseSuggestion(p: ViewProfile): void {
+    this.onPick(p);
   }
 }
 

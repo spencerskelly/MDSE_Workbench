@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { FUNCTIONAL_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "../src/core/views";
+import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "../src/core/views";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
 const schema = fixtureSchema();
@@ -420,4 +420,123 @@ test("popup editing: empty properties get a row only in edit mode, so they can b
   const fm = { type: "Requirement", subtype: "", status: "Draft", tags: [] };
   assert.deepEqual(propertyRows(fm).map((r) => r.key), ["type", "status"]);
   assert.deepEqual(propertyRows(fm, new Set(), true).map((r) => r.key), ["type", "subtype", "status", "tags"]);
+});
+
+const views = () => PROFILES;
+const keysOf = (idx: ReturnType<typeof indexOf>, start: string, name: string) => [...traverse(idx, [start], views()[name]).depthOf.keys()].sort();
+const arrow = (idx: ReturnType<typeof indexOf>, start: string, name: string) => {
+  const c = toCanvas(idx, traverse(idx, [start], views()[name]), views()[name]);
+  const id = (f: string) => c.nodes.find((n) => n.file === f)?.id;
+  return (a: string, b: string) => c.edges.find((e) => e.fromNode === id(a) && e.toNode === id(b));
+};
+
+test("every view uses only relationship fields and classes that exist in the schema (WB-102)", () => {
+  for (const [name, profile] of Object.entries(PROFILES)) {
+    assert.ok(profile.description, `${name} has a description for the picker`);
+    for (const st of profile.steps) {
+      assert.ok(schema.byField.has(st.field), `${name}: ${st.field} is a forward relationship field`);
+      for (const c of [...(st.from ?? []), ...(st.to ?? []), ...(profile.startTypes ?? [])]) assert.ok(schema.classNames.has(c), `${name}: class ${c} exists`);
+    }
+  }
+  assert.deepEqual(Object.keys(PROFILES).sort(), ["Behavior", "Design", "Evidence", "Failure and risk", "Functional", "Interfaces", "Requirements", "Scenario", "Structure", "Verification", "Where Used"]);
+});
+
+test("where used: parents, owners, performers and dependants, followed upward, arrows as stored (WB-102)", () => {
+  const idx = indexOf(schema, [
+    note("Product.md", "Object", { hasPart: ["Cable.md"] }),
+    note("Cable.md", "Object", { hasPart: ["Wire.md"], hasPort: ["P.md"] }),
+    note("Wire.md", "Object"),
+    note("Fn.md", "Function"),
+    note("Wire2.md", "Object", { performs: ["Fn.md"] }),
+    note("Other.md", "Object", { dependsOn: ["Wire.md"] }),
+    note("P.md", "Port"),
+    note("Box.md", "Object", { hasPart: ["Wire.md"] }),
+    note("UC.md", "Use Case", { realizedBy: ["Fn.md"], participants: ["Wire.md"] }),
+  ]);
+  assert.deepEqual(keysOf(idx, "Wire.md", "Where Used"), ["Box.md", "Cable.md", "Other.md", "Product.md", "UC.md", "Wire.md"], "three levels up through assemblies");
+  assert.equal(arrow(idx, "Wire.md", "Where Used")("Cable.md", "Wire.md")?.label, "hasPart", "the assembly points at its part");
+  assert.deepEqual(keysOf(idx, "Fn.md", "Where Used"), ["Fn.md", "UC.md", "Wire2.md"]);
+  assert.deepEqual(keysOf(idx, "P.md", "Where Used"), ["Cable.md", "P.md", "Product.md"], "a port's owner and the owner's assembly");
+});
+
+test("interfaces: ports, the other end and its owner, outer and inner ports, flows; symmetric links have no arrowhead (WB-102)", () => {
+  const idx = indexOf(schema, [
+    note("A.md", "Object", { hasPort: ["PA.md", "PA2.md"] }),
+    note("PA.md", "Port", { interfaces: ["PB.md"], transmits: ["Flow.md"], exposes: ["PIn.md"] }),
+    note("PA2.md", "Port", { hasFlow: ["Flow2.md"] }),
+    note("PB.md", "Port", { interfaces: ["PA.md"] }),
+    note("B.md", "Object", { hasPort: ["PB.md"] }),
+    note("PIn.md", "Port"),
+    note("Flow.md", "Item Flow"),
+    note("Flow2.md", "Item Flow"),
+  ]);
+  assert.deepEqual(keysOf(idx, "A.md", "Interfaces"), ["A.md", "B.md", "Flow.md", "Flow2.md", "PA.md", "PA2.md", "PB.md", "PIn.md"]);
+  const c = toCanvas(idx, traverse(idx, ["A.md"], INTERFACES_PROFILE), INTERFACES_PROFILE);
+  const iface = c.edges.find((e) => e.label === "interfaces")!;
+  assert.equal(iface.toEnd, "none");
+  assert.equal(c.edges.find((e) => e.label === "transmits")?.toEnd, undefined);
+  assert.deepEqual(keysOf(idx, "PB.md", "Interfaces"), ["A.md", "B.md", "Flow.md", "PA.md", "PA2.md", "PB.md", "PIn.md"], "from a port: its owner, the port it faces, that port's owner and flows, then the owner's other ports (three levels)");
+  assert.deepEqual(keysOf(idx, "Flow.md", "Interfaces"), ["A.md", "B.md", "Flow.md", "PA.md", "PA2.md", "PB.md", "PIn.md"], "from an item flow: the port that transmits it, its owner, what the port faces and exposes");
+});
+
+test("verification, design, scenario (WB-102)", () => {
+  const v = indexOf(schema, [
+    note("R.md", "Requirement"), note("R2.md", "Requirement"),
+    note("V.md", "Verification", { verifies: ["R.md", "R2.md"] }),
+    note("Fn.md", "Function", { satisfies: ["R.md"] }),
+    note("Des.md", "Design", { satisfies: ["R2.md"] }),
+  ]);
+  assert.deepEqual(keysOf(v, "R.md", "Verification"), ["Fn.md", "R.md", "R2.md", "V.md"], "verifier, its other requirement, satisfier");
+  assert.deepEqual(keysOf(v, "V.md", "Verification"), ["Des.md", "Fn.md", "R.md", "R2.md", "V.md"], "requirements verified, then who satisfies them");
+  assert.deepEqual(keysOf(v, "Fn.md", "Verification"), ["Fn.md", "R.md", "V.md"]);
+  assert.equal(arrow(v, "R.md", "Verification")("V.md", "R.md")?.label, "verifies");
+
+  const d = indexOf(schema, [
+    note("Obj.md", "Object", { hasDesign: ["D1.md"] }),
+    note("D1.md", "Design", { hasChild: ["D2.md"], satisfies: ["Req.md"] }),
+    note("D2.md", "Design", { satisfies: ["Req2.md"] }),
+    note("Req.md", "Requirement"), note("Req2.md", "Requirement"),
+  ]);
+  assert.deepEqual(keysOf(d, "Obj.md", "Design"), ["D1.md", "D2.md", "Obj.md", "Req.md"]);
+  assert.deepEqual(keysOf(d, "D2.md", "Design"), ["D1.md", "D2.md", "Req.md", "Req2.md"], "parent design, own requirement, and the parent's requirement; the owner Object belongs to the parent");
+
+  const s = indexOf(schema, [
+    note("UC.md", "Use Case", { participants: ["Actor.md", "Obj.md"], realizedBy: ["F1.md"], hasChild: ["UC2.md"], optionOf: ["UC3.md"], drives: ["Req.md"] }),
+    note("UC4.md", "Use Case", { optionOf: ["UC.md"] }),
+    note("Actor.md", "Actor"), note("Obj.md", "Object"), note("UC2.md", "Use Case"), note("UC3.md", "Use Case"), note("Req.md", "Requirement"),
+    note("F1.md", "Function", { precedes: ["F2.md"] }), note("F2.md", "Function"),
+  ]);
+  assert.deepEqual(keysOf(s, "UC.md", "Scenario"), ["Actor.md", "F1.md", "F2.md", "Obj.md", "Req.md", "UC.md", "UC2.md", "UC3.md", "UC4.md"]);
+  assert.equal(arrow(s, "UC.md", "Scenario")("UC4.md", "UC.md")?.label, "optionOf", "a variant points at its base use case");
+});
+
+test("behavior, failure and risk, evidence (WB-102)", () => {
+  const b = indexOf(schema, [
+    note("Obj.md", "Object", { hasState: ["SM.md"] }),
+    note("SM.md", "State Machine", { hasState: ["S1.md", "S2.md"], initialState: ["S1.md"] }),
+    note("S1.md", "State", { precedes: ["S2.md"], triggeredBy: ["Fn.md"] }),
+    note("S2.md", "State", { hasChild: ["S3.md"] }), note("S3.md", "State"), note("Fn.md", "Function"),
+  ]);
+  assert.deepEqual(keysOf(b, "Obj.md", "Behavior"), ["Obj.md", "S1.md", "S2.md", "SM.md"]);
+  assert.deepEqual(keysOf(b, "S1.md", "Behavior"), ["Fn.md", "S1.md", "S2.md", "S3.md", "SM.md"], "owner, next state, trigger, and the next state's nested state");
+  assert.deepEqual(keysOf(b, "S2.md", "Behavior"), ["Fn.md", "S1.md", "S2.md", "S3.md", "SM.md"], "previous state, owner, nested state, and what triggers the previous state");
+
+  const f = indexOf(schema, [
+    note("Iss.md", "Issue", { affects: ["Fn.md"] }),
+    note("Fn.md", "Function", { satisfies: ["Req.md"] }), note("Req.md", "Requirement"),
+    note("Perf.md", "Object", { performs: ["Fn.md"] }),
+    note("Iss2.md", "Issue", { affects: ["Perf.md"] }),
+  ]);
+  assert.deepEqual(keysOf(f, "Iss.md", "Failure and risk"), ["Fn.md", "Iss.md", "Perf.md", "Req.md"]);
+  assert.deepEqual(keysOf(f, "Perf.md", "Failure and risk"), ["Iss2.md", "Perf.md"], "what affects an element");
+
+  const e = indexOf(schema, [
+    note("Req.md", "Requirement", { hasChild: ["Art2.md"] }),
+    note("Req2.md", "Requirement"),
+    note("Art.md", "Artifact", { describes: ["Req.md", "Req2.md"] }),
+    note("Art2.md", "Artifact"),
+  ]);
+  assert.deepEqual(keysOf(e, "Req.md", "Evidence"), ["Art.md", "Art2.md", "Req.md", "Req2.md"]);
+  assert.deepEqual(keysOf(e, "Art.md", "Evidence"), ["Art.md", "Req.md", "Req2.md", "Art2.md"].sort());
+  assert.equal(arrow(e, "Req.md", "Evidence")("Art.md", "Req.md")?.label, "describes");
 });

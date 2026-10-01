@@ -23,10 +23,14 @@ export interface ViewStep {
   atStartOnly?: boolean;
   /** Show a link to a missing note as an undefined card even though `to` filters by type: true when the schema allows only those types at that end (WB-097). */
   undefinedOk?: boolean;
+  /** Draw the link without an arrowhead: a symmetric relationship such as `interfaces` (WB-102). */
+  noArrow?: boolean;
 }
 
 export interface ViewProfile {
   name: string;
+  /** One line shown in the view picker (WB-102). */
+  description?: string;
   /** Relationship fields followed, in priority order. */
   steps: ViewStep[];
   /** Note types the view can start from; any when absent (WB-097). */
@@ -41,6 +45,7 @@ export interface ViewProfile {
 /** Spike default. View Profiles become vault configuration later (WB-001, review item 6). */
 export const STRUCTURE_PROFILE: ViewProfile = {
   name: "Structure",
+  description: "What it is made of: parts, children, states, included notes, ports, flows.",
   steps: [
     { field: "hasPart", direction: "out" },
     { field: "hasChild", direction: "out" },
@@ -62,6 +67,7 @@ export const STRUCTURE_PROFILE: ViewProfile = {
  */
 export const FUNCTIONAL_PROFILE: ViewProfile = {
   name: "Functional",
+  description: "Functions of an Object, or a Function with its performer, sub-functions, order and requirements.",
   startTypes: ["Object", "Function"],
   steps: [
     { field: "performs", direction: "out", from: ["Object"], to: ["Function"], atStartOnly: true, undefinedOk: true },
@@ -87,6 +93,7 @@ const REQ_HOLDERS = ["Object", "Function", "Design", "State", "Use Case", "Verif
  */
 export const REQUIREMENTS_PROFILE: ViewProfile = {
   name: "Requirements",
+  description: "A requirement with its parents, children, derivation, satisfiers and verifiers; or an element with its requirements.",
   startTypes: ["Requirement", ...REQ_HOLDERS],
   steps: [
     { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Function", "Design"], atStartOnly: true },
@@ -111,10 +118,173 @@ export const REQUIREMENTS_PROFILE: ViewProfile = {
   perParent: 12,
 };
 
+/** Where Used (WB-102): everything that contains or uses the note, followed upward through assemblies. */
+export const WHERE_USED_PROFILE: ViewProfile = {
+  name: "Where Used",
+  description: "What contains or uses this: parent assemblies, owners, performers, designs, use cases, dependants.",
+  steps: [
+    { field: "hasPart", direction: "in" },
+    { field: "includes", direction: "in" },
+    { field: "hasChild", direction: "in" },
+    { field: "hasState", direction: "in" },
+    { field: "hasPort", direction: "in" },
+    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
+    { field: "hasDesign", direction: "in", from: ["Design"] },
+    { field: "realizedBy", direction: "in", from: ["Function", "Design"], to: ["Use Case"] },
+    { field: "participants", direction: "in", from: ["Object", "Actor", "Function", "Port", "Document"], to: ["Use Case"] },
+    { field: "dependsOn", direction: "in" },
+  ],
+  depth: 3,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+/** Interfaces (WB-102): ports, what they connect to, outer and inner ports, and the item flows. */
+export const INTERFACES_PROFILE: ViewProfile = {
+  name: "Interfaces",
+  description: "Ports, what each connects to and who owns the other end, exposed ports, item flows.",
+  startTypes: ["Object", "Port", "Item Flow"],
+  steps: [
+    { field: "hasPort", direction: "out", from: ["Object"], to: ["Port"], undefinedOk: true },
+    { field: "hasPort", direction: "in", from: ["Port"], to: ["Object"] },
+    { field: "interfaces", direction: "out", from: ["Port"], to: ["Port"], noArrow: true, undefinedOk: true },
+    { field: "exposes", direction: "out", from: ["Port"], to: ["Port"], undefinedOk: true },
+    { field: "exposes", direction: "in", from: ["Port"], to: ["Port"] },
+    { field: "transmits", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
+    { field: "receives", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
+    { field: "exchanges", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
+    { field: "hasFlow", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
+    { field: "transmits", direction: "in", from: ["Item Flow"], to: ["Port"] },
+    { field: "receives", direction: "in", from: ["Item Flow"], to: ["Port"] },
+    { field: "exchanges", direction: "in", from: ["Item Flow"], to: ["Port"] },
+    { field: "hasFlow", direction: "in", from: ["Item Flow"], to: ["Port"] },
+  ],
+  depth: 3,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+/** Verification (WB-102): what verifies what, and what a verification covers. */
+export const VERIFICATION_PROFILE: ViewProfile = {
+  name: "Verification",
+  description: "What verifies a requirement, what else a verification covers, and what satisfies those requirements.",
+  startTypes: ["Requirement", "Verification", "Function", "Design", "State"],
+  steps: [
+    { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
+    { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], undefinedOk: true },
+    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design", "State"] },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+/** Design (WB-102): the designs of an Object, their sub-designs and the requirements they satisfy. */
+export const DESIGN_PROFILE: ViewProfile = {
+  name: "Design",
+  description: "The designs of an Object or Document, sub-designs, and the requirements each satisfies.",
+  startTypes: ["Object", "Document", "Design"],
+  steps: [
+    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Design"], undefinedOk: true },
+    { field: "hasDesign", direction: "in", from: ["Design"], to: ["Object", "Document"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Design"], to: ["Design"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Design"], to: ["Design"] },
+    { field: "satisfies", direction: "out", from: ["Design"], to: ["Requirement"], undefinedOk: true },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+/** Scenario (WB-102): a Use Case with its participants, realizing functions, variants and driven requirements. */
+export const SCENARIO_PROFILE: ViewProfile = {
+  name: "Scenario",
+  description: "A use case: participants, the functions and designs that realize it, included and optional use cases, the order of its steps.",
+  startTypes: ["Use Case"],
+  steps: [
+    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Function", "Port", "Document"], undefinedOk: true },
+    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Function", "Design"], undefinedOk: true },
+    { field: "hasChild", direction: "out", from: ["Use Case"], to: ["Use Case"] },
+    { field: "hasChild", direction: "in", from: ["Use Case"], to: ["Use Case"], atStartOnly: true },
+    { field: "optionOf", direction: "out", from: ["Use Case"], to: ["Use Case"], undefinedOk: true },
+    { field: "optionOf", direction: "in", from: ["Use Case"], to: ["Use Case"] },
+    { field: "drives", direction: "out", from: ["Use Case"], to: ["Requirement"] },
+    { field: "precedes", direction: "in", from: ["Function"], to: ["Function"] },
+    { field: "precedes", direction: "out", from: ["Function"], to: ["Function"] },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+/** Behavior (WB-102): State Machines and States, their order, nesting and triggers. */
+export const BEHAVIOR_PROFILE: ViewProfile = {
+  name: "Behavior",
+  description: "State machines and states: who has them, initial and final states, order, nesting, what triggers them.",
+  startTypes: ["State Machine", "State", "Object"],
+  steps: [
+    { field: "hasState", direction: "out", from: ["Object", "State Machine"], to: ["State", "State Machine"], undefinedOk: true },
+    { field: "hasState", direction: "in", from: ["State", "State Machine"], to: ["Object", "State Machine"], atStartOnly: true },
+    { field: "initialState", direction: "out", from: ["State Machine"], to: ["State"], undefinedOk: true },
+    { field: "finalState", direction: "out", from: ["State Machine"], to: ["State"], undefinedOk: true },
+    { field: "hasChild", direction: "out", from: ["State"], to: ["State"] },
+    { field: "hasChild", direction: "in", from: ["State"], to: ["State"], atStartOnly: true },
+    { field: "precedes", direction: "in", from: ["State"], to: ["State"] },
+    { field: "precedes", direction: "out", from: ["State"], to: ["State"], undefinedOk: true },
+    { field: "triggeredBy", direction: "out", from: ["State"], to: ["Function", "Design", "State", "Item Flow"] },
+    { field: "triggeredBy", direction: "in", from: ["State"], to: ["Function", "Design", "State"] },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+/** Failure and risk (WB-102): what an Issue or Failure Mode affects, and what affects an element. */
+export const FAILURE_PROFILE: ViewProfile = {
+  name: "Failure and risk",
+  description: "What an issue or failure mode affects, what affects an element, causes, and the requirements around them.",
+  steps: [
+    { field: "affects", direction: "out", from: ["Issue", "Failure Mode", "Use Case"] },
+    { field: "affects", direction: "in", to: ["Issue", "Failure Mode", "Use Case"] },
+    { field: "drives", direction: "out", from: ["Issue", "Failure Mode"] },
+    { field: "drives", direction: "in", from: ["Issue", "Failure Mode"] },
+    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], undefinedOk: true },
+    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+/** Evidence (WB-102): the documents, artifacts and notes that describe an element. */
+export const EVIDENCE_PROFILE: ViewProfile = {
+  name: "Evidence",
+  description: "The artifacts, documents and info notes that describe this, and what else each one describes.",
+  steps: [
+    { field: "describes", direction: "in", to: ["Info", "Artifact", "Document"] },
+    { field: "describes", direction: "out", from: ["Info", "Artifact", "Document"] },
+    { field: "hasChild", direction: "out", to: ["Artifact", "Info", "Document"] },
+    { field: "hasChild", direction: "in", from: ["Artifact", "Info", "Document"], atStartOnly: true },
+    { field: "references", direction: "out", from: ["Requirement"], to: ["Document"] },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
 export const PROFILES: Record<string, ViewProfile> = {
   [STRUCTURE_PROFILE.name]: STRUCTURE_PROFILE,
   [FUNCTIONAL_PROFILE.name]: FUNCTIONAL_PROFILE,
   [REQUIREMENTS_PROFILE.name]: REQUIREMENTS_PROFILE,
+  [WHERE_USED_PROFILE.name]: WHERE_USED_PROFILE,
+  [INTERFACES_PROFILE.name]: INTERFACES_PROFILE,
+  [VERIFICATION_PROFILE.name]: VERIFICATION_PROFILE,
+  [DESIGN_PROFILE.name]: DESIGN_PROFILE,
+  [SCENARIO_PROFILE.name]: SCENARIO_PROFILE,
+  [BEHAVIOR_PROFILE.name]: BEHAVIOR_PROFILE,
+  [FAILURE_PROFILE.name]: FAILURE_PROFILE,
+  [EVIDENCE_PROFILE.name]: EVIDENCE_PROFILE,
 };
 
 /** Does a step apply to a note of type `cur` reaching a note of type `nbr`? */
@@ -291,8 +461,8 @@ const ROW_H = 100;
 const MORE_W = 140;
 /** Cross links are drawn only when there are few enough to stay readable. */
 const MAX_CROSS = 40;
-/** One color per relationship in profile order, all different from the undefined-card red (WB-096): Canvas colors 4, 5, 6, 2, 3, then four hex colors for the sixth to ninth. */
-const PALETTE = ["4", "5", "6", "2", "3", "#9aa0a6", "#b5835a", "#7f9cf5", "#c9b037"];
+/** One color per relationship in profile order, all different from the undefined-card red (WB-096): Canvas colors 4, 5, 6, 2, 3, then seven hex colors for the sixth to twelfth. */
+const PALETTE = ["4", "5", "6", "2", "3", "#9aa0a6", "#b5835a", "#7f9cf5", "#c9b037", "#5fb3b3", "#a37ed6", "#e0a458"];
 
 export interface CanvasNode {
   id: string;
@@ -313,6 +483,8 @@ export interface CanvasEdge {
   toSide: "right" | "left" | "top" | "bottom";
   label?: string;
   color?: string;
+  /** "none" for a symmetric link (WB-102). */
+  toEnd?: "none" | "arrow";
 }
 export interface CanvasData {
   nodes: CanvasNode[];
@@ -328,6 +500,7 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
   const nameOf = (p: string) => (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
   const colorOf = new Map<string, string>();
   for (const s of profile.steps) if (!colorOf.has(s.field)) colorOf.set(s.field, PALETTE[colorOf.size % PALETTE.length]);
+  const plainFields = new Set(profile.steps.filter((s) => s.noArrow).map((s) => s.field));
   const kids = new Map<string, TreeLink[]>();
   for (const l of view.tree) {
     let k = kids.get(l.parent);
@@ -358,6 +531,7 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
         toSide: reverse ? "right" : "left",
         label: edgeLabel(l.field, l.count),
         color: colorOf.get(l.field),
+        ...(plainFields.has(l.field) ? { toEnd: "none" as const } : {}),
       };
       edges.push(edge);
       mine.push({ edge, reverse });

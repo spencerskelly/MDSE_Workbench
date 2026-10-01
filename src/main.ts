@@ -10,7 +10,7 @@ import { editingBlocked, parseSchema, type Schema } from "./core/schema";
 import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
-import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal } from "./obsidian/ui";
+import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal, ViewPicker } from "./obsidian/ui";
 import { NoteDetailPanel } from "./obsidian/detail";
 import { nodeAt, parseTranslate, undefinedName, type CanvasNodeJson } from "./core/detail";
 import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
@@ -87,6 +87,25 @@ export default class MdseWorkbench extends Plugin {
       id: "explore-requirements",
       name: "Explore requirements view of current note",
       checkCallback: (checking) => this.withActive(checking, (f) => this.explore([f.path], PROFILES.Requirements)),
+    });
+    // One command per further view (WB-102), and a picker that lists the views that fit the current note.
+    const more: Array<[string, string, string]> = [
+      ["explore-where-used", "Explore where-used view of current note", "Where Used"],
+      ["explore-interfaces", "Explore interfaces view of current note", "Interfaces"],
+      ["explore-verification", "Explore verification view of current note", "Verification"],
+      ["explore-design", "Explore design view of current note", "Design"],
+      ["explore-scenario", "Explore scenario view of current note", "Scenario"],
+      ["explore-behavior", "Explore behavior view of current note", "Behavior"],
+      ["explore-failure", "Explore failure and risk view of current note", "Failure and risk"],
+      ["explore-evidence", "Explore evidence view of current note", "Evidence"],
+    ];
+    for (const [id, name, key] of more) {
+      this.addCommand({ id, name, checkCallback: (checking) => this.withActive(checking, (f) => this.explore([f.path], PROFILES[key])) });
+    }
+    this.addCommand({
+      id: "explore-pick",
+      name: "Explore view of current note…",
+      checkCallback: (checking) => this.withActive(checking, (f) => this.pickView(f.path)),
     });
     this.addCommand({
       id: "check-view",
@@ -244,6 +263,18 @@ export default class MdseWorkbench extends Plugin {
     ];
     if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
     new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
+  }
+
+  /** Lists the views that can start from this note's type and opens the one chosen. */
+  pickView(path: string): void {
+    if (!this.isReady()) {
+      new Notice("MDSE Workbench is still indexing. Try again in a moment.");
+      return;
+    }
+    const rec = this.indexer!.index.notes.get(path);
+    const type = rec?.type ?? "";
+    const fits = Object.values(PROFILES).filter((p) => !p.startTypes || p.startTypes.includes(type));
+    new ViewPicker(this.app, fits, rec?.name ?? "this note", (p) => void this.explore([path], p)).open();
   }
 
   async explore(starts: string[], profile: ViewProfile = STRUCTURE_PROFILE): Promise<void> {
