@@ -1,0 +1,299 @@
+/**
+ * MDSE Workbench, Phase 0 spike (WB-081, WB-090 gate R0).
+ * Commands: diagnostics, rebuild index, explore Structure from the current note,
+ * relate the current note to another, undo, and the Canvas probe.
+ */
+import { App, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import type { NoteRecord } from "./core/model";
+import { optionsBetween } from "./core/rules";
+import { editingBlocked, parseSchema, type Schema } from "./core/schema";
+import { signature, STRUCTURE_PROFILE, toCanvas, traverse } from "./core/views";
+import { Indexer } from "./obsidian/indexer";
+import { probeReport, registerSelectionMenu } from "./obsidian/probe";
+import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal } from "./obsidian/ui";
+import { RelationshipWriter } from "./obsidian/writer";
+
+interface Settings {
+  relationshipsPath: string;
+  elementTypesPath: string;
+  /** Generated views go here; keep it out of Git (WB-036). Default chosen at build (WB-073). */
+  viewsFolder: string;
+  canvasProbe: boolean;
+}
+
+const DEFAULTS: Settings = {
+  relationshipsPath: "99_System/03_Schemas/relationships.yaml",
+  elementTypesPath: "99_System/03_Schemas/element-types.yaml",
+  viewsFolder: "Workbench Views",
+  canvasProbe: true,
+};
+
+interface Stored {
+  settings: Settings;
+  /** Generated canvas path → signature at generation, for stale-view checks (WB-035). */
+  views: Record<string, { starts: string[]; profile: string; signature: string; at: number }>;
+}
+
+export default class MdseWorkbench extends Plugin {
+  settings: Settings = { ...DEFAULTS };
+  views: Stored["views"] = {};
+  schema: Schema | null = null;
+  indexer: Indexer | null = null;
+  writer: RelationshipWriter | null = null;
+  lastFindingsMs = 0;
+
+  async onload(): Promise<void> {
+    const stored = ((await this.loadData()) ?? {}) as Partial<Stored>;
+    this.settings = { ...DEFAULTS, ...(stored.settings ?? {}) };
+    this.views = stored.views ?? {};
+    this.addSettingTab(new WorkbenchSettings(this.app, this));
+
+    this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => this.diagnostics() });
+    this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
+    this.addCommand({
+      id: "explore-structure",
+      name: "Explore structure of current note",
+      checkCallback: (checking) => this.withActive(checking, (f) => this.explore([f.path])),
+    });
+    this.addCommand({
+      id: "check-view",
+      name: "Check whether this view is current",
+      callback: () => this.checkView(),
+    });
+    this.addCommand({
+      id: "relate",
+      name: "Relate current note to another note",
+      checkCallback: (checking) => this.withActive(checking, (f) => this.pickTargetThenRelate(f.path)),
+    });
+    this.addCommand({ id: "undo", name: "Undo last relationship change", callback: () => this.undo() });
+    this.addCommand({
+      id: "probe-canvas",
+      name: "Check Canvas support (Phase 0 probe)",
+      callback: () => new ReportModal(this.app, "Canvas support", probeReport(this.app), [
+        "If 'Relate selected notes (Workbench)' appears when you right-click two selected notes on a canvas, the selection menu hook works.",
+      ]).open(),
+    });
+    if (this.settings.canvasProbe) {
+      registerSelectionMenu(this.app, (ref) => this.registerEvent(ref), (a, b) => this.relate(a.path, b.path));
+    }
+
+    this.app.workspace.onLayoutReady(() => void this.start(false));
+  }
+
+  async saveAll(): Promise<void> {
+    await this.saveData({ settings: this.settings, views: this.views } satisfies Stored);
+  }
+
+  private withActive(checking: boolean, run: (f: TFile) => void): boolean {
+    const f = this.app.workspace.getActiveFile();
+    if (!f || f.extension !== "md") return false;
+    if (!checking) run(f);
+    return true;
+  }
+
+  async loadSchema(): Promise<Schema> {
+    const read = async (p: string) => parseYaml(await this.app.vault.adapter.read(normalizePath(p)));
+    return parseSchema(await read(this.settings.relationshipsPath), await read(this.settings.elementTypesPath));
+  }
+
+  /** Load schema, build the index, then follow vault changes (WB-033, WB-086). */
+  async start(rebuild: boolean): Promise<void> {
+    try {
+      this.schema = await this.loadSchema();
+    } catch (e) {
+      new Notice(`MDSE Workbench: could not read the schema files. ${(e as Error).message} Check the paths in settings.`);
+      return;
+    }
+    const schema = this.schema;
+    if (!this.indexer) {
+      this.indexer = new Indexer(this.app, schema);
+      this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
+      const waitResolved = () =>
+        new Promise<void>((res) => {
+          // `resolved` fires once the metadata cache has caught up with the vault.
+          const ref = this.app.metadataCache.on("resolved", () => {
+            this.app.metadataCache.offref(ref);
+            res();
+          });
+          window.setTimeout(res, 15000);
+        });
+      await waitResolved();
+      this.registerEvent(
+        this.app.metadataCache.on("changed", (file) => {
+          if (file.path === normalizePath(this.settings.relationshipsPath) || file.path === normalizePath(this.settings.elementTypesPath)) return;
+          if (this.indexer?.changed(file)) void this.indexer.build();
+        }),
+      );
+      this.registerEvent(this.app.vault.on("delete", (f) => this.indexer?.removed(f.path)));
+      this.registerEvent(
+        this.app.vault.on("rename", (f, old) => {
+          this.indexer?.removed(old);
+          if (f instanceof TFile) this.indexer?.changed(f);
+        }),
+      );
+      this.registerEvent(
+        this.app.vault.on("modify", (f) => {
+          // Schema edited: reload rules and rebuild, so rules are never stale.
+          const p = f.path;
+          if (p === normalizePath(this.settings.relationshipsPath) || p === normalizePath(this.settings.elementTypesPath)) void this.start(true);
+        }),
+      );
+    } else {
+      this.indexer.setSchema(schema);
+    }
+    const stats = await this.indexer.build();
+    if (rebuild || schema.warnings.length) {
+      new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
+    }
+  }
+
+  private ready(): boolean {
+    if (!this.schema || !this.indexer || this.indexer.building || !this.indexer.stats) {
+      new Notice("MDSE Workbench is still indexing. Try again in a moment.");
+      return false;
+    }
+    return true;
+  }
+
+  diagnostics(): void {
+    if (!this.ready()) return;
+    const s = this.indexer!.stats!;
+    const schema = this.schema!;
+    const t0 = performance.now();
+    const f = this.indexer!.index.findings();
+    this.lastFindingsMs = Math.round(performance.now() - t0);
+    const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+    const rows: Array<[string, string, boolean?]> = [
+      ["Markdown files", String(s.files)],
+      ["Notes with properties", String(s.notes)],
+      ["Model notes", String(s.elements)],
+      ["Authored links", String(s.links)],
+      ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
+      ["Findings scan", `${this.lastFindingsMs} ms`],
+      ["Missing inverses", String(f.missingInverse.length), f.missingInverse.length > 0],
+      ["Inverses with no forward link", String(f.orphanInverse.length), f.orphanInverse.length > 0],
+      ["Links that break endpoint rules", String(f.offRule.length)],
+      ["Provisional links (tracesTo)", String(f.provisional.length)],
+      ["Unresolved relationship links", String(f.unresolvedLinks), f.unresolvedLinks > 0],
+      ["relationships.yaml", schema.relationshipsVersion],
+      ["element-types.yaml", schema.elementTypesVersion],
+      ["Editing", editingBlocked(schema) ? "off (schema too old)" : "on", editingBlocked(schema)],
+    ];
+    if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
+    new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
+  }
+
+  async explore(starts: string[]): Promise<void> {
+    if (!this.ready()) return;
+    const index = this.indexer!.index;
+    const t0 = performance.now();
+    const view = traverse(index, starts, STRUCTURE_PROFILE);
+    if (view.depthOf.size <= 1 && view.omitted.size === 0) {
+      new Notice("Nothing to show: this note has no structure links (hasPart, hasChild, includes, hasPort, exposes, hasFlow).");
+      return;
+    }
+    const canvas = toCanvas(index, view);
+    const name = (index.notes.get(starts[0])?.name ?? "view").replace(/[\\/:*?"<>|#^[\]]/g, "_");
+    const folder = normalizePath(this.settings.viewsFolder);
+    if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    // Same starting set + profile reuses the same file (WB-037).
+    const path = normalizePath(`${folder}/${name} - ${view.profile}.canvas`);
+    const json = JSON.stringify(canvas, null, "\t");
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    const file = existing instanceof TFile ? (await this.app.vault.modify(existing, json), existing) : await this.app.vault.create(path, json);
+    this.views[path] = { starts: view.starts, profile: view.profile, signature: signature(view), at: Date.now() };
+    await this.saveAll();
+    const ms = Math.round(performance.now() - t0);
+    await this.app.workspace.getLeaf(true).openFile(file);
+    new Notice(`${view.profile}: ${view.depthOf.size} notes in ${ms} ms${view.capReached ? `, stopped at the ${STRUCTURE_PROFILE.nodeCap}-note limit` : ""}.`);
+  }
+
+  async checkView(): Promise<void> {
+    if (!this.ready()) return;
+    const f = this.app.workspace.getActiveFile();
+    const meta = f ? this.views[f.path] : undefined;
+    if (!f || !meta) {
+      new Notice("Open a view generated by Workbench first.");
+      return;
+    }
+    const now = signature(traverse(this.indexer!.index, meta.starts, STRUCTURE_PROFILE));
+    if (now === meta.signature) new Notice("This view is current.");
+    else
+      new ConfirmModal(this.app, "The model changed since this view was generated.", "Refresh view", () => void this.explore(meta.starts)).open();
+  }
+
+  private elements(): NoteRecord[] {
+    const index = this.indexer!.index;
+    return [...index.notes.values()].filter((r) => index.isElement(r)).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  pickTargetThenRelate(firstPath: string): void {
+    if (!this.ready()) return;
+    const first = this.indexer!.index.notes.get(firstPath);
+    if (!this.indexer!.index.isElement(first)) {
+      new Notice("This note has no known type, so Workbench cannot relate it.");
+      return;
+    }
+    new ElementPicker(this.app, this.elements().filter((r) => r.path !== firstPath), `Relate ${first.name} to…`, (second) =>
+      this.relate(firstPath, second.path),
+    ).open();
+  }
+
+  relate(firstPath: string, secondPath: string): void {
+    if (!this.ready()) return;
+    const index = this.indexer!.index;
+    const a = index.notes.get(firstPath);
+    const b = index.notes.get(secondPath);
+    if (!index.isElement(a) || !index.isElement(b)) {
+      new Notice("Both notes need a known type to be related.");
+      return;
+    }
+    const options = optionsBetween(this.schema!, a.type, b.type);
+    new RelationshipPicker(this.app, options, a, b, async (o) => {
+      const [owner, target] = o.ownerIsFirst ? [a, b] : [b, a];
+      try {
+        const tx = await this.writer!.add(o.def, owner.path, target.path);
+        new Notice(tx.files.length ? `Added: ${owner.name} ${o.def.field} ${target.name}.` : "That link already exists.");
+      } catch (e) {
+        new Notice(`Not added: ${(e as Error).message}`);
+      }
+    }).open();
+  }
+
+  async undo(): Promise<void> {
+    if (!this.writer) return;
+    new Notice(await this.writer.undo());
+  }
+}
+
+class WorkbenchSettings extends PluginSettingTab {
+  constructor(app: App, private readonly plugin: MdseWorkbench) {
+    super(app, plugin);
+  }
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    const text = (name: string, desc: string, key: "relationshipsPath" | "elementTypesPath" | "viewsFolder") =>
+      new Setting(containerEl)
+        .setName(name)
+        .setDesc(desc)
+        .addText((t) =>
+          t.setValue(this.plugin.settings[key]).onChange(async (v) => {
+            this.plugin.settings[key] = v.trim();
+            await this.plugin.saveAll();
+          }),
+        );
+    text("Relationship schema", "Path to relationships.yaml in this vault.", "relationshipsPath");
+    text("Element types", "Path to element-types.yaml in this vault.", "elementTypesPath");
+    text("Generated views folder", "Generated canvases are written here. Add this folder to .gitignore.", "viewsFolder");
+    new Setting(containerEl)
+      .setName("Canvas probe")
+      .setDesc("Adds 'Relate selected notes' to the canvas right-click menu, to test whether Canvas editing is possible (Phase 0). Reload Obsidian after changing.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.canvasProbe).onChange(async (v) => {
+          this.plugin.settings.canvasProbe = v;
+          await this.plugin.saveAll();
+        }),
+      );
+  }
+}

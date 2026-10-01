@@ -1,0 +1,82 @@
+schemaVersion: '1.16'
+date: '2026-09-30'
+basis: MDSE ruleset 1.21
+commonProperties: [type, subtype, id, uid, status, tags]   # order fixed by W-97; W-88 removed control, boundary, aliases and formerIds
+relationshipFields: after tags, in the order of relationships.yaml; may hold lists (W-126)
+translatedOnlyProperties: [eaType]   # written by the translator, between status and tags (W-31, W-97)
+classes:
+- name: Object
+  prefix: OBJ
+  subtype: ["electrical", "circuit", "mechanical", "software", "firmware", "part"]
+- name: Port
+  prefix: PORT
+  subtype: ["proxy", "full"]
+- name: Item Flow
+  prefix: IFLOW
+  subtype: ["information", "energy", "material"]
+- name: Function
+  prefix: FUNC
+  subtype: []
+- name: Functional Flow
+  prefix: FFLOW
+  subtype: []
+- name: State
+  prefix: STATE
+  subtype: []
+- name: State Machine
+  prefix: SM
+  subtype: []
+- name: Requirement
+  prefix: REQ
+  subtype: ["functional", "design", "standard", "stakeholder", "engineering"]
+- name: Design
+  prefix: DES
+  subtype: []
+- name: Use Case
+  prefix: UC
+  subtype: ["what", "where", "why", "when", "who"]
+- name: Actor
+  prefix: ACT
+  subtype: []
+- name: Failure Mode
+  prefix: FM
+  subtype: []
+- name: Issue
+  prefix: ISS
+  subtype: ["engineering issue", "lifecycle risk"]
+- name: Info
+  prefix: INFO
+  subtype: []
+- name: Step
+  prefix: STEP
+  subtype: []
+- name: Verification
+  prefix: VER
+  subtype: ["test", "analysis", "inspection", "demonstration"]
+- name: Procedure
+  prefix: PROC
+  subtype: ["test", "assembly", "configuration", "commissioning", "calibration", "maintenance", "repair", "decommissioning"]
+- name: Setup
+  prefix: SETUP
+  subtype: []
+- name: Plan
+  prefix: PLAN
+  subtype: []
+- name: Result
+  prefix: RES
+  subtype: []
+- name: Document
+  prefix: DOC
+  subtype: []
+- name: Artifact
+  prefix: ART
+  subtype: []
+- name: modelCheck
+  prefix: MC
+  folder: null   # no folder of its own: translated notes stay in their EA package folders (W-117, W-181)
+  subtype: ["Action", "StateNode", "Change", "Boundary", "Decision", "ActivityPartition", "Trigger", "Synchronization", "Sequence", "ActionPin", "ProxyConnector", "Event", "ActivityParameter", "Package"]
+  note: 'Holding class for EA elements with no approved mapping; the subtype is the EA type (W-100, W-146, W-147). Sorted in stage 2 (Post-Import Task 7). Not meant to be created by hand (W-181).'
+- name: Diagram
+  prefix: DIA
+  folder: 72_Diagrams
+  subtype: ["custom", "logical", "use case", "composite structure", "statechart", "activity", "sequence", "package"]
