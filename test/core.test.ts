@@ -141,3 +141,20 @@ test("review: findings list, counts, filters and Previous / Next skipping", asyn
   assert.equal(neighbour(list, 2, -1, skip), 0, "previous skips it too");
   assert.equal(neighbour(list, 3, 1, skip), -1, "no finding after the last");
 });
+
+test("quantity: a child listed several times is one card with a x-count label (WB-091)", () => {
+  const idx = indexOf(schema, [
+    { ...note("Top.md", "Object", { hasPart: ["Wire.md", "Jacket.md"] }), repeat: new Map([["hasPart|Wire.md", 3]]) },
+    note("Wire.md", "Object"),
+    note("Jacket.md", "Object"),
+  ]);
+  const profile: ViewProfile = { name: "S", steps: [{ field: "hasPart", direction: "out" }], depth: 1, nodeCap: 10 };
+  const v = traverse(idx, ["Top.md"], profile);
+  assert.equal(v.depthOf.size, 3, "one card per distinct child");
+  assert.equal(idx.edgeCount(), 2, "links stay one per distinct target, so Review counts do not change");
+  assert.deepEqual(v.tree.map((l) => [l.child, l.count]), [["Jacket.md", 1], ["Wire.md", 3]]);
+  const labels = toCanvas(idx, v, profile).edges.map((e) => e.label);
+  assert.deepEqual(labels, ["hasPart", "×3"]);
+  const once = indexOf(schema, [note("Top.md", "Object", { hasPart: ["Wire.md"] }), note("Wire.md", "Object")]);
+  assert.notEqual(signature(v), signature(traverse(once, ["Top.md"], profile)));
+});

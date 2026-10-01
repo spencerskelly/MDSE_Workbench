@@ -37,6 +37,8 @@ export interface TreeLink {
   parent: string;
   child: string;
   field: string;
+  /** How many times the parent lists this child in the field (quantity, WB-091). 1 when listed once. */
+  count: number;
 }
 
 export interface ViewResult {
@@ -117,7 +119,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
       }
       // Keep each parent's children in relationship-then-name order.
       for (const n of picked.get(s.p) ?? []) {
-        tree.push({ parent: s.p, child: n.node, field: n.field });
+        tree.push({ parent: s.p, child: n.node, field: n.field, count: index.notes.get(s.p)?.repeat?.get(`${n.field}|${n.node}`) ?? 1 });
         next.push(n.node);
       }
     }
@@ -147,13 +149,20 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
 export function signature(view: ViewResult): string {
   const nodes = [...view.depthOf.keys()].sort().join("\n");
   const edges = view.edges.map((e) => `${e.from}|${e.field}|${e.to}`).sort().join("\n");
+  const qty = view.tree.filter((l) => l.count > 1).map((l) => `${l.parent}|${l.field}|${l.child}x${l.count}`).sort().join("\n");
   const more = [...view.omitted].map(([p, n]) => `${p}:${n}`).sort().join("\n");
   let h = 2166136261;
-  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}`) {
+  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${qty}`) {
     h ^= ch.charCodeAt(0);
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0).toString(16);
+}
+
+/** Relationship name on the first link of a group, and a quantity (×25) wherever a child is listed more than once. */
+function edgeLabel(field: string, count: number): string | undefined {
+  const text = [field, count > 1 ? `×${count}` : ""].filter(Boolean).join(" ");
+  return text || undefined;
 }
 
 const NODE_W = 300;
@@ -226,7 +235,7 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
         toNode: idOf.get(l.child) as string,
         fromSide: "right",
         toSide: "left",
-        label: l.field !== lastField ? l.field : undefined,
+        label: edgeLabel(l.field !== lastField ? l.field : "", l.count),
         color: colorOf.get(l.field),
       });
       lastField = l.field;

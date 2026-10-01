@@ -18,6 +18,8 @@ export interface NoteRecord {
   unresolved: number;
   /** The same links by field and link text, for Review (optional so older callers keep working). */
   broken?: Array<{ field: string; link: string }>;
+  /** Quantity (WB-091): how often a field lists the same target, only where more than once. Key `field|targetPath`. Edges stay one per distinct target. */
+  repeat?: Map<string, number>;
 }
 
 export interface Edge {
