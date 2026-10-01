@@ -1,5 +1,5 @@
-schemaVersion: '1.33'
-date: '2026-09-30'
+schemaVersion: '1.34'
+date: '2026-10-01'
 storage: Author forward/owner-side fields. Inverse fields are persisted in YAML and written with the forward field by the translator, Workbench or the regenerate script (W-275); the forward field wins when they disagree.
 paired:
 - {forward: subtypeOf, inverse: supertypeOf, from: any, to: any, sameClass: true}
@@ -8,6 +8,7 @@ paired:
 - {forward: hasFlow, inverse: flowOf, from: [Port], to: [Item Flow]}
 - {forward: exposes, inverse: exposedBy, from: [Port], to: [Port]}
 - {forward: hasChild, inverse: childOf, from: any, to: any, excludePairs: [[Object, Object]]}
+- {forward: hasState, inverse: stateOf, from: [Object, State Machine], to: [State]}
 - {forward: includes, inverse: includedIn, from: any, to: any}
 - {forward: copyOf, inverse: hasCopy, from: any, to: any, sameClass: true}
 - {forward: dependsOn, inverse: dependencyOf, from: any, to: any}
@@ -53,6 +54,7 @@ oneWay:
 - {field: initialState, from: [State Machine], to: [State]}
 - {field: finalState, from: [State Machine], to: [State]}
 guidance:
+  hasState: 'hasState/stateOf: an Object or a State Machine has a State; hasState is written on the Object or State Machine and points at the State, stateOf is generated on the State (W-291, restoring the pair removed in W-185). Nothing in the import writes it yet: States placed under an owner stay hasChild/childOf (W-149) until the placement rule is decided.'
   states: 'initialState and finalState are one-way, written on a State Machine and pointing at the State it starts in and the States it can end in; finalState may hold several values. Nothing in the import writes them; Post-Import Task 7 item 14 replaces the initial and final node notes with them (W-285).'
   affects: 'affects/affectedBy: the source has an impact on a target that exists anyway, good or bad (for example an Issue or Failure Mode on the element it harms, or normal use in a Use Case on the parts it loads or wears); written on the source, affectedBy generated. drives is different: the target exists or happens because of the source. To design against an impact, prefer Use Case drives Requirement, applied to the element (W-284).'
   triggeredBy: 'triggeredBy/triggers: what starts a behavior. triggeredBy is written on the triggered Function, Design or State and points at the Function, Design, State or Item Flow (a signal or event) that starts it; triggers is generated (W-282). It is element-level: it does not say which transition a trigger belongs to; the transition-level trigger, guard and effect text stays as source-section lines on the state before (W-175). Guards stay as text for now (W-282).'

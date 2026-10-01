@@ -65,7 +65,7 @@ npm run build       # typecheck and bundle main.js
 npm run bench:generate -- 60000 && npm run bench
 ```
 
-`test/fixtures/` holds copies of the vault's `relationships.yaml` (schema 1.33) and `element-types.yaml`. Refresh them when the schema changes.
+`test/fixtures/` holds copies of the vault's `relationships.yaml` (schema 1.34) and `element-types.yaml`. Refresh them when the schema changes.
 
 The CI and release workflows are in `ci-workflows/` until the access token can write workflow files; move them to `.github/workflows/` to turn them on.
 

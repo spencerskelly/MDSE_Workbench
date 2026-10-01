@@ -175,3 +175,17 @@ test("undefined: a link to a note that does not exist is an undefined card, not 
   assert.equal(c.edges.find((e) => e.toNode === card.id)!.label, "×2");
   assert.equal(idx.edgeCount(), 1, "Review counts unchanged");
 });
+
+test("hasState/stateOf (W-291): an Object or a State Machine has a State, and the inverse is stateOf", () => {
+  const def = schema.byField.get("hasState")!;
+  assert.equal(def.inverse, "stateOf");
+  assert.ok(schema.byInverse.has("stateOf"));
+  assert.ok(allows(def, "Object", "State").ok);
+  assert.ok(allows(def, "State Machine", "State").ok);
+  assert.ok(!allows(def, "Function", "State").ok);
+  assert.ok(!allows(def, "Object", "Object").ok);
+  assert.ok(optionsBetween(schema, "Object", "State").some((o) => o.def.field === "hasState" && o.ownerIsFirst));
+  const idx = indexOf(schema, [note("Obj.md", "Object", { hasState: ["S.md"] }), note("S.md", "State", { stateOf: ["Obj.md"] })]);
+  const f = idx.findings();
+  assert.equal(f.missingInverse.length + f.orphanInverse.length + f.offRule.length, 0);
+});
