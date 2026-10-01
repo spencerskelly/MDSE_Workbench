@@ -24,6 +24,8 @@ export interface DetailHost {
   /** Pick the relationship and write it; the popup refreshes when the note changes. */
   relate(firstPath: string, secondPath: string): void;
   undo(): Promise<void>;
+  /** Opens the view picker for a note (WB-104). */
+  pickView(path: string): void;
 }
 
 export class NoteDetailPanel extends Component {
@@ -136,6 +138,8 @@ export class NoteDetailPanel extends Component {
       undo.disabled = !this.host.writer()?.canUndo;
       undo.onclick = () => void this.host.undo();
     }
+    const view = head.createEl("button", { text: "View…", cls: "mdse-detail-btn", attr: { title: "Open a view of this note: Structure, Functional, Where Used and more" } });
+    view.onclick = () => this.host.pickView(file.path);
     const open = head.createEl("button", { text: "Open note", cls: "mdse-detail-btn" });
     open.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
     head.createEl("button", { text: "×", cls: "mdse-detail-btn", attr: { "aria-label": "Close" } }).onclick = () => this.requestClose();

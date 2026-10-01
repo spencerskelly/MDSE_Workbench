@@ -67,6 +67,7 @@ export default class MdseWorkbench extends Plugin {
       elements: (exclude) => this.elements().filter((r) => r.path !== exclude),
       relate: (a, b) => this.relate(a, b),
       undo: () => this.undo(),
+      pickView: (path) => this.pickView(path),
     });
     this.addChild(this.detail);
     this.registerDetailClicks();
