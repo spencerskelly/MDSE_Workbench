@@ -116,3 +116,28 @@ test("layout: per-parent limit, one label per relationship group, children besid
   const mid = (Math.min(...ys) + Math.max(...ys)) / 2;
   assert.equal(top.y + top.height / 2, mid, "parent centred on its children");
 });
+
+test("review: findings list, counts, filters and Previous / Next skipping", async () => {
+  const { toFindings, countByCategory, filterFindings, neighbour } = await import("../src/core/review");
+  const f1 = note("F.md", "Function", { satisfies: ["R.md"], tracesTo: ["O.md"] });
+  f1.broken = [{ field: "satisfies", link: "Ghost" }];
+  const idx = indexOf(schema, [
+    f1,
+    note("R.md", "Requirement", { satisfiedBy: ["S.md"] }),
+    note("S.md", "State", { satisfies: ["R.md"] }),
+    note("O.md", "Object", { tracesFrom: ["F.md"] }),
+  ]);
+  const list = toFindings(idx.findings());
+  const n = countByCategory(list);
+  assert.deepEqual([n.provisional, n.missingInverse, n.orphanInverse, n.offRule, n.broken], [1, 1, 0, 1, 1]);
+  assert.equal(new Set(list.map((x) => x.key)).size, list.length, "keys are unique");
+  assert.deepEqual(list.map((x) => x.category), ["provisional", "missingInverse", "offRule", "broken"], "category order");
+  assert.equal(filterFindings(list, idx, { category: "offRule" }).length, 1);
+  assert.equal(filterFindings(list, idx, { type: "Function" }).length, 3);
+  assert.equal(filterFindings(list, idx, { text: "ghost" }).length, 1);
+  assert.equal(filterFindings(list, idx, { field: "tracesTo" })[0].to, "O.md");
+  const skip = new Set([list[1].key]);
+  assert.equal(neighbour(list, 0, 1, skip), 2, "next skips a resolved finding");
+  assert.equal(neighbour(list, 2, -1, skip), 0, "previous skips it too");
+  assert.equal(neighbour(list, 3, 1, skip), -1, "no finding after the last");
+});

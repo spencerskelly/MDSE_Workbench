@@ -54,12 +54,14 @@ export class Indexer {
     if (!fm) return null;
     const fields = new Map<string, string[]>();
     let unresolved = 0;
+    const broken: Array<{ field: string; link: string }> = [];
     for (const fl of cache.frontmatterLinks ?? []) {
       const field = fl.key.split(".")[0];
       if (!this.schema.byField.has(field) && !this.schema.byInverse.has(field)) continue;
       const dest = this.app.metadataCache.getFirstLinkpathDest(getLinkpath(fl.link), file.path);
       if (!dest) {
         unresolved++;
+        broken.push({ field, link: fl.link });
         continue;
       }
       let list = fields.get(field);
@@ -67,7 +69,7 @@ export class Indexer {
       if (!list.includes(dest.path)) list.push(dest.path);
     }
     const str = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : String(v));
-    return { path: file.path, name: file.basename, type: str(fm.type), id: str(fm.id), uid: str(fm.uid), fields, unresolved };
+    return { path: file.path, name: file.basename, type: str(fm.type), id: str(fm.id), uid: str(fm.uid), fields, unresolved, broken };
   }
 
   /** Builds the index; a second call while building returns the same promise. */

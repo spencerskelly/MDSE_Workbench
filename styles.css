@@ -4,3 +4,25 @@
 .mdse-diagnostics td:first-child { color: var(--text-muted); white-space: nowrap; }
 .mdse-diagnostics .mdse-warn { color: var(--text-error); }
 .mdse-option-meta { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-left: 0.5em; }
+.mdse-review { padding: var(--size-4-3); }
+.mdse-review-head { display: flex; justify-content: space-between; align-items: center; }
+.mdse-review-head h3 { margin: 0; }
+.mdse-review-cats { display: flex; flex-wrap: wrap; gap: var(--size-4-1); margin: var(--size-4-2) 0; }
+.mdse-cat { display: inline-flex; gap: 0.5em; align-items: center; }
+.mdse-cat.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }
+.mdse-count { font-variant-numeric: tabular-nums; font-weight: var(--font-semibold); }
+.mdse-count.is-zero { opacity: 0.5; }
+.mdse-muted { color: var(--text-muted); font-size: var(--font-ui-small); }
+.mdse-review-filters { display: flex; flex-wrap: wrap; gap: var(--size-4-1); margin-bottom: var(--size-4-2); }
+.mdse-review-filters input[type="search"] { flex: 1 1 14em; }
+.mdse-review-list { display: flex; flex-direction: column; }
+.mdse-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--size-4-2); padding: var(--size-4-1) var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; }
+.mdse-row:hover { background: var(--background-modifier-hover); }
+.mdse-row .mdse-field { color: var(--text-accent); }
+.mdse-row .mdse-from, .mdse-row .mdse-to { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.mdse-finding { border-collapse: collapse; width: 100%; margin-bottom: var(--size-4-2); }
+.mdse-finding td { padding: 2px 8px; border-bottom: 1px solid var(--background-modifier-border); vertical-align: top; }
+.mdse-finding td:first-child { color: var(--text-muted); white-space: nowrap; }
+.mdse-options { margin: var(--size-4-2) 0; }
+.mdse-option { display: flex; gap: 0.5em; align-items: center; padding: 2px 0; }
+.mdse-buttons { display: flex; gap: var(--size-4-2); margin-bottom: var(--size-4-2); }

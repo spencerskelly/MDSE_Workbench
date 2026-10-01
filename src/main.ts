@@ -11,6 +11,7 @@ import { signature, STRUCTURE_PROFILE, toCanvas, traverse } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal } from "./obsidian/ui";
+import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
 
 /** Quiet time with no cache activity before the first index build starts. */
@@ -83,6 +84,19 @@ export default class MdseWorkbench extends Plugin {
       registerSelectionMenu(this.app, (ref) => this.registerEvent(ref), (a, b) => this.relate(a.path, b.path));
     }
 
+    this.registerView(
+      REVIEW_VIEW,
+      (leaf) =>
+        new ReviewView(leaf, {
+          app: this.app,
+          ready: () => this.isReady(),
+          index: () => (this.indexer as Indexer).index,
+          schema: () => this.schema as Schema,
+          writer: () => this.writer as RelationshipWriter,
+        }),
+    );
+    this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
+    this.addRibbonIcon("list-checks", "Workbench Review", () => void this.openReview());
     this.registerEvent(this.app.metadataCache.on("changed", () => (this.lastChange = Date.now())));
     this.register(() => (this.unloaded = true));
     this.app.workspace.onLayoutReady(() => void this.start(false));
@@ -156,6 +170,18 @@ export default class MdseWorkbench extends Plugin {
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
     }
+  }
+
+  /** Quiet version of ready(): no notice. Used by Review, which waits and retries. */
+  private isReady(): boolean {
+    return !!(this.schema && this.indexer && this.writer && !this.indexer.building && this.indexer.stats);
+  }
+
+  async openReview(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(REVIEW_VIEW)[0];
+    const leaf = existing ?? this.app.workspace.getLeaf("tab");
+    if (!existing) await leaf.setViewState({ type: REVIEW_VIEW, active: true });
+    void this.app.workspace.revealLeaf(leaf);
   }
 
   private ready(): boolean {

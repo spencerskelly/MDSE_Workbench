@@ -42,6 +42,7 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
 - **Relate current note to another note**: pick the other note by name (type and id shown beside it), then pick from only the relationships the endpoint rules allow, in either direction. `tracesTo` is offered last, as the provisional relationship (W-288).
 - **Undo last relationship change**: reverses both notes of the last relate, and refuses if either note was edited since. Use this, not Cmd/Ctrl-Z, which only undoes one open note and can leave a pair half-written. Give it a hotkey under Settings → Hotkeys. History is kept in memory and clears when Obsidian restarts.
 - **Check Canvas support (Phase 0 probe)**
+- **Open Review** (also the checklist icon in the ribbon): the whole-vault Review screen. Categories with counts (Provisional Relationships, Missing Inverses, Inverses With No Forward Link, Off-Rule Links, Broken References), search plus note-type and relationship filters, and a finding window with Previous / Next. Two findings can be resolved from the window: **Replace relationship** (provisional `tracesTo` → an approved relationship the endpoint rules allow; adds the new link, then removes the old one, so Undo reverses the removal first) and **Write missing inverse**. Everything else offers **Open source** and **Open target** only. The screen follows changes after a one-second pause and lists the first 200 rows of a filter.
 
 Generated views go to `Workbench Views/` (configurable). Add that folder to the vault's `.gitignore` (WB-036).
 

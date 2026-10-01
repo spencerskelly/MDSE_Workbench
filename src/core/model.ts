@@ -16,6 +16,8 @@ export interface NoteRecord {
   fields: Map<string, string[]>;
   /** Links in relationship fields whose target note does not exist. */
   unresolved: number;
+  /** The same links by field and link text, for Review (optional so older callers keep working). */
+  broken?: Array<{ field: string; link: string }>;
 }
 
 export interface Edge {
@@ -35,6 +37,8 @@ export interface Findings {
   provisional: Edge[];
   /** Relationship-field links that point at no note. */
   unresolvedLinks: number;
+  /** The unresolved links one by one, for Review. */
+  broken: Array<{ from: string; field: string; link: string }>;
 }
 
 export class ModelIndex {
@@ -101,9 +105,10 @@ export class ModelIndex {
   }
 
   findings(): Findings {
-    const f: Findings = { missingInverse: [], orphanInverse: [], offRule: [], provisional: [], unresolvedLinks: 0 };
+    const f: Findings = { missingInverse: [], orphanInverse: [], offRule: [], provisional: [], unresolvedLinks: 0, broken: [] };
     for (const rec of this.notes.values()) {
       f.unresolvedLinks += rec.unresolved;
+      for (const b of rec.broken ?? []) f.broken.push({ from: rec.path, ...b });
       for (const e of this.out(rec.path)) {
         const def = this.schema.byField.get(e.field) as RelationshipDef;
         const target = this.notes.get(e.to);
