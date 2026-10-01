@@ -181,7 +181,7 @@ export function signature(view: ViewResult): string {
   return (h >>> 0).toString(16);
 }
 
-/** Relationship name on the first link of a group, and a quantity (×25) wherever a child is listed more than once. */
+/** Relationship name on every link (WB-095), plus a quantity (×27) wherever a child is listed more than once. */
 function edgeLabel(field: string, count: number): string | undefined {
   const text = [field, count > 1 ? `×${count}` : ""].filter(Boolean).join(" ");
   return text || undefined;
@@ -190,9 +190,9 @@ function edgeLabel(field: string, count: number): string | undefined {
 /** Canvas color 1 (red) marks a note that still has to be defined (WB-092). */
 const UNDEFINED_COLOR = "1";
 const NODE_W = 300;
-const NODE_H = 60;
+const NODE_H = 80;
 const COL_GAP = 160;
-const ROW_H = 80;
+const ROW_H = 100;
 const MORE_W = 140;
 /** Cross links are drawn only when there are few enough to stay readable. */
 const MAX_CROSS = 40;
@@ -249,7 +249,6 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
     const children = kids.get(p) ?? [];
     const more = view.omitted.get(p) ?? 0;
     const centres: number[] = [];
-    let lastField = "";
     for (const l of children) {
       const c = place(l.child, depth + 1);
       centres.push(c);
@@ -259,10 +258,9 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
         toNode: idOf.get(l.child) as string,
         fromSide: "right",
         toSide: "left",
-        label: edgeLabel(l.field !== lastField ? l.field : "", l.count),
+        label: edgeLabel(l.field, l.count),
         color: colorOf.get(l.field),
       });
-      lastField = l.field;
     }
     let moreId: string | undefined;
     if (more) {

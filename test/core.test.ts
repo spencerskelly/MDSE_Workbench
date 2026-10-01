@@ -90,7 +90,7 @@ test("frontmatter: add, dedupe, sort and order properties", () => {
   assert.equal(linkTarget("[[A b|alias]]"), "A b");
 });
 
-test("layout: per-parent limit, one label per relationship group, children beside their parent", () => {
+test("layout: per-parent limit, a relationship label on every link (WB-095), children beside their parent", () => {
   const ports = ["P1.md", "P2.md", "P3.md"];
   const parts = Array.from({ length: 5 }, (_, i) => `C${i}.md`);
   const idx = indexOf(schema, [
@@ -110,7 +110,7 @@ test("layout: per-parent limit, one label per relationship group, children besid
   assert.equal(v.omitted.get("Top.md"), 2);
   const c = toCanvas(idx, v, profile);
   const labels = c.edges.map((e) => e.label).filter(Boolean);
-  assert.deepEqual(labels, ["hasPart", "hasPort"]);
+  assert.deepEqual(labels, ["hasPart", "hasPart", "hasPart", "hasPart", "hasPart", "hasPort"]);
   const top = c.nodes.find((n) => n.file === "Top.md")!;
   const ys = c.nodes.filter((n) => n.x > top.x).map((n) => n.y + n.height / 2);
   const mid = (Math.min(...ys) + Math.max(...ys)) / 2;
@@ -154,7 +154,7 @@ test("quantity: a child listed several times is one card with a x-count label (W
   assert.equal(idx.edgeCount(), 2, "links stay one per distinct target, so Review counts do not change");
   assert.deepEqual(v.tree.map((l) => [l.child, l.count]), [["Jacket.md", 1], ["Wire.md", 3]]);
   const labels = toCanvas(idx, v, profile).edges.map((e) => e.label);
-  assert.deepEqual(labels, ["hasPart", "×3"]);
+  assert.deepEqual(labels, ["hasPart", "hasPart ×3"]);
   const once = indexOf(schema, [note("Top.md", "Object", { hasPart: ["Wire.md"] }), note("Wire.md", "Object")]);
   assert.notEqual(signature(v), signature(traverse(once, ["Top.md"], profile)));
 });
@@ -172,7 +172,7 @@ test("undefined: a link to a note that does not exist is an undefined card, not 
   const card = c.nodes.find((n) => n.type === "text" && n.text?.includes("Ghost"))!;
   assert.ok(card.text!.includes("undefined") && card.color === "1");
   assert.ok(c.nodes.filter((n) => n.type === "file").every((n) => n.file === "Top.md" || n.file === "Real.md"));
-  assert.equal(c.edges.find((e) => e.toNode === card.id)!.label, "×2");
+  assert.equal(c.edges.find((e) => e.toNode === card.id)!.label, "hasPart ×2");
   assert.equal(idx.edgeCount(), 1, "Review counts unchanged");
 });
 
