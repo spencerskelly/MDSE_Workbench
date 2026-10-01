@@ -7,8 +7,10 @@ import { ModelIndex, type NoteRecord } from "../core/model";
 import type { Schema } from "../core/schema";
 
 const CHUNK = 500;
-/** After this many outside changes, rebuild instead of patching (WB-086). */
-const REBUILD_AFTER = 300;
+/** Outside changes within one burst before a full rebuild is scheduled (WB-086). */
+const BURST_REBUILD = 300;
+/** Quiet time before a scheduled rebuild runs, so a pull or first-time indexing finishes first. */
+const QUIET_MS = 3000;
 
 export interface BuildStats {
   files: number;
@@ -19,14 +21,27 @@ export interface BuildStats {
   builtAt: number;
 }
 
+/**
+ * Startup rule: Obsidian reports every note as "changed" while it builds its own cache the
+ * first time a vault opens (tens of thousands of events). Changes arriving before the first
+ * build, or during any build, are only remembered and applied once after it. A burst of
+ * outside changes schedules one rebuild after things go quiet; builds never overlap.
+ */
 export class Indexer {
   index: ModelIndex;
   stats: BuildStats | null = null;
-  building = false;
-  private pendingChanges = 0;
+  private running: Promise<BuildStats> | null = null;
+  private readonly dirty = new Set<string>();
+  private burst = 0;
+  private burstStarted = 0;
+  private timer: number | null = null;
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
+  }
+
+  get building(): boolean {
+    return this.running !== null;
   }
 
   setSchema(schema: Schema): void {
@@ -55,8 +70,13 @@ export class Indexer {
     return { path: file.path, name: file.basename, type: str(fm.type), id: str(fm.id), uid: str(fm.uid), fields, unresolved };
   }
 
-  async build(): Promise<BuildStats> {
-    this.building = true;
+  /** Builds the index; a second call while building returns the same promise. */
+  build(): Promise<BuildStats> {
+    if (!this.running) this.running = this.doBuild().finally(() => (this.running = null));
+    return this.running;
+  }
+
+  private async doBuild(): Promise<BuildStats> {
     const t0 = performance.now();
     const index = new ModelIndex(this.schema);
     const files = this.app.vault.getMarkdownFiles();
@@ -66,8 +86,13 @@ export class Indexer {
       if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
     }
     this.index = index;
-    this.pendingChanges = 0;
-    this.building = false;
+    // Apply what changed while building. A large backlog (first-time caching, a big pull)
+    // is cheaper as one more chunked build after things go quiet than as one long loop.
+    const backlog = this.dirty.size;
+    if (backlog <= CHUNK) for (const path of this.dirty) this.apply(path);
+    this.dirty.clear();
+    if (backlog > CHUNK) this.scheduleRebuild();
+    this.burst = 0;
     let elements = 0;
     for (const r of index.notes.values()) if (index.isElement(r)) elements++;
     this.stats = {
@@ -81,16 +106,41 @@ export class Indexer {
     return this.stats;
   }
 
-  /** Incremental update after one file changed. Returns true if a full rebuild is due. */
-  changed(file: TFile): boolean {
-    if (this.building) return false;
-    const rec = this.record(file);
+  private apply(path: string): void {
+    const f = this.app.vault.getAbstractFileByPath(path);
+    const rec = f instanceof TFile ? this.record(f) : null;
     if (rec) this.index.upsert(rec);
-    else this.index.remove(file.path);
-    return ++this.pendingChanges >= REBUILD_AFTER;
+    else this.index.remove(path);
+  }
+
+  /** One file changed or was created. Cheap; never starts a build directly. */
+  changed(path: string): void {
+    if (!this.stats || this.running) {
+      this.dirty.add(path);
+      return;
+    }
+    this.apply(path);
+    const now = Date.now();
+    if (now - this.burstStarted > 10000) {
+      this.burstStarted = now;
+      this.burst = 0;
+    }
+    if (++this.burst >= BURST_REBUILD) this.scheduleRebuild();
   }
 
   removed(path: string): void {
-    if (!this.building) this.index.remove(path);
+    this.changed(path);
+  }
+
+  scheduleRebuild(): void {
+    if (this.timer !== null) window.clearTimeout(this.timer);
+    this.timer = window.setTimeout(() => {
+      this.timer = null;
+      void this.build();
+    }, QUIET_MS);
+  }
+
+  dispose(): void {
+    if (this.timer !== null) window.clearTimeout(this.timer);
   }
 }

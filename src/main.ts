@@ -108,36 +108,40 @@ export default class MdseWorkbench extends Plugin {
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
-      const waitResolved = () =>
-        new Promise<void>((res) => {
-          // `resolved` fires once the metadata cache has caught up with the vault.
-          const ref = this.app.metadataCache.on("resolved", () => {
-            this.app.metadataCache.offref(ref);
-            res();
-          });
-          window.setTimeout(res, 15000);
-        });
-      await waitResolved();
+      const schemaPaths = () => [normalizePath(this.settings.relationshipsPath), normalizePath(this.settings.elementTypesPath)];
+      // Follow changes from the start; the indexer only remembers them until its first build.
       this.registerEvent(
         this.app.metadataCache.on("changed", (file) => {
-          if (file.path === normalizePath(this.settings.relationshipsPath) || file.path === normalizePath(this.settings.elementTypesPath)) return;
-          if (this.indexer?.changed(file)) void this.indexer.build();
+          if (!schemaPaths().includes(file.path)) this.indexer?.changed(file.path);
         }),
       );
       this.registerEvent(this.app.vault.on("delete", (f) => this.indexer?.removed(f.path)));
       this.registerEvent(
         this.app.vault.on("rename", (f, old) => {
           this.indexer?.removed(old);
-          if (f instanceof TFile) this.indexer?.changed(f);
+          this.indexer?.changed(f.path);
         }),
       );
       this.registerEvent(
         this.app.vault.on("modify", (f) => {
           // Schema edited: reload rules and rebuild, so rules are never stale.
-          const p = f.path;
-          if (p === normalizePath(this.settings.relationshipsPath) || p === normalizePath(this.settings.elementTypesPath)) void this.start(true);
+          if (schemaPaths().includes(f.path)) void this.start(true);
         }),
       );
+      this.register(() => this.indexer?.dispose());
+      // Wait until Obsidian's own cache has caught up. On a vault opened for the first time
+      // that can take minutes; if it was already caught up, `resolved` may not fire again.
+      await new Promise<void>((res) => {
+        const ref = this.app.metadataCache.on("resolved", () => {
+          this.app.metadataCache.offref(ref);
+          res();
+        });
+        window.setTimeout(() => {
+          this.app.metadataCache.offref(ref);
+          res();
+        }, 5000);
+      });
+      new Notice("MDSE Workbench: indexing the vault. Diagnostics are available when it finishes.");
     } else {
       this.indexer.setSchema(schema);
     }
