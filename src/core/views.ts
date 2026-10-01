@@ -77,7 +77,45 @@ export const FUNCTIONAL_PROFILE: ViewProfile = {
   perParent: 12,
 };
 
-export const PROFILES: Record<string, ViewProfile> = { [STRUCTURE_PROFILE.name]: STRUCTURE_PROFILE, [FUNCTIONAL_PROFILE.name]: FUNCTIONAL_PROFILE };
+const REQ_HOLDERS = ["Object", "Function", "Design", "State", "Use Case", "Verification"];
+
+/**
+ * Requirements view (WB-098): from a Requirement, where it sits (owner element, parent requirement), its
+ * sub-requirements, what it is derived from or refined by, what it references, what satisfies, verifies,
+ * applies to or drives it. From an Object, Function, Design, State, Use Case or Verification, the
+ * requirements it holds, satisfies, verifies, drives or that apply to it, each then opened as a Requirement.
+ */
+export const REQUIREMENTS_PROFILE: ViewProfile = {
+  name: "Requirements",
+  startTypes: ["Requirement", ...REQ_HOLDERS],
+  steps: [
+    { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Function", "Design"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Requirement"], to: ["Requirement"] },
+    { field: "hasChild", direction: "out", from: ["Object", "Function", "Design"], to: ["Requirement"], atStartOnly: true },
+    { field: "derivedFrom", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
+    { field: "derivedFrom", direction: "in", from: ["Requirement"], to: ["Requirement"] },
+    { field: "refines", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
+    { field: "refines", direction: "in", from: ["Requirement"], to: ["Requirement"] },
+    { field: "references", direction: "out", from: ["Requirement"], to: ["Requirement", "Document"] },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design", "State"] },
+    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
+    { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "appliesTo", direction: "out", from: ["Requirement"] },
+    { field: "appliesTo", direction: "in", from: REQ_HOLDERS, to: ["Requirement"], atStartOnly: true },
+    { field: "drives", direction: "in", from: ["Requirement"], to: ["Use Case"] },
+    { field: "drives", direction: "out", from: ["Use Case"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+  ],
+  depth: 2,
+  nodeCap: 80,
+  perParent: 12,
+};
+
+export const PROFILES: Record<string, ViewProfile> = {
+  [STRUCTURE_PROFILE.name]: STRUCTURE_PROFILE,
+  [FUNCTIONAL_PROFILE.name]: FUNCTIONAL_PROFILE,
+  [REQUIREMENTS_PROFILE.name]: REQUIREMENTS_PROFILE,
+};
 
 /** Does a step apply to a note of type `cur` reaching a note of type `nbr`? */
 function stepAllows(step: ViewStep, cur: string | undefined, nbr: string | undefined): boolean {
@@ -253,8 +291,8 @@ const ROW_H = 100;
 const MORE_W = 140;
 /** Cross links are drawn only when there are few enough to stay readable. */
 const MAX_CROSS = 40;
-/** One color per relationship in profile order, all different from the undefined-card red (WB-096): Canvas colors 4, 5, 6, 2, 3, then two hex colors for the sixth and seventh. */
-const PALETTE = ["4", "5", "6", "2", "3", "#9aa0a6", "#b5835a"];
+/** One color per relationship in profile order, all different from the undefined-card red (WB-096): Canvas colors 4, 5, 6, 2, 3, then four hex colors for the sixth to ninth. */
+const PALETTE = ["4", "5", "6", "2", "3", "#9aa0a6", "#b5835a", "#7f9cf5", "#c9b037"];
 
 export interface CanvasNode {
   id: string;

@@ -68,6 +68,11 @@ export default class MdseWorkbench extends Plugin {
       checkCallback: (checking) => this.withActive(checking, (f) => this.explore([f.path], PROFILES.Functional)),
     });
     this.addCommand({
+      id: "explore-requirements",
+      name: "Explore requirements view of current note",
+      checkCallback: (checking) => this.withActive(checking, (f) => this.explore([f.path], PROFILES.Requirements)),
+    });
+    this.addCommand({
       id: "check-view",
       name: "Check whether this view is current",
       callback: () => this.checkView(),

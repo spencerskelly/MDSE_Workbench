@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { FUNCTIONAL_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "../src/core/views";
+import { FUNCTIONAL_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "../src/core/views";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
 const schema = fixtureSchema();
@@ -281,4 +281,72 @@ test("functional view: starts only from an Object or a Function; stale signature
   assert.deepEqual(FUNCTIONAL_PROFILE.startTypes, ["Object", "Function"]);
   const idx = functionalIndex();
   assert.notEqual(signature(traverse(idx, ["Pump.md"], FUNCTIONAL_PROFILE)), signature(traverse(idx, ["Pump.md"], STRUCTURE_PROFILE)));
+});
+
+test("requirements view from a Requirement: owner, parent, children, derivation, satisfiers and verifiers with arrows as stored (WB-098)", () => {
+  const idx = indexOf(schema, [
+    note("Owner.md", "Object", { hasChild: ["Parent.md"] }),
+    note("Parent.md", "Requirement", { hasChild: ["R.md"] }),
+    note("R.md", "Requirement", { hasChild: ["Kid.md"], derivedFrom: ["Source.md"], refines: ["Broad.md"], references: ["Std.md"], appliesTo: ["Owner.md"] }),
+    note("Kid.md", "Requirement"),
+    note("Source.md", "Requirement"),
+    note("Broad.md", "Requirement"),
+    note("Std.md", "Document"),
+    note("Derived.md", "Requirement", { derivedFrom: ["R.md"] }),
+    note("Fn.md", "Function", { satisfies: ["R.md", "Other.md"] }),
+    note("Other.md", "Requirement"),
+    note("V.md", "Verification", { verifies: ["R.md"] }),
+    note("UC.md", "Use Case", { drives: ["R.md"] }),
+  ]);
+  const v = traverse(idx, ["R.md"], REQUIREMENTS_PROFILE);
+  assert.ok(!v.depthOf.has("Other.md"), "a satisfier's other requirements are not pulled in");
+  assert.deepEqual([...v.depthOf.keys()].sort(), ["Broad.md", "Derived.md", "Fn.md", "Kid.md", "Owner.md", "Parent.md", "R.md", "Source.md", "Std.md", "UC.md", "V.md"]);
+  const c = toCanvas(idx, v, REQUIREMENTS_PROFILE);
+  const id = (f: string) => c.nodes.find((n) => n.file === f)!.id;
+  const edge = (a: string, b: string) => c.edges.find((e) => e.fromNode === id(a) && e.toNode === id(b))?.label;
+  assert.equal(edge("Parent.md", "R.md"), "hasChild");
+  assert.equal(edge("R.md", "Kid.md"), "hasChild");
+  assert.equal(edge("R.md", "Source.md"), "derivedFrom");
+  assert.equal(edge("Derived.md", "R.md"), "derivedFrom", "a requirement derived from this one points at it");
+  assert.equal(edge("R.md", "Broad.md"), "refines");
+  assert.equal(edge("Fn.md", "R.md"), "satisfies");
+  assert.equal(edge("V.md", "R.md"), "verifies");
+  assert.equal(edge("UC.md", "R.md"), "drives");
+  assert.equal(edge("R.md", "Std.md"), "references");
+  assert.ok(c.edges.every((e) => e.fromNode && e.toNode));
+});
+
+test("requirements view from a Function, Object and Verification: the requirements they hold, satisfy, are applied to, or verify (WB-098)", () => {
+  const idx = indexOf(schema, [
+    note("Fn.md", "Function", { satisfies: ["R1.md"], hasChild: ["R2.md"] }),
+    note("Obj.md", "Object"),
+    note("R1.md", "Requirement", { hasChild: ["R1a.md"] }),
+    note("R1a.md", "Requirement"),
+    note("R2.md", "Requirement"),
+    note("R3.md", "Requirement", { appliesTo: ["Obj.md"] }),
+    note("Ver.md", "Verification", { verifies: ["R2.md"] }),
+    note("Fn2.md", "Function", { satisfies: ["R1.md"] }),
+  ]);
+  const fn = traverse(idx, ["Fn.md"], REQUIREMENTS_PROFILE);
+  assert.deepEqual([...fn.depthOf.keys()].sort(), ["Fn.md", "Fn2.md", "R1.md", "R1a.md", "R2.md", "Ver.md"], "co-satisfier and verifier come in at the second level");
+  assert.deepEqual([...traverse(idx, ["Obj.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["Obj.md", "R3.md"]);
+  assert.deepEqual([...traverse(idx, ["Ver.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["R2.md", "Ver.md"], "the owner of a requirement is shown only when the requirement is the start");
+});
+
+test("requirements view: a missing requirement or source shows as undefined; start types; every profile has one color per relationship and no red (WB-098)", () => {
+  const f = { ...note("F.md", "Function", {}), broken: [{ field: "satisfies", link: "Req gone" }, { field: "hasChild", link: "Unknown gone" }] };
+  const r = { ...note("R.md", "Requirement", {}), broken: [{ field: "derivedFrom", link: "Parent req gone" }, { field: "references", link: "Std gone" }, { field: "hasChild", link: "Kid gone" }] };
+  const idx = indexOf(schema, [f, r]);
+  assert.deepEqual([...traverse(idx, ["F.md"], REQUIREMENTS_PROFILE).depthOf.keys()].filter((k) => k !== "F.md"), ["undefined:Req gone"]);
+  assert.deepEqual([...traverse(idx, ["R.md"], REQUIREMENTS_PROFILE).depthOf.keys()].filter((k) => k !== "R.md"), ["undefined:Parent req gone"]);
+  assert.ok(REQUIREMENTS_PROFILE.startTypes!.includes("Requirement") && !REQUIREMENTS_PROFILE.startTypes!.includes("Port"));
+  for (const profile of Object.values(PROFILES)) {
+    const fields = [...new Set(profile.steps.map((s) => s.field))];
+    const colors = new Set<string>();
+    const dummy = indexOf(schema, [note("X.md", "Object")]);
+    const canvas = toCanvas(dummy, { ...traverse(dummy, ["X.md"], profile), tree: fields.map((fl, i) => ({ parent: "X.md", child: `C${i}.md`, field: fl, direction: "out" as const, count: 1 })) }, profile);
+    for (const e of canvas.edges) if (e.color) colors.add(e.color);
+    assert.equal(colors.size, fields.length, `${profile.name}: one color per relationship`);
+    assert.ok(!colors.has("1"), `${profile.name}: no red`);
+  }
 });
