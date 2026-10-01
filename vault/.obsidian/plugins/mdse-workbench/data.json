@@ -1,0 +1,26 @@
+{
+  "settings": {
+    "relationshipsPath": "99_System/03_Schemas/relationships.yaml",
+    "elementTypesPath": "99_System/03_Schemas/element-types.yaml",
+    "viewsFolder": "Workbench Views",
+    "canvasProbe": true
+  },
+  "views": {
+    "Workbench Views/Object 000011 - Structure.canvas": {
+      "starts": [
+        "Object/0/Object 000011.md"
+      ],
+      "profile": "Structure",
+      "signature": "266a3839",
+      "at": 1790828633640
+    },
+    "Workbench Views/Object 000036 - Structure.canvas": {
+      "starts": [
+        "Object/0/Object 000036.md"
+      ],
+      "profile": "Structure",
+      "signature": "3069b8d0",
+      "at": 1790829049040
+    }
+  }
+}

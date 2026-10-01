@@ -1,0 +1,307 @@
+{
+  "main": {
+    "id": "2c3ded9fd0abbd7d",
+    "type": "split",
+    "children": [
+      {
+        "id": "9e3b31bc79e66b58",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "5aea195b97ad2814",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Object/0/Object 000011.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Object 000011"
+            }
+          },
+          {
+            "id": "b3f91fbd04787337",
+            "type": "leaf",
+            "state": {
+              "type": "canvas",
+              "state": {
+                "file": "Workbench Views/Object 000011 - Structure.canvas",
+                "viewState": {
+                  "x": 3900,
+                  "y": 1245,
+                  "zoom": 0
+                }
+              },
+              "icon": "lucide-layout-dashboard",
+              "title": "Object 000011 - Structure"
+            }
+          },
+          {
+            "id": "01836b0628976d7c",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Object/0/Object 000036.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Object 000036"
+            }
+          },
+          {
+            "id": "d5916d6cad87d688",
+            "type": "leaf",
+            "state": {
+              "type": "canvas",
+              "state": {
+                "file": "Workbench Views/Object 000036 - Structure.canvas",
+                "viewState": {
+                  "x": 1310,
+                  "y": 11,
+                  "zoom": 0
+                }
+              },
+              "icon": "lucide-layout-dashboard",
+              "title": "Object 000036 - Structure"
+            }
+          },
+          {
+            "id": "2a5ff2a3e05bcd2a",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Requirement/11/Requirement 011224.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Requirement 011224"
+            }
+          },
+          {
+            "id": "6466fcd20c2c966e",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Use_Case/54/Use Case 054715.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Use Case 054715"
+            }
+          },
+          {
+            "id": "c11489e1fe11243d",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Verification/17/Verification 017628.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Verification 017628"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "17137c32f5c74ebe",
+    "type": "split",
+    "children": [
+      {
+        "id": "c4fd2583dd7f9da6",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0cabc8977cade879",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "a75ede221f73bb68",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "6d3c970a07a556f6",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "cca7d9f1023d6132",
+    "type": "split",
+    "children": [
+      {
+        "id": "6ba151f21eb4c1a9",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "4202674eca4653a9",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks"
+            }
+          },
+          {
+            "id": "1f863a6cfe552d50",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "234182cb85da0c88",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "4e73ae5afeff27f1",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "fdb22321a95f0b15",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "5aea195b97ad2814",
+  "lastOpenFiles": [
+    "Workbench Views/Object 000011 - Structure.canvas",
+    "Use_Case/54/Use Case 054715.md",
+    "Verification/17/Verification 017628.md",
+    "Requirement/11/Requirement 011224.md",
+    "Workbench Views/Object 000036 - Structure.canvas",
+    "Object/0/Object 000036.md",
+    "Object/0/Object 000027.md",
+    "Object/0/Object 000016.md",
+    "Object/0/Object 000011.md",
+    "Object/0/Object 000009.md",
+    "Object/0/Object 000008.md",
+    "Object/0/Object 000007.md",
+    "Object/0/Object 000115.md",
+    "Object/0/Object 000122.md",
+    "Object/0/Object 000094.md",
+    "Object/0/Object 000117.md",
+    "Object/0/Object 000077.md",
+    "Object/0/Object 000072.md",
+    "Object/0/Object 000043.md",
+    "Use_Case/43/Use Case 043435.md",
+    "Workbench Views",
+    "files/styles.css",
+    "files/manifest.json",
+    "files/main.js",
+    "files",
+    "files.zip"
+  ]
+}

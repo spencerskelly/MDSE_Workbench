@@ -1,0 +1,20 @@
+---
+type: Requirement
+subtype:
+id: X-49503
+uid: 20260930000000000synthetic503
+status: Draft
+tags: []
+childOf:
+  - "[[Requirement 000483]]"
+appliesTo:
+  - "[[Object 052695]]"
+derivedFrom:
+  - "[[Requirement 021683]]"
+---
+
+# Requirement 049503
+
+## Definition
+
+Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. 

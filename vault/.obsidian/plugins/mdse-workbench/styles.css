@@ -1,0 +1,6 @@
+/* MDSE Workbench. Uses Obsidian theme variables only, so it follows the user's theme. */
+.mdse-diagnostics table { border-collapse: collapse; width: 100%; }
+.mdse-diagnostics td { padding: 2px 8px; border-bottom: 1px solid var(--background-modifier-border); vertical-align: top; }
+.mdse-diagnostics td:first-child { color: var(--text-muted); white-space: nowrap; }
+.mdse-diagnostics .mdse-warn { color: var(--text-error); }
+.mdse-option-meta { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-left: 0.5em; }

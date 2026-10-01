@@ -1,0 +1,22 @@
+---
+type: Requirement
+subtype:
+id: X-05296
+uid: 20260930000000000synthetic296
+status: Draft
+tags: []
+childOf:
+  - "[[Verification 000524]]"
+hasChild:
+  - "[[Object 046243]]"
+appliesTo:
+  - "[[Object 039284]]"
+describedBy:
+  - "[[Info 005015]]"
+---
+
+# Requirement 005296
+
+## Definition
+
+Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. Lorem ipsum engineering text for size realism. 

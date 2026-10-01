@@ -1,0 +1,74 @@
+schemaVersion: '1.33'
+date: '2026-09-30'
+storage: Author forward/owner-side fields. Inverse fields are persisted in YAML and written with the forward field by the translator, Workbench or the regenerate script (W-275); the forward field wins when they disagree.
+paired:
+- {forward: subtypeOf, inverse: supertypeOf, from: any, to: any, sameClass: true}
+- {forward: hasPart, inverse: partOf, from: [Object], to: [Object]}
+- {forward: hasPort, inverse: portOf, from: any, to: [Port]}
+- {forward: hasFlow, inverse: flowOf, from: [Port], to: [Item Flow]}
+- {forward: exposes, inverse: exposedBy, from: [Port], to: [Port]}
+- {forward: hasChild, inverse: childOf, from: any, to: any, excludePairs: [[Object, Object]]}
+- {forward: includes, inverse: includedIn, from: any, to: any}
+- {forward: copyOf, inverse: hasCopy, from: any, to: any, sameClass: true}
+- {forward: dependsOn, inverse: dependencyOf, from: any, to: any}
+- {forward: derivedFrom, inverse: derivedBy, from: [Requirement], to: [Requirement]}
+- {forward: refines, inverse: refinedBy, from: [Requirement], to: [Requirement]}
+- {forward: drives, inverse: drivenBy, from: any, to: any}
+- {forward: references, inverse: referencedBy, from: [Requirement], to: [Requirement, Document]}
+- {forward: precedes, inverse: follows, from: any, to: any, sameClass: true}
+- {forward: triggeredBy, inverse: triggers, from: [Function, Design, State], to: [Function, Design, State, Item Flow]}
+- {forward: supersedes, inverse: supersededBy, from: any, to: any, sameClass: true}
+- {forward: describes, inverse: describedBy, from: [Info, Artifact, Document], to: any}
+- {forward: tracesTo, inverse: tracesFrom, from: any, to: any, provisional: true}
+- {forward: performs, inverse: performedBy, from: [Object], to: [Function]}
+- {forward: hasDesign, inverse: designOf, from: [Object, Document], to: [Design]}
+- {forward: appliesTo, inverse: applies, from: [Requirement], to: any}
+- {forward: satisfies, inverse: satisfiedBy, from: [Function, Design], to: [Requirement]}
+- {forward: verifies, inverse: verifiedBy, from: [Verification], to: [Requirement]}
+- {forward: realizedBy, inverse: realizes, from: [Use Case], to: [Function, Design]}
+- {forward: optionOf, inverse: hasOption, from: [Use Case], to: [Use Case]}
+- {forward: affects, inverse: affectedBy, from: [Issue, Failure Mode, Use Case], to: any}
+temporaryPairs:
+- forward: hasClassifier
+  inverse: classifierOf
+  from: [Port, Object]
+  to: [Object, Item Flow]
+  meaning: 'The element named by the EA Classifier field of a Port, or by the PDATA1 typing link of a Port when the target is not a Port note (a Hardware Component or a Signal). Written by the translator on the Port note; inverse generated. Temporary (W-125, W-127): kept to keep the import clean and resolved in a later stage into copyOf/hasCopy or another relationship, then removed.'
+symmetric:
+- field: conflictsWith
+  between: any
+  meaning: Mutual compatibility conflict; generated mirror is derivative. Kept though nothing writes it yet (W-192).
+- field: interfaces
+  between: [Port]
+  meaning: 'Two Ports, or two notes, that interact physically or logically. EA Connector with no stereotype (W-153). Written on both end notes because the relationship has no direction (Direction is Unspecified on every EA Connector).'
+- field: equals
+  between: [Port]
+  meaning: 'Two Ports that are the same port at two levels of the system, from the EA BindingConnector (W-153). Written on both end notes. Temporary: stage 1 keeps the EA meaning, and stage 2 turns each one into exposes/exposedBy on the outer and inner Port (Post-Import Task 8), then removes the field.'
+  temporary: true
+oneWay:
+- {field: participants, from: [Use Case], to: [Object, Actor, Function, Port, Document]}
+- {field: transmits, from: [Port], to: [Item Flow]}
+- {field: receives, from: [Port], to: [Item Flow]}
+- {field: exchanges, from: [Port], to: [Item Flow]}
+- {field: initialState, from: [State Machine], to: [State]}
+- {field: finalState, from: [State Machine], to: [State]}
+guidance:
+  states: 'initialState and finalState are one-way, written on a State Machine and pointing at the State it starts in and the States it can end in; finalState may hold several values. Nothing in the import writes them; Post-Import Task 7 item 14 replaces the initial and final node notes with them (W-285).'
+  affects: 'affects/affectedBy: the source has an impact on a target that exists anyway, good or bad (for example an Issue or Failure Mode on the element it harms, or normal use in a Use Case on the parts it loads or wears); written on the source, affectedBy generated. drives is different: the target exists or happens because of the source. To design against an impact, prefer Use Case drives Requirement, applied to the element (W-284).'
+  triggeredBy: 'triggeredBy/triggers: what starts a behavior. triggeredBy is written on the triggered Function, Design or State and points at the Function, Design, State or Item Flow (a signal or event) that starts it; triggers is generated (W-282). It is element-level: it does not say which transition a trigger belongs to; the transition-level trigger, guard and effect text stays as source-section lines on the state before (W-175). Guards stay as text for now (W-282).'
+  exposes: 'exposes/exposedBy: one Port is also exposed at a higher level of the system; exposes is written on the outer Port and points at the inner Port, exposedBy is generated (W-281). Post-Import Task 8 turns the temporary equals into exposes, or into interfaces when it is not an exposure.'
+  endpoints: 'Endpoint rules (W-272, W-277): from is the class of the note the field is written on, to is the class of the note it points at; any means every class; sameClass means both notes have the same class; excludePairs lists [from, to] pairs that must use another field. The rules say what a person or AI may create; the translator writes links as drawn in EA and an off-rule link is a Review finding, not an error. A relationship with no from/to has no rule written yet. provisional means every link of it is a Review finding until it is replaced by a stronger relationship; a person, AI or Workbench may create it when no relationship fits yet (W-288, replacing importOnly from W-283).'
+  includes: 'includes/includedIn is membership without ownership: the whole includes a member it does not own, and a member may be included in several wholes. Written on the whole. hasChild is ownership (one parent); hasPart is Object assembly (W-277).'
+  connector: 'interfaces and equals are symmetric fields written on both end notes (W-153). equals is temporary and is resolved after the import (Post-Import Task 8).'
+  refine: 'refines/refinedBy is between two requirements: the source requirement adds precision to the target (W-165).'
+  drives: 'drives/drivenBy: the element on which it is written gives rise to or causes the other; drives is written on the source, drivenBy generated. First used for Use Case to Requirement (W-165); any to any since W-283 so it also covers causes.'
+  references: 'references/referencedBy: one note mentions another, written on the note that mentions it. First used for requirements that mention other requirements (W-167); general enough for a requirement that cites a standard clause or a document.'
+  participants: 'participants is one-way, written only on the Use Case, listing the Objects, Actors, Functions and Ports that take part in it; nothing is written back on them, so their properties are not overloaded (W-172).'
+  precedes: 'precedes/follows is the order of steps in a flow: precedes is written on the step before, pointing at the step after; follows is generated. Used for EA ControlFlow (W-174) and StateFlow (W-175); a guard, trigger or effect is a source-section line on the step before.'
+  data: 'transmits, receives and exchanges say what data a Port sends, takes in, or both, and point at the Item Flow note for that data (W-177). The Port already connects to something (interfaces); these fields define what is exchanged with it. transmits is the source or out end, receives the target or in end; for an inout flow both Ports get exchanges. One-way: nothing is written back on the Item Flow note, which shows the Ports in its backlinks and can be queried.'
+  tracesTo: 'Provisional link: the two notes are related and the relationship is not chosen yet. The translator writes it for EA connectors that fit no rule; a person, AI or Workbench writes it when unsure. Every link is a Review finding until replaced by a stronger relationship (W-288).'
+  composition: 'hasPart/partOf is for Object notes only, the assembly and block relationship (W-149). hasChild/childOf is the generic parent and child link for every other nesting, written on the owner; it carries the EA owner (ParentID) of an element (W-149) and the 252 independent Nesting connectors (W-151); no placement link is written where the child is subtypeOf its owner (W-178).'
+  flow: 'hasFlow/flowOf is ownership: a Port note has the Item Flow notes made from its pins; direction is carried by transmits, receives or exchanges on the Port (W-177).'
+  copy: copyOf/hasCopy says a note is a copy of another element and lets a reader trace back to the original note. It is general, not limited to Ports (W-124).
+  supersedes: 'supersedes/supersededBy is for a note that has been replaced by another note: supersedes is written on the replacing note and points at the note it replaces; supersededBy is generated on the replaced note (W-191). Nothing in the import writes it.'
+  crossVault: Relationship semantics do not change across vault boundaries. Store durable note references by uid when the target is in another vault.
