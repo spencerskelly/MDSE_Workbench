@@ -40,7 +40,7 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
 - **Explore structure of current note**: follows `hasPart`, `hasChild`, `includes`, `hasPort`, `exposes`, `hasFlow` two levels down as a left-to-right tree. Each note shows up to 12 children; the 80-note limit is shared evenly across each level and wins over depth (WB-082); "+N more" shows what was left out. One label per relationship group, colored by relationship.
 - **Check whether this view is current**: compares the open generated view with the model and offers to refresh it.
 - **Relate current note to another note**: pick the other note by name (type and id shown beside it), then pick from only the relationships the endpoint rules allow, in either direction. `tracesTo` is offered last, as the provisional relationship (W-288).
-- **Undo last relationship change**
+- **Undo last relationship change**: reverses both notes of the last relate, and refuses if either note was edited since. Use this, not Cmd/Ctrl-Z, which only undoes one open note and can leave a pair half-written. Give it a hotkey under Settings → Hotkeys. History is kept in memory and clears when Obsidian restarts.
 - **Check Canvas support (Phase 0 probe)**
 
 Generated views go to `Workbench Views/` (configurable). Add that folder to the vault's `.gitignore` (WB-036).

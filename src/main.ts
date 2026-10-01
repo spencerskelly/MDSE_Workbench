@@ -264,16 +264,16 @@ export default class MdseWorkbench extends Plugin {
       const [owner, target] = o.ownerIsFirst ? [a, b] : [b, a];
       try {
         const tx = await this.writer!.add(o.def, owner.path, target.path);
-        new Notice(tx.files.length ? `Added: ${owner.name} ${o.def.field} ${target.name}.` : "That link already exists.");
+        new Notice(tx.files.length ? `Added: ${owner.name} ${o.def.field} ${target.name}.` : "That link already exists.", 8000);
       } catch (e) {
-        new Notice(`Not added: ${(e as Error).message}`);
+        new Notice(`Not added: ${(e as Error).message}`, 15000);
       }
     }).open();
   }
 
   async undo(): Promise<void> {
     if (!this.writer) return;
-    new Notice(await this.writer.undo());
+    new Notice(await this.writer.undo(), 15000);
   }
 }
 
