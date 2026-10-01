@@ -350,3 +350,25 @@ test("requirements view: a missing requirement or source shows as undefined; sta
     assert.ok(!colors.has("1"), `${profile.name}: no red`);
   }
 });
+
+test("detail popup helpers: body without properties, card position, node match, undefined name, property rows (WB-099)", async () => {
+  const { bodyOf, parseTranslate, nodeAt, undefinedName, propertyRows } = await import("../src/core/detail");
+  const text = "---\ntype: Function\nid: F-1\n---\n\n# Title\n\nBody line.\n";
+  assert.equal(bodyOf(text), "# Title\n\nBody line.\n");
+  assert.equal(bodyOf(text, text.indexOf("---\n\n# Title") + 3), "# Title\n\nBody line.\n");
+  assert.equal(bodyOf("No properties here\n"), "No properties here\n");
+  assert.deepEqual(parseTranslate("transform: translate(460px, -80.5px); width: 300px;"), { x: 460, y: -80.5 });
+  assert.equal(parseTranslate("width: 300px"), null);
+  const nodes = [
+    { id: "a", type: "file", x: 0, y: 0, width: 300, height: 80, file: "A.md" },
+    { id: "b", type: "text", x: 460, y: 100, width: 300, height: 80, text: "**Ghost**\n*undefined*" },
+  ];
+  assert.equal(nodeAt(nodes, 460, 100.4)?.id, "b");
+  assert.equal(nodeAt(nodes, 461.5, 100), undefined);
+  assert.equal(undefinedName(nodes[1].text), "Ghost");
+  assert.equal(undefinedName("**+3 more**"), null);
+  const rows = propertyRows({ type: "Object", hasPart: ["[[Wire]]", "[[Jacket|the jacket]]"], tags: [], note: "see [[X#Sec]] now", position: {} }, new Set(["id"]));
+  assert.deepEqual(rows.map((r) => r.key), ["type", "hasPart", "note"]);
+  assert.deepEqual(rows[1].parts, [{ text: "Wire", link: "Wire" }, { text: ", " }, { text: "the jacket", link: "Jacket" }]);
+  assert.deepEqual(rows[2].parts, [{ text: "see " }, { text: "X", link: "X" }, { text: " now" }]);
+});

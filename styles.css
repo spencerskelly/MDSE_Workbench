@@ -26,3 +26,44 @@ table.mdse-finding { border-collapse: collapse; width: 100%; margin-bottom: var(
 .mdse-options { margin: var(--size-4-2) 0; }
 .mdse-option { display: flex; gap: 0.5em; align-items: center; padding: 2px 0; }
 .mdse-buttons { display: flex; gap: var(--size-4-2); margin-bottom: var(--size-4-2); }
+
+/* Note detail popup (WB-099) */
+.mdse-detail {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  width: 440px;
+  min-width: 280px;
+  max-width: 90vw;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  resize: both;
+  z-index: var(--layer-popover, 40);
+  padding: 0 14px 14px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: var(--shadow-l);
+  user-select: text;
+}
+.mdse-detail-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0 6px;
+  background: var(--background-primary);
+  z-index: 1;
+}
+.mdse-detail-title { flex: 1; font-weight: var(--font-bold); font-size: var(--font-ui-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdse-detail-btn { padding: 2px 8px; height: auto; font-size: var(--font-ui-small); }
+.mdse-detail-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.mdse-detail-chip { padding: 1px 8px; border-radius: 10px; background: var(--background-secondary); color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.mdse-detail-undefined { background: rgba(var(--color-red-rgb), 0.2); color: var(--text-normal); }
+.mdse-detail-props { margin-bottom: 8px; font-size: var(--font-ui-smaller); }
+.mdse-detail-props summary { cursor: pointer; color: var(--text-muted); }
+.mdse-detail-props th { text-align: left; padding: 1px 10px 1px 0; color: var(--text-muted); font-weight: var(--font-normal); vertical-align: top; white-space: nowrap; }
+.mdse-detail-props td { padding: 1px 0; word-break: break-word; }
+.mdse-detail-body { font-size: var(--font-text-size, 15px); }
+.mdse-detail-empty { color: var(--text-muted); }

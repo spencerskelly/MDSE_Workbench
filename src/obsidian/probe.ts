@@ -35,8 +35,18 @@ export function probeReport(app: App): Array<[string, string, boolean?]> {
     ["canvas.requestSave", has(c.requestSave)],
     ["canvas.getData", has(c.getData)],
     ["Selected notes now", String(selectedFiles(c).length)],
+    ["Card elements (note details popup)", cardElements(c)],
   ];
   return rows;
+}
+
+/** Does each Canvas card object expose its element and file, which the note details popup uses? */
+function cardElements(c: AnyCanvas): string {
+  const nodes: unknown = c.nodes;
+  const list: any[] = nodes instanceof Map ? [...nodes.values()] : [];
+  if (!list.length) return "no cards to inspect";
+  const withEl = list.filter((n) => n?.nodeEl instanceof HTMLElement).length;
+  return `${withEl} of ${list.length} cards have an element`;
 }
 
 function sel(c: AnyCanvas): string {

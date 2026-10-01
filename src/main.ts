@@ -11,6 +11,8 @@ import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewPr
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal } from "./obsidian/ui";
+import { NoteDetailPanel } from "./obsidian/detail";
+import { nodeAt, parseTranslate, undefinedName, type CanvasNodeJson } from "./core/detail";
 import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
 
@@ -23,6 +25,8 @@ interface Settings {
   /** Generated views go here; keep it out of Git (WB-036). Default chosen at build (WB-073). */
   viewsFolder: string;
   canvasProbe: boolean;
+  /** Clicking a note on a generated view opens its details in a popup (WB-099). */
+  showDetails: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -30,6 +34,7 @@ const DEFAULTS: Settings = {
   elementTypesPath: "99_System/03_Schemas/element-types.yaml",
   viewsFolder: "Workbench Views",
   canvasProbe: true,
+  showDetails: true,
 };
 
 interface Stored {
@@ -45,6 +50,7 @@ export default class MdseWorkbench extends Plugin {
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
   lastFindingsMs = 0;
+  detail: NoteDetailPanel | null = null;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
   private lastChange = Date.now();
   private unloaded = false;
@@ -54,6 +60,9 @@ export default class MdseWorkbench extends Plugin {
     this.settings = { ...DEFAULTS, ...(stored.settings ?? {}) };
     this.views = stored.views ?? {};
     this.addSettingTab(new WorkbenchSettings(this.app, this));
+    this.detail = new NoteDetailPanel(this.app, () => new Set(this.schema ? [...this.schema.byField.keys(), ...this.schema.byInverse.keys()] : []));
+    this.addChild(this.detail);
+    this.registerDetailClicks();
 
     this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => this.diagnostics() });
     this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
@@ -262,6 +271,74 @@ export default class MdseWorkbench extends Plugin {
     new Notice(`${view.profile}: ${view.depthOf.size} notes${view.undefinedCount ? ` (${view.undefinedCount} undefined)` : ""} in ${ms} ms${view.capReached ? `, stopped at the ${profile.nodeCap}-note limit` : ""}.`);
   }
 
+  /**
+   * Clicking a card on a generated view opens its details (WB-099). It only watches clicks and never stops
+   * them, so selecting and moving cards on the canvas works as before. It relies on Canvas internals that
+   * Obsidian does not document (the card elements and `canvas.nodes`), so a fallback reads the card's
+   * position and matches it to the canvas file; check it again on each Obsidian version.
+   */
+  private registerDetailClicks(): void {
+    let down: { x: number; y: number } | null = null;
+    this.registerDomEvent(document, "pointerdown", (e) => (down = { x: e.clientX, y: e.clientY }), true);
+    this.registerDomEvent(
+      document,
+      "click",
+      (e) => {
+        const moved = down ? Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5 : false;
+        if (!this.settings.showDetails || moved || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+        void this.onCanvasClick(e.target as HTMLElement | null);
+      },
+      true,
+    );
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf?.view.getViewType() !== "canvas") this.detail?.close();
+      }),
+    );
+  }
+
+  private isWorkbenchCanvas(file: TFile | null | undefined): boolean {
+    if (!file) return false;
+    return !!this.views[file.path] || file.path.startsWith(normalizePath(this.settings.viewsFolder) + "/");
+  }
+
+  private async onCanvasClick(target: HTMLElement | null): Promise<void> {
+    const cardEl = target?.closest?.(".canvas-node") as HTMLElement | null;
+    if (!cardEl || target?.closest("a, button, input, textarea")) return;
+    const view = this.app.workspace.getLeavesOfType("canvas").map((l) => l.view as any).find((v) => v?.containerEl?.contains(cardEl)); // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!view || !this.isWorkbenchCanvas(view.file)) return;
+    let file: TFile | null = null;
+    let missing: string | null = null;
+    // 1. Obsidian's own card objects (undocumented).
+    try {
+      const nodes: unknown = view.canvas?.nodes;
+      const list: any[] = nodes instanceof Map ? [...nodes.values()] : Array.isArray(nodes) ? nodes : []; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const node = list.find((n) => n?.nodeEl === cardEl);
+      if (node?.file instanceof TFile) file = node.file;
+      else if (node) missing = undefinedName(node.text);
+    } catch {
+      /* fall through to the position match */
+    }
+    // 2. Fallback: the card's position, matched to the canvas file's JSON.
+    if (!file && missing === null) {
+      const pos = parseTranslate(cardEl.getAttribute("style"));
+      if (pos) {
+        try {
+          const json = JSON.parse(await this.app.vault.cachedRead(view.file)) as { nodes?: CanvasNodeJson[] };
+          const n = nodeAt(json.nodes ?? [], pos.x, pos.y);
+          if (n?.file) {
+            const f = this.app.vault.getAbstractFileByPath(n.file);
+            if (f instanceof TFile) file = f;
+          } else if (n) missing = undefinedName(n.text);
+        } catch {
+          /* nothing to show */
+        }
+      }
+    }
+    if (file) await this.detail?.show(file);
+    else if (missing) this.detail?.showUndefined(missing);
+  }
+
   async checkView(): Promise<void> {
     if (!this.ready()) return;
     const f = this.app.workspace.getActiveFile();
@@ -341,6 +418,16 @@ class WorkbenchSettings extends PluginSettingTab {
     text("Relationship schema", "Path to relationships.yaml in this vault.", "relationshipsPath");
     text("Element types", "Path to element-types.yaml in this vault.", "elementTypesPath");
     text("Generated views folder", "Generated canvases are written here. Add this folder to .gitignore.", "viewsFolder");
+    new Setting(containerEl)
+      .setName("Note details on click")
+      .setDesc("Clicking a note on a generated view (a canvas in the views folder) opens its properties and text in a popup. Uses Canvas internals that Obsidian does not document.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.showDetails).onChange(async (v) => {
+          this.plugin.settings.showDetails = v;
+          if (!v) this.plugin.detail?.close();
+          await this.plugin.saveAll();
+        }),
+      );
     new Setting(containerEl)
       .setName("Canvas probe")
       .setDesc("Adds 'Relate selected notes' to the canvas right-click menu, to test whether Canvas editing is possible (Phase 0). Reload Obsidian after changing.")
