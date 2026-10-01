@@ -41,33 +41,57 @@ export function undefinedName(text: string | undefined): string | null {
 
 export interface PropertyRow {
   key: string;
+  /** Distinct entries in the row. */
+  count: number;
   /** Plain text and note links in order, so the popup can make the links clickable. */
   parts: Array<{ text: string; link?: string }>;
 }
 
-/** One row per property: arrays joined with commas, `[[note]]` and `[[note|alias]]` split out as links. */
-export function propertyRows(fm: Record<string, unknown> | null | undefined, skip: ReadonlySet<string> = new Set()): PropertyRow[] {
+function linkParts(item: unknown): PropertyRow["parts"] {
+  const s = typeof item === "object" ? JSON.stringify(item) : String(item);
+  const parts: PropertyRow["parts"] = [];
+  const re = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    if (m.index > last) parts.push({ text: s.slice(last, m.index) });
+    parts.push({ text: (m[2] ?? m[1]).trim(), link: m[1].trim() });
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) parts.push({ text: s.slice(last) });
+  return parts;
+}
+
+function rowsFrom(fm: Record<string, unknown> | null | undefined, include: (key: string) => boolean, collapse: boolean): PropertyRow[] {
   if (!fm) return [];
   const rows: PropertyRow[] = [];
   for (const [key, value] of Object.entries(fm)) {
-    if (key === "position" || skip.has(key)) continue;
-    const items = Array.isArray(value) ? value : [value];
+    if (key === "position" || !include(key)) continue;
+    let items = (Array.isArray(value) ? value : [value]).filter((v) => v !== null && v !== undefined && v !== "");
+    // A note listed several times is one entry with its quantity (WB-091, WB-100).
+    const counts = new Map<string, number>();
+    if (collapse) {
+      for (const v of items) counts.set(String(v), (counts.get(String(v)) ?? 0) + 1);
+      items = [...new Set(items.map(String))];
+    }
     const parts: PropertyRow["parts"] = [];
     items.forEach((item, i) => {
-      if (item === null || item === undefined || item === "") return;
-      if (i > 0 && parts.length) parts.push({ text: ", " });
-      const s = typeof item === "object" ? JSON.stringify(item) : String(item);
-      const re = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/g;
-      let last = 0;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(s))) {
-        if (m.index > last) parts.push({ text: s.slice(last, m.index) });
-        parts.push({ text: (m[2] ?? m[1]).trim(), link: m[1].trim() });
-        last = m.index + m[0].length;
-      }
-      if (last < s.length) parts.push({ text: s.slice(last) });
+      if (i > 0) parts.push({ text: ", " });
+      parts.push(...linkParts(item));
+      const n = counts.get(String(item)) ?? 1;
+      if (n > 1) parts.push({ text: ` ×${n}` });
     });
-    if (parts.length) rows.push({ key, parts });
+    if (parts.length) rows.push({ key, parts, count: items.length });
   }
   return rows;
+}
+
+/** One row per property, skipping some: arrays joined with commas, `[[note]]` and `[[note|alias]]` split out as links. */
+export function propertyRows(fm: Record<string, unknown> | null | undefined, skip: ReadonlySet<string> = new Set()): PropertyRow[] {
+  return rowsFrom(fm, (k) => !skip.has(k), false);
+}
+
+/** One row per relationship field of the note, a note listed several times shown once with its quantity (×27). */
+export function relationshipRows(fm: Record<string, unknown> | null | undefined, fields: ReadonlySet<string>): PropertyRow[] {
+  return rowsFrom(fm, (k) => fields.has(k), true);
 }

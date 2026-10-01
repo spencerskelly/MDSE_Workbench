@@ -4,7 +4,7 @@
  * the canvas is used, and follows the next note clicked. Links inside it open in the same panel.
  */
 import { App, Component, MarkdownRenderer, TFile } from "obsidian";
-import { bodyOf, propertyRows } from "../core/detail";
+import { bodyOf, propertyRows, relationshipRows, type PropertyRow } from "../core/detail";
 
 export class NoteDetailPanel extends Component {
   private el: HTMLElement | null = null;
@@ -66,21 +66,9 @@ export class NoteDetailPanel extends Component {
       if (v !== undefined && v !== null && String(v) !== "") chips.createSpan({ cls: "mdse-detail-chip", text: k === "type" || k === "subtype" ? String(v) : `${k} ${String(v)}` });
     }
 
-    const rows = propertyRows(fm, this.relationFields());
-    if (rows.length) {
-      const details = root.createEl("details", { cls: "mdse-detail-props" });
-      details.createEl("summary", { text: "Properties" });
-      const table = details.createEl("table");
-      for (const r of rows) {
-        const tr = table.createEl("tr");
-        tr.createEl("th", { text: r.key });
-        const td = tr.createEl("td");
-        for (const p of r.parts) {
-          if (p.link) this.link(td, p.text, p.link, file.path);
-          else td.appendText(p.text);
-        }
-      }
-    }
+    const fields = this.relationFields();
+    this.section(root, "Properties", propertyRows(fm, fields), file.path);
+    this.section(root, "Relationships", relationshipRows(fm, fields), file.path);
 
     const body = root.createDiv({ cls: "mdse-detail-body markdown-rendered" });
     const md = bodyOf(text, cache?.frontmatterPosition?.end.offset);
@@ -137,7 +125,31 @@ export class NoteDetailPanel extends Component {
     return this.el;
   }
 
+  /** A collapsed section (a dropdown) with one row per property or relationship. */
+  private section(root: HTMLElement, name: string, rows: PropertyRow[], from: string): void {
+    if (!rows.length) return;
+    const total = rows.reduce((n, r) => n + r.count, 0);
+    const details = root.createEl("details", { cls: "mdse-detail-props" });
+    details.createEl("summary", { text: `${name} (${total})` });
+    const table = details.createEl("table");
+    for (const r of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("th", { text: r.count > 1 ? `${r.key} (${r.count})` : r.key });
+      const td = tr.createEl("td");
+      for (const p of r.parts) {
+        if (p.link) this.link(td, p.text, p.link, from);
+        else td.appendText(p.text);
+      }
+    }
+  }
+
   private link(parent: HTMLElement, text: string, linktext: string, from: string): void {
+    const exists = !!this.app.metadataCache.getFirstLinkpathDest(linktext, from);
+    if (!exists) {
+      // A note that does not exist yet (WB-092): shown, not clickable.
+      parent.createSpan({ text, cls: "mdse-detail-missing", attr: { title: "undefined: no note with this name yet" } });
+      return;
+    }
     const a = parent.createEl("a", { text, cls: "internal-link", href: "#" });
     a.onclick = (e) => {
       e.preventDefault();

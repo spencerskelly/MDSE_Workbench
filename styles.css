@@ -67,3 +67,5 @@ table.mdse-finding { border-collapse: collapse; width: 100%; margin-bottom: var(
 .mdse-detail-props td { padding: 1px 0; word-break: break-word; }
 .mdse-detail-body { font-size: var(--font-text-size, 15px); }
 .mdse-detail-empty { color: var(--text-muted); }
+
+.mdse-detail-missing { color: var(--text-error); text-decoration: underline dotted; cursor: default; }

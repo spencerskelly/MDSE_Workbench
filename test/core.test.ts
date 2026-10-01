@@ -372,3 +372,13 @@ test("detail popup helpers: body without properties, card position, node match, 
   assert.deepEqual(rows[1].parts, [{ text: "Wire", link: "Wire" }, { text: ", " }, { text: "the jacket", link: "Jacket" }]);
   assert.deepEqual(rows[2].parts, [{ text: "see " }, { text: "X", link: "X" }, { text: " now" }]);
 });
+
+test("detail popup relationships: only relationship fields, a repeated link once with its quantity (WB-100)", async () => {
+  const { propertyRows, relationshipRows } = await import("../src/core/detail");
+  const fm = { type: "Object", id: "O-1", hasPart: ["[[Wire]]", "[[Wire]]", "[[Wire]]", "[[Jacket]]"], hasPort: ["[[P1]]"], partOf: [], tags: ["a"] };
+  const fields = new Set(["hasPart", "hasPort", "partOf"]);
+  const rel = relationshipRows(fm, fields);
+  assert.deepEqual(rel.map((r) => [r.key, r.count]), [["hasPart", 2], ["hasPort", 1]], "empty partOf is left out");
+  assert.deepEqual(rel[0].parts, [{ text: "Wire", link: "Wire" }, { text: " ×3" }, { text: ", " }, { text: "Jacket", link: "Jacket" }]);
+  assert.deepEqual(propertyRows(fm, fields).map((r) => r.key), ["type", "id", "tags"], "relationships are not repeated under Properties");
+});
