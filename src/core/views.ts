@@ -6,6 +6,12 @@ import type { Edge, ModelIndex } from "./model";
 
 export type Direction = "out" | "in";
 
+/** A linked note that does not exist yet is shown as an undefined card (WB-092). Its id is not a vault path. */
+const UNDEFINED = "undefined:";
+export const undefinedId = (link: string) => `${UNDEFINED}${link}`;
+export const isUndefinedId = (id: string) => id.startsWith(UNDEFINED);
+const undefinedName = (id: string) => id.slice(UNDEFINED.length);
+
 export interface ViewProfile {
   name: string;
   /** Relationship fields followed, in priority order. */
@@ -55,10 +61,12 @@ export interface ViewResult {
   /** Neighbors not shown, per note, because a bound was reached (WB-028). */
   omitted: Map<string, number>;
   capReached: boolean;
+  /** Undefined cards in the view (links to notes that do not exist, WB-092). */
+  undefinedCount: number;
 }
 
 export function traverse(index: ModelIndex, starts: string[], profile: ViewProfile): ViewResult {
-  const nameOf = (p: string) => index.notes.get(p)?.name ?? p;
+  const nameOf = (p: string) => (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
   const perParent = profile.perParent ?? Infinity;
   const depthOf = new Map<string, number>();
   const omitted = new Map<string, number>();
@@ -69,9 +77,9 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
   let frontier = [...new Set(starts)].filter((s) => index.notes.has(s));
   for (const s of frontier) depthOf.set(s, 0);
 
-  const neighbours = (p: string): Array<{ node: string; field: string }> => {
+  const neighbours = (p: string): Array<{ node: string; field: string; count?: number }> => {
     const seen = new Set<string>();
-    const out: Array<{ node: string; field: string }> = [];
+    const out: Array<{ node: string; field: string; count?: number }> = [];
     for (const step of profile.steps) {
       const edges = step.direction === "out" ? index.out(p) : index.in(p);
       const next = edges
@@ -83,6 +91,19 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
         seen.add(n);
         out.push({ node: n, field: step.field });
       }
+      // Links to notes that do not exist yet: undefined cards, after the defined ones in this field (WB-092).
+      if (step.direction === "out") {
+        const missing = new Map<string, number>();
+        for (const b of index.notes.get(p)?.broken ?? []) {
+          if (b.field === step.field) missing.set(b.link, (missing.get(b.link) ?? 0) + 1);
+        }
+        for (const [link, count] of [...missing].sort((a, b) => a[0].localeCompare(b[0]))) {
+          const id = undefinedId(link);
+          if (seen.has(id)) continue;
+          seen.add(id);
+          out.push({ node: id, field: step.field, count });
+        }
+      }
     }
     return out;
   };
@@ -91,7 +112,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
   for (let d = 0; d < profile.depth && frontier.length; d++) {
     // Candidates per parent, in relationship order then name.
     const queues = frontier.map((p) => ({ p, q: neighbours(p).filter((n) => !depthOf.has(n.node)), shown: 0 }));
-    const picked = new Map<string, Array<{ node: string; field: string }>>();
+    const picked = new Map<string, Array<{ node: string; field: string; count?: number }>>();
     // Round-robin across the parents of this level, so the node cap is shared fairly
     // instead of being spent on the first few parents.
     let progress = true;
@@ -119,7 +140,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
       }
       // Keep each parent's children in relationship-then-name order.
       for (const n of picked.get(s.p) ?? []) {
-        tree.push({ parent: s.p, child: n.node, field: n.field, count: index.notes.get(s.p)?.repeat?.get(`${n.field}|${n.node}`) ?? 1 });
+        tree.push({ parent: s.p, child: n.node, field: n.field, count: n.count ?? index.notes.get(s.p)?.repeat?.get(`${n.field}|${n.node}`) ?? 1 });
         next.push(n.node);
       }
     }
@@ -142,7 +163,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
       if (!treeKey.has(`${e.from}|${e.field}|${e.to}`)) cross.push(e);
     }
   }
-  return { profile: profile.name, starts: [...depthOf.keys()].filter((p) => depthOf.get(p) === 0), depthOf, tree, edges, cross, omitted, capReached };
+  return { profile: profile.name, starts: [...depthOf.keys()].filter((p) => depthOf.get(p) === 0), depthOf, tree, edges, cross, omitted, capReached, undefinedCount: [...depthOf.keys()].filter(isUndefinedId).length };
 }
 
 /** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
@@ -165,6 +186,8 @@ function edgeLabel(field: string, count: number): string | undefined {
   return text || undefined;
 }
 
+/** Canvas color 1 (red) marks a note that still has to be defined (WB-092). */
+const UNDEFINED_COLOR = "1";
 const NODE_W = 300;
 const NODE_H = 60;
 const COL_GAP = 160;
@@ -206,7 +229,7 @@ export interface CanvasData {
  * its children. One label per relationship group, colored by relationship. Deterministic.
  */
 export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfile = STRUCTURE_PROFILE): CanvasData {
-  const nameOf = (p: string) => index.notes.get(p)?.name ?? p;
+  const nameOf = (p: string) => (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
   const colorOf = new Map(profile.steps.map((s, i) => [s.field, PALETTE[i % PALETTE.length]]));
   const kids = new Map<string, TreeLink[]>();
   for (const l of view.tree) {
@@ -256,7 +279,9 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
     }
     const id = `n${nodes.length}`;
     idOf.set(p, id);
-    nodes.push({ id, type: "file", file: p, x, y: Math.round(centre - NODE_H / 2), width: NODE_W, height: NODE_H, color: depth === 0 ? "4" : undefined });
+    const y = Math.round(centre - NODE_H / 2);
+    if (isUndefinedId(p)) nodes.push({ id, type: "text", text: `**${undefinedName(p)}**\n*undefined*`, x, y, width: NODE_W, height: NODE_H, color: UNDEFINED_COLOR });
+    else nodes.push({ id, type: "file", file: p, x, y, width: NODE_W, height: NODE_H, color: depth === 0 ? "4" : undefined });
     // Point this note's child edges (the last children.length edges added at this level) at it.
     for (const e of edges) if (e.fromNode === "" && children.some((l) => idOf.get(l.child) === e.toNode)) e.fromNode = id;
     if (moreId) edges.push({ id: `e${edges.length}`, fromNode: id, toNode: moreId, fromSide: "right", toSide: "left" });

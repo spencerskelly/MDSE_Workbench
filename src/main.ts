@@ -242,7 +242,7 @@ export default class MdseWorkbench extends Plugin {
     await this.saveAll();
     const ms = Math.round(performance.now() - t0);
     await this.app.workspace.getLeaf(true).openFile(file);
-    new Notice(`${view.profile}: ${view.depthOf.size} notes in ${ms} ms${view.capReached ? `, stopped at the ${STRUCTURE_PROFILE.nodeCap}-note limit` : ""}.`);
+    new Notice(`${view.profile}: ${view.depthOf.size} notes${view.undefinedCount ? ` (${view.undefinedCount} undefined)` : ""} in ${ms} ms${view.capReached ? `, stopped at the ${STRUCTURE_PROFILE.nodeCap}-note limit` : ""}.`);
   }
 
   async checkView(): Promise<void> {

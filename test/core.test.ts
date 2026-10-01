@@ -158,3 +158,20 @@ test("quantity: a child listed several times is one card with a x-count label (W
   const once = indexOf(schema, [note("Top.md", "Object", { hasPart: ["Wire.md"] }), note("Wire.md", "Object")]);
   assert.notEqual(signature(v), signature(traverse(once, ["Top.md"], profile)));
 });
+
+test("undefined: a link to a note that does not exist is an undefined card, not an omission (WB-092)", () => {
+  const top = { ...note("Top.md", "Object", { hasPart: ["Real.md"] }), broken: [{ field: "hasPart", link: "Ghost" }, { field: "hasPart", link: "Ghost" }, { field: "hasPort", link: "Port x" }, { field: "subtypeOf", link: "Other" }] };
+  const idx = indexOf(schema, [top, note("Real.md", "Object")]);
+  const profile: ViewProfile = { name: "S", steps: [{ field: "hasPart", direction: "out" }, { field: "hasPort", direction: "out" }], depth: 1, nodeCap: 10 };
+  const v = traverse(idx, ["Top.md"], profile);
+  assert.equal(v.undefinedCount, 2, "Ghost and Port x; subtypeOf is not in the profile");
+  assert.equal(v.omitted.size, 0);
+  const ghost = v.tree.find((l) => l.child.endsWith("Ghost"))!;
+  assert.equal(ghost.count, 2);
+  const c = toCanvas(idx, v, profile);
+  const card = c.nodes.find((n) => n.type === "text" && n.text?.includes("Ghost"))!;
+  assert.ok(card.text!.includes("undefined") && card.color === "1");
+  assert.ok(c.nodes.filter((n) => n.type === "file").every((n) => n.file === "Top.md" || n.file === "Real.md"));
+  assert.equal(c.edges.find((e) => e.toNode === card.id)!.label, "×2");
+  assert.equal(idx.edgeCount(), 1, "Review counts unchanged");
+});
