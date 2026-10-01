@@ -13,6 +13,9 @@ import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal } from "./obsidian/ui";
 import { RelationshipWriter } from "./obsidian/writer";
 
+/** Quiet time with no cache activity before the first index build starts. */
+const QUIET_START_MS = 8000;
+
 interface Settings {
   relationshipsPath: string;
   elementTypesPath: string;
@@ -41,6 +44,9 @@ export default class MdseWorkbench extends Plugin {
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
   lastFindingsMs = 0;
+  /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
+  private lastChange = Date.now();
+  private unloaded = false;
 
   async onload(): Promise<void> {
     const stored = ((await this.loadData()) ?? {}) as Partial<Stored>;
@@ -77,7 +83,16 @@ export default class MdseWorkbench extends Plugin {
       registerSelectionMenu(this.app, (ref) => this.registerEvent(ref), (a, b) => this.relate(a.path, b.path));
     }
 
+    this.registerEvent(this.app.metadataCache.on("changed", () => (this.lastChange = Date.now())));
+    this.register(() => (this.unloaded = true));
     this.app.workspace.onLayoutReady(() => void this.start(false));
+  }
+
+  /** Resolves once the layout is ready and no note has changed for QUIET_START_MS. */
+  private async whenVaultQuiet(): Promise<void> {
+    while (!this.unloaded && Date.now() - this.lastChange < QUIET_START_MS) {
+      await new Promise((r) => window.setTimeout(r, 1000));
+    }
   }
 
   async saveAll(): Promise<void> {
@@ -129,19 +144,11 @@ export default class MdseWorkbench extends Plugin {
         }),
       );
       this.register(() => this.indexer?.dispose());
-      // Wait until Obsidian's own cache has caught up. On a vault opened for the first time
-      // that can take minutes; if it was already caught up, `resolved` may not fire again.
-      await new Promise<void>((res) => {
-        const ref = this.app.metadataCache.on("resolved", () => {
-          this.app.metadataCache.offref(ref);
-          res();
-        });
-        window.setTimeout(() => {
-          this.app.metadataCache.offref(ref);
-          res();
-        }, 5000);
-      });
-      new Notice("MDSE Workbench: indexing the vault. Diagnostics are available when it finishes.");
+      // Do nothing until Obsidian's own cache has finished and the vault has been quiet.
+      // On a large vault that first caching takes minutes; indexing alongside it made the app
+      // look frozen (0.0.4). No fixed timeout: a slow vault just starts later.
+      await this.whenVaultQuiet();
+      if (this.unloaded) return;
     } else {
       this.indexer.setSchema(schema);
     }
