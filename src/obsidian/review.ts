@@ -273,11 +273,18 @@ export class FindingModal extends Modal {
     if (f.category === "missingInverse" && from && to && index.isElement(from) && index.isElement(to)) {
       const def = this.host.schema().byField.get(f.field);
       if (def) {
-        actionLabel = "Write missing inverse";
-        action = async () => {
-          await this.host.writer().add(def, f.from, f.to as string);
-          new Notice(`Wrote the inverse on ${base(f.to as string)}.`, 8000);
-        };
+        // A link that already breaks its endpoint rule is a modeling error: writing its inverse would
+        // spread the error, and the writer refuses it. Offer no button (WB-094).
+        const problem = this.host.writer().check(def, f.from, f.to as string);
+        if (problem) {
+          contentEl.createEl("p", { text: `This link breaks its endpoint rule (${problem}), so its inverse is not written. Fix the link in the note, or leave it for the post-import review.`, cls: "mdse-muted" });
+        } else {
+          actionLabel = "Write missing inverse";
+          action = async () => {
+            await this.host.writer().add(def, f.from, f.to as string);
+            new Notice(`Wrote the inverse on ${base(f.to as string)}.`, 8000);
+          };
+        }
       }
     }
 
