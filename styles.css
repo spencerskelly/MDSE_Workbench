@@ -69,3 +69,14 @@ table.mdse-finding { border-collapse: collapse; width: 100%; margin-bottom: var(
 .mdse-detail-empty { color: var(--text-muted); }
 
 .mdse-detail-missing { color: var(--text-error); text-decoration: underline dotted; cursor: default; }
+
+/* Editing in the popup (WB-101) */
+.mdse-detail-editing { border-color: var(--interactive-accent); }
+.mdse-detail-chip-edit { background: var(--interactive-accent); color: var(--text-on-accent); }
+.mdse-detail-input { width: 100%; min-width: 8em; font-size: var(--font-ui-smaller); }
+.mdse-detail-text { width: 100%; resize: vertical; font-family: var(--font-monospace); font-size: var(--font-ui-small); line-height: 1.45; }
+.mdse-detail-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.mdse-detail-state { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.mdse-detail-x { padding: 0 6px; margin-left: 4px; height: 1.4em; line-height: 1; font-size: var(--font-ui-smaller); color: var(--text-muted); background: transparent; box-shadow: none; }
+.mdse-detail-x:hover { color: var(--text-error); }
+.mdse-detail-add { margin-top: 6px; }

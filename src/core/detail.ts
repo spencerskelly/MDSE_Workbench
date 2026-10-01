@@ -62,7 +62,7 @@ function linkParts(item: unknown): PropertyRow["parts"] {
   return parts;
 }
 
-function rowsFrom(fm: Record<string, unknown> | null | undefined, include: (key: string) => boolean, collapse: boolean): PropertyRow[] {
+function rowsFrom(fm: Record<string, unknown> | null | undefined, include: (key: string) => boolean, collapse: boolean, keepEmpty = false): PropertyRow[] {
   if (!fm) return [];
   const rows: PropertyRow[] = [];
   for (const [key, value] of Object.entries(fm)) {
@@ -81,14 +81,14 @@ function rowsFrom(fm: Record<string, unknown> | null | undefined, include: (key:
       const n = counts.get(String(item)) ?? 1;
       if (n > 1) parts.push({ text: ` ×${n}` });
     });
-    if (parts.length) rows.push({ key, parts, count: items.length });
+    if (parts.length || keepEmpty) rows.push({ key, parts, count: items.length });
   }
   return rows;
 }
 
-/** One row per property, skipping some: arrays joined with commas, `[[note]]` and `[[note|alias]]` split out as links. */
-export function propertyRows(fm: Record<string, unknown> | null | undefined, skip: ReadonlySet<string> = new Set()): PropertyRow[] {
-  return rowsFrom(fm, (k) => !skip.has(k), false);
+/** One row per property, skipping some (empty ones too unless `keepEmpty`, which editing needs): arrays joined with commas, `[[note]]` and `[[note|alias]]` split out as links. */
+export function propertyRows(fm: Record<string, unknown> | null | undefined, skip: ReadonlySet<string> = new Set(), keepEmpty = false): PropertyRow[] {
+  return rowsFrom(fm, (k) => !skip.has(k), false, keepEmpty);
 }
 
 /** One row per relationship field of the note, a note listed several times shown once with its quantity (×27). */

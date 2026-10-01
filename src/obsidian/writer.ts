@@ -4,6 +4,7 @@
  * No UI here; commands and, later, Canvas call it.
  */
 import { App, TFile } from "obsidian";
+import { bodyUnchanged, PROTECTED_PROPERTIES, replaceBody } from "../core/edit";
 import { addLink, canonicalOrder, orderProperties, removeLink } from "../core/frontmatter";
 import type { ModelIndex } from "../core/model";
 import { allows } from "../core/rules";
@@ -89,6 +90,67 @@ export class RelationshipWriter {
     const back = def.kind === "symmetric" ? def.field : def.inverse;
     if (back) await edit(target, back, owner);
     if (tx.files.length) this.undoStack.push(tx);
+    return tx;
+  }
+
+  /** Removes a link whose note does not exist (an undefined card, WB-092). There is no inverse to remove. */
+  async removeMissing(path: string, field: string, linkText: string): Promise<Transaction> {
+    const file = this.file(path);
+    const tx: Transaction = { label: `remove ${file.basename} ${field} ${linkText}`, files: [] };
+    const before = await this.app.vault.read(file);
+    let changed = false;
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      changed = removeLink(fm, field, linkText);
+    });
+    if (changed) tx.files.push({ path: file.path, before, after: await this.app.vault.read(file) });
+    if (tx.files.length) this.undoStack.push(tx);
+    return tx;
+  }
+
+  /**
+   * Sets one ordinary property (WB-101). Never `type`, `id` or `uid`, never a relationship field (those go
+   * through add and remove), and only a property the note already has: properties are not added or dropped
+   * (AI_INSTRUCTIONS).
+   */
+  async setProperty(path: string, key: string, value: unknown): Promise<Transaction> {
+    const schema = this.getSchema();
+    if (editingBlocked(schema)) throw new Error("The vault's schema is older than this Workbench supports, so editing is off.");
+    if (PROTECTED_PROPERTIES.has(key)) throw new Error(`${key} is never edited by hand.`);
+    if (schema.byField.has(key) || schema.byInverse.has(key)) throw new Error(`${key} is a relationship: change it under Relationships.`);
+    const file = this.file(path);
+    const tx: Transaction = { label: `set ${key} on ${file.basename}`, files: [] };
+    const before = await this.app.vault.read(file);
+    let present = true;
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (!(key in fm)) {
+        present = false;
+        return;
+      }
+      fm[key] = value;
+    });
+    if (!present) throw new Error(`${file.basename} has no ${key} property, and properties are not added by hand.`);
+    const after = await this.app.vault.read(file);
+    if (after !== before) {
+      tx.files.push({ path: file.path, before, after });
+      this.undoStack.push(tx);
+    }
+    return tx;
+  }
+
+  /** Replaces the note text below the properties. Refuses if the text changed since the popup loaded it. */
+  async setBody(path: string, loadedBody: string, newBody: string): Promise<Transaction> {
+    const schema = this.getSchema();
+    if (editingBlocked(schema)) throw new Error("The vault's schema is older than this Workbench supports, so editing is off.");
+    const file = this.file(path);
+    const tx: Transaction = { label: `edit text of ${file.basename}`, files: [] };
+    const before = await this.app.vault.read(file);
+    if (!bodyUnchanged(before, loadedBody)) throw new Error(`${file.basename} changed since the popup showed it. Close and reopen the popup, then edit again.`);
+    const after = replaceBody(before, newBody);
+    if (after !== before) {
+      await this.app.vault.modify(file, after);
+      tx.files.push({ path: file.path, before, after });
+      this.undoStack.push(tx);
+    }
     return tx;
   }
 

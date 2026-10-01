@@ -60,7 +60,14 @@ export default class MdseWorkbench extends Plugin {
     this.settings = { ...DEFAULTS, ...(stored.settings ?? {}) };
     this.views = stored.views ?? {};
     this.addSettingTab(new WorkbenchSettings(this.app, this));
-    this.detail = new NoteDetailPanel(this.app, () => new Set(this.schema ? [...this.schema.byField.keys(), ...this.schema.byInverse.keys()] : []));
+    this.detail = new NoteDetailPanel(this.app, {
+      schema: () => this.schema,
+      writer: () => this.writer,
+      editBlocked: () => (!this.isReady() ? "Workbench is still indexing; try again in a moment." : this.schema && editingBlocked(this.schema) ? "The vault's schema is older than this Workbench supports, so editing is off." : null),
+      elements: (exclude) => this.elements().filter((r) => r.path !== exclude),
+      relate: (a, b) => this.relate(a, b),
+      undo: () => this.undo(),
+    });
     this.addChild(this.detail);
     this.registerDetailClicks();
 
@@ -91,7 +98,7 @@ export default class MdseWorkbench extends Plugin {
       name: "Relate current note to another note",
       checkCallback: (checking) => this.withActive(checking, (f) => this.pickTargetThenRelate(f.path)),
     });
-    this.addCommand({ id: "undo", name: "Undo last relationship change", callback: () => this.undo() });
+    this.addCommand({ id: "undo", name: "Undo last Workbench edit", callback: () => this.undo() });
     this.addCommand({
       id: "probe-canvas",
       name: "Check Canvas support (Phase 0 probe)",
@@ -292,7 +299,7 @@ export default class MdseWorkbench extends Plugin {
     );
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
-        if (leaf?.view.getViewType() !== "canvas") this.detail?.close();
+        if (leaf?.view.getViewType() !== "canvas") this.detail?.closeIfClean();
       }),
     );
   }

@@ -382,3 +382,42 @@ test("detail popup relationships: only relationship fields, a repeated link once
   assert.deepEqual(rel[0].parts, [{ text: "Wire", link: "Wire" }, { text: " ×3" }, { text: ", " }, { text: "Jacket", link: "Jacket" }]);
   assert.deepEqual(propertyRows(fm, fields).map((r) => r.key), ["type", "id", "tags"], "relationships are not repeated under Properties");
 });
+
+test("popup editing rules: what may be edited and how it is read back (WB-101)", async () => {
+  const { propertyEditor, parseListInput, coerceValue, replaceBody, bodyUnchanged } = await import("../src/core/edit");
+  const { bodyOf } = await import("../src/core/detail");
+  const ctx = { relationFields: new Set(["hasPart", "partOf"]), translatedOnly: new Set(["eaType"]), subtypes: ["electrical", "part"] };
+  assert.equal(propertyEditor("type", "Object", ctx).kind, "readonly");
+  assert.equal(propertyEditor("id", "OBJ-1", ctx).kind, "readonly");
+  assert.equal(propertyEditor("uid", "2026", ctx).kind, "readonly");
+  assert.equal(propertyEditor("hasPart", [], ctx).kind, "readonly");
+  assert.equal(propertyEditor("eaType", "Class", ctx).kind, "readonly");
+  assert.equal(propertyEditor("status", "Draft", ctx).kind, "status");
+  assert.equal(propertyEditor("tags", [], ctx).kind, "list");
+  assert.equal(propertyEditor("other", "x", ctx).kind, "text");
+  assert.equal(propertyEditor("nested", { a: 1 }, ctx).kind, "readonly");
+  assert.deepEqual(propertyEditor("subtype", "part", ctx), { kind: "select", options: ["", "electrical", "part"] });
+  assert.deepEqual(propertyEditor("subtype", "legacy", ctx), { kind: "select", options: ["", "electrical", "part", "legacy"] }, "a value outside the schema stays selectable");
+  assert.equal(propertyEditor("subtype", "", { ...ctx, subtypes: [] }).kind, "readonly");
+  assert.equal(propertyEditor("subtype", "", { ...ctx, subtypes: null }).kind, "readonly");
+  assert.deepEqual(parseListInput(" a, b ,, c, a "), ["a", "b", "c"]);
+  assert.deepEqual(parseListInput(""), []);
+  assert.equal(coerceValue(3, " 7 "), 7);
+  assert.equal(coerceValue(3, "x"), "x");
+  assert.equal(coerceValue(true, "false"), false);
+  assert.equal(coerceValue("Draft", " Active "), "Active");
+  const text = '---\ntype: "State"\nid: S-1\n---\n\n# Title\n\nOld body.\n';
+  assert.equal(replaceBody(text, bodyOf(text)), text, "saving an unchanged body writes the same file");
+  assert.equal(replaceBody(text, "# Title\n\nNew body.\n"), '---\ntype: "State"\nid: S-1\n---\n\n# Title\n\nNew body.\n', "properties block kept byte for byte");
+  assert.equal(replaceBody("Plain note\n", "Changed\n"), "Changed\n");
+  assert.equal(replaceBody("---\na: 1\n---\nTight\n", "Looser\n"), "---\na: 1\n---\nLooser\n", "no blank line stays none");
+  assert.ok(bodyUnchanged(text, "# Title\n\nOld body.\n"));
+  assert.ok(!bodyUnchanged(text.replace("Old", "Edited"), "# Title\n\nOld body.\n"));
+});
+
+test("popup editing: empty properties get a row only in edit mode, so they can be filled in (WB-101)", async () => {
+  const { propertyRows } = await import("../src/core/detail");
+  const fm = { type: "Requirement", subtype: "", status: "Draft", tags: [] };
+  assert.deepEqual(propertyRows(fm).map((r) => r.key), ["type", "status"]);
+  assert.deepEqual(propertyRows(fm, new Set(), true).map((r) => r.key), ["type", "subtype", "status", "tags"]);
+});
