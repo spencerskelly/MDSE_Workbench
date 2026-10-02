@@ -86,6 +86,9 @@ test("frontmatter: add, dedupe, sort and order properties", () => {
   assert.deepEqual(fm.satisfies, ["[[Alpha]]", "[[Zeta]]"]);
   orderProperties(fm, canonicalOrder(schema));
   assert.deepEqual(Object.keys(fm), ["type", "id", "tags", "satisfies", "custom"]);
+  const withAbstract: Record<string, unknown> = { satisfies: ["[[Zeta]]"], abstract: true, tags: [], type: "Function", id: "FUNC-00002" };
+  orderProperties(withAbstract, canonicalOrder(schema));
+  assert.deepEqual(Object.keys(withAbstract), ["type", "id", "tags", "abstract", "satisfies"], "abstract ordering");
   assert.ok(removeLink(fm, "satisfies", "Zeta"));
   assert.equal(linkTarget("[[A b|alias]]"), "A b");
 });
