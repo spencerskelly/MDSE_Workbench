@@ -68,7 +68,7 @@ function rowsFrom(fm: Record<string, unknown> | null | undefined, include: (key:
   for (const [key, value] of Object.entries(fm)) {
     if (key === "position" || !include(key)) continue;
     let items = (Array.isArray(value) ? value : [value]).filter((v) => v !== null && v !== undefined && v !== "");
-    // A note listed several times is one entry with its quantity (WB-091, WB-100).
+    // A note listed several times is one entry with explicit duplicate-source evidence. This is not engineering quantity.
     const counts = new Map<string, number>();
     if (collapse) {
       for (const v of items) counts.set(String(v), (counts.get(String(v)) ?? 0) + 1);
@@ -79,7 +79,7 @@ function rowsFrom(fm: Record<string, unknown> | null | undefined, include: (key:
       if (i > 0) parts.push({ text: ", " });
       parts.push(...linkParts(item));
       const n = counts.get(String(item)) ?? 1;
-      if (n > 1) parts.push({ text: ` ×${n}` });
+      if (n > 1) parts.push({ text: ` (duplicate ×${n})` });
     });
     if (parts.length || keepEmpty) rows.push({ key, parts, count: items.length });
   }
@@ -91,7 +91,7 @@ export function propertyRows(fm: Record<string, unknown> | null | undefined, ski
   return rowsFrom(fm, (k) => !skip.has(k), false, keepEmpty);
 }
 
-/** One row per relationship field of the note, a note listed several times shown once with its quantity (×27). */
+/** One row per relationship field. Repeated identical targets are collapsed for display and labeled as duplicate evidence, never quantity. */
 export function relationshipRows(fm: Record<string, unknown> | null | undefined, fields: ReadonlySet<string>): PropertyRow[] {
   return rowsFrom(fm, (k) => fields.has(k), true);
 }
