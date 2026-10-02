@@ -299,7 +299,7 @@ export interface TreeLink {
   field: string;
   /** "in": the stored link runs from the child to the parent, so the arrow is drawn child to parent (WB-097). */
   direction: Direction;
-  /** How many times the parent lists this child in the field (quantity, WB-091). 1 when listed once. */
+  /** How many times the same relationship target was repeated in source data. Duplicate evidence only; never engineering quantity. */
   count: number;
 }
 
@@ -435,19 +435,19 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
 export function signature(view: ViewResult): string {
   const nodes = [...view.depthOf.keys()].sort().join("\n");
   const edges = view.edges.map((e) => `${e.from}|${e.field}|${e.to}`).sort().join("\n");
-  const qty = view.tree.filter((l) => l.count > 1).map((l) => `${l.parent}|${l.field}|${l.child}x${l.count}`).sort().join("\n");
+  const dupes = view.tree.filter((l) => l.count > 1).map((l) => `${l.parent}|${l.field}|${l.child}x${l.count}`).sort().join("\n");
   const more = [...view.omitted].map(([p, n]) => `${p}:${n}`).sort().join("\n");
   let h = 2166136261;
-  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${qty}`) {
+  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${dupes}`) {
     h ^= ch.charCodeAt(0);
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0).toString(16);
 }
 
-/** Relationship name on every link (WB-095), plus a quantity (×27) wherever a child is listed more than once. */
+/** Relationship name on every link. Repeated source targets are labeled explicitly as duplicate evidence, not quantity. */
 function edgeLabel(field: string, count: number): string | undefined {
-  const text = [field, count > 1 ? `×${count}` : ""].filter(Boolean).join(" ");
+  const text = count > 1 ? `${field} (duplicate ×${count})` : field;
   return text || undefined;
 }
 
