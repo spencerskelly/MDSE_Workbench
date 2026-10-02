@@ -73,4 +73,3 @@ guidance:
   flow: 'hasFlow/flowOf is ownership: a Port note has the Item Flow notes made from its pins; direction is carried by transmits, receives or exchanges on the Port (W-177).'
   copy: copyOf/hasCopy says a note is a copy of another element and lets a reader trace back to the original note. It is general, not limited to Ports (W-124).
   supersedes: 'supersedes/supersededBy is for a note that has been replaced by another note: supersedes is written on the replacing note and points at the note it replaces; supersededBy is generated on the replaced note (W-191). Nothing in the import writes it.'
-  crossVault: Relationship semantics do not change across vault boundaries. Store durable note references by uid when the target is in another vault.
