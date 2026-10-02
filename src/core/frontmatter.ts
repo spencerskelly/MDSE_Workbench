@@ -48,7 +48,7 @@ export function removeLink(fm: Frontmatter, field: string, target: string): bool
 
 /**
  * Property order (W-97, W-126): common properties with the translated-only ones before
- * `tags`, then relationship fields in the order of relationships.yaml, then anything else
+ * `tags`, then governed sparse optional properties, then relationship fields in the order of relationships.yaml, then anything else
  * in its existing order. Where an inverse sits relative to its forward field is still an
  * open workspace decision; this keeps each inverse right after its forward field.
  */
@@ -61,7 +61,7 @@ export function canonicalOrder(schema: Schema): string[] {
     rel.push(r.field);
     if (r.inverse) rel.push(r.inverse);
   }
-  return [...common, ...rel];
+  return [...common, ...schema.optionalProperties, ...rel];
 }
 
 /** Reorders `fm` in place (JavaScript keeps string-key insertion order). */
