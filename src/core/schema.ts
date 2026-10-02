@@ -37,6 +37,8 @@ export interface Schema {
   classes: ElementClass[];
   classNames: Set<string>;
   commonProperties: string[];
+  /** Sparse governed frontmatter properties declared by element-types.yaml; omitted when default. */
+  optionalProperties: string[];
   translatedOnlyProperties: string[];
   relationships: RelationshipDef[];
   /** Forward (or symmetric/one-way) field name → definition. */
@@ -177,6 +179,13 @@ export function parseSchema(relationshipsYaml: unknown, elementTypesYaml: unknow
     classes,
     classNames,
     commonProperties: strList(elementTypesYaml.commonProperties),
+    optionalProperties: Array.isArray(elementTypesYaml.optionalProperties)
+      ? elementTypesYaml.optionalProperties.flatMap((v) => {
+          if (typeof v === "string") return [v];
+          if (isObj(v) && typeof v.name === "string") return [v.name];
+          return [];
+        })
+      : [],
     translatedOnlyProperties: strList(elementTypesYaml.translatedOnlyProperties),
     relationships: rels,
     byField,
