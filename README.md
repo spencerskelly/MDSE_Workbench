@@ -65,10 +65,12 @@ Workspace decisions W-293/W-294/W-298 and Workbench decision WB-105 add addressa
 The next occurrence-aware Workbench build will treat that content as a separate **Local Model** surface:
 
 - Local Model is distinct from ordinary narrative text, Properties and note-level Relationships.
-- Read-only parsing/indexing comes before structured editing.
-- The ordinary text editor must exclude/protect the governed Local Model region.
-- Structured Local Model editing waits until the canonical body/marker contract is frozen.
-- High-value views will navigate local records rather than flattening contextual occurrences into duplicate note-level links.
+- W-302 bounds it with the managed START/END markers and schema `0.1`; the ordinary text editor must exclude/protect that region.
+- W-303 gives local records durable `part-*`, `ep-*`, `conn-*`, and `flow-*` IDs independent of visible names.
+- W-304 fixes heading + named-field Markdown records. Parts reuse Object/assembly definitions; endpoints reuse Port/interface definitions; nested pins/contacts/sub-interfaces are recursive endpoint records using a parent address.
+- Connection-owned flow records are stored once but indexed and shown from each participating endpoint/interface.
+- EA-only provenance is not required by Workbench and lives in the import-evidence `Local Model Source Map.csv` rather than engineering note records.
+- Read-only parsing/indexing comes before structured editing; high-value views navigate local records rather than flattening them into duplicate note-level links.
 
 **0.1.14 predates this contract. Do not use its body editor on notes containing `## Local Model` records.** The synchronized importer/base release after the current v0.7 merge candidate will start at v0.8.0; Workbench remains independently versioned.
 
