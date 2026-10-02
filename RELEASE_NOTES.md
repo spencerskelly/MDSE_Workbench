@@ -1,6 +1,6 @@
 # 0.1.15
 
-Safety/alignment build for the MDSE v0.8 contract. Repeated note-level relationship targets are no longer presented as engineering quantity, and governed Local Model regions are protected from the ordinary body editor.
+Safety/alignment build for the MDSE v0.8 contract. Repeated note-level relationship targets are no longer presented as engineering quantity, governed Local Model regions are protected from the ordinary body editor, and schema-defined sparse optional properties are ordered before relationship fields.
 
 Pilot build of the MDSE Workbench plugin for Obsidian. Read-mostly, with a governed editing path; not yet piloted with engineers.
 
