@@ -58,6 +58,21 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
 
 Generated views go to `Workbench Views/` (configurable). Add that folder to the vault's `.gitignore` (WB-036).
 
+### Local Model compatibility direction
+
+Workspace decisions W-293/W-294/W-298 and Workbench decision WB-105 add addressable local part occurrences, endpoints, connections, connection-scoped flows and local applicability inside the owning note body.
+
+The next occurrence-aware Workbench build will treat that content as a separate **Local Model** surface:
+
+- Local Model is distinct from ordinary narrative text, Properties and note-level Relationships.
+- Read-only parsing/indexing comes before structured editing.
+- The ordinary text editor must exclude/protect the governed Local Model region.
+- Structured Local Model editing waits until the canonical body/marker contract is frozen.
+- High-value views will navigate local records rather than flattening contextual occurrences into duplicate note-level links.
+
+**0.1.14 predates this contract. Do not use its body editor on notes containing `## Local Model` records.** The synchronized importer/base release after the current v0.7 merge candidate will start at v0.8.0; Workbench remains independently versioned.
+
+
 ## Design rules this code follows
 
 - **Model core is pure TypeScript** (`src/core`): schema, endpoint rules, index, findings, traversal, layout, frontmatter edits. No Obsidian or Node imports, so it is unit-tested in Node and stays mobile-ready (WB-087).
