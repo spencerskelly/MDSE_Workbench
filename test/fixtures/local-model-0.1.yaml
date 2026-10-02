@@ -1,0 +1,186 @@
+schemaVersion: "0.1"
+purpose: "Machine-readable contract for governed Local Model Markdown records. This is a tooling/format schema, not a new first-class MDSE element schema."
+
+region:
+  heading: "Local Model"
+  headingLevel: 2
+  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.1 -->"
+  endMarker: "<!-- MDSE:LOCAL-MODEL END -->"
+  maxPerNote: 1
+  markerErrorsBlockStructuredEditing: true
+
+identity:
+  persistedAsNativeBlockId: true
+  blockIdMustEqualLocalId: true
+  visibleHeadingIsIdentity: false
+  kinds:
+    part:
+      prefix: "part-"
+    endpoint:
+      prefix: "ep-"
+    connection:
+      prefix: "conn-"
+    flow:
+      prefix: "flow-"
+  importedIdRule: "Deterministic from immutable EA source identity/provenance; exact token length/collision-extension rule is governed separately."
+  workbenchIdRule: "Generated stable opaque token using the same kind prefixes."
+
+references:
+  principle: "Use native Obsidian links whenever a persisted reference can be represented natively."
+  definition:
+    kind: "noteLink"
+    example: "[[CAN Interface]]"
+  local:
+    kind: "obsidianBlockLink"
+    sameNoteExample: "[[#^ep-42bd90|J4]]"
+    crossNoteExample: "[[Control Assembly#^ep-42bd90|J4]]"
+    bareLocalIdsAsPersistedReferences: false
+
+sections:
+  part: "Part Occurrences"
+  endpoint: "Local Interfaces"
+  connection: "Connections"
+
+records:
+  part:
+    headingLevel: 4
+    required:
+      - definition
+    optional:
+      - identifier
+      - multiplicity
+    fields:
+      definition:
+        value: "noteLink"
+        targetSemanticKind: "Object"
+      identifier:
+        value: "text"
+      multiplicity:
+        value: "positiveIntegerOrSourceMultiplicity"
+    rules:
+      - "definition points to the reusable Object/assembly definition."
+      - "multiplicity is allowed only for contextually interchangeable copies."
+      - "individually addressable copies are separate part records."
+
+  endpoint:
+    headingLevel: 4
+    required:
+      - definition
+    optional:
+      - identifier
+      - part
+      - parent
+      - exposes
+      - equals
+      - multiplicity
+      - kind
+    fields:
+      definition:
+        value: "noteLink"
+        targetSemanticKind: "Port"
+      identifier:
+        value: "text"
+      part:
+        value: "localBlockLink"
+        targetLocalKind: "part"
+      parent:
+        value: "localBlockLink"
+        targetLocalKind: "endpoint"
+      exposes:
+        value: "localBlockLinkOrList"
+        targetLocalKind: "endpoint"
+        direction: "outer-to-inner"
+      equals:
+        value: "localBlockLinkOrList"
+        targetLocalKind: "endpoint"
+        temporary: true
+        symmetricMeaning: true
+      multiplicity:
+        value: "positiveIntegerOrSourceMultiplicity"
+      kind:
+        value: "text"
+    rules:
+      - "part and parent are mutually exclusive."
+      - "absence of both part and parent means an endpoint on the owning assembly boundary."
+      - "nested inherited members are materialized only when the local context needs independent addressability."
+      - "exposes means the owning/boundary endpoint makes the inner endpoint available at the next assembly level."
+      - "temporary equals preserves unresolved EA BindingConnector meaning for review; it is not automatically exposure."
+
+  connection:
+    headingLevel: 4
+    required:
+      - endpointA
+      - endpointB
+    optional:
+      - definition
+      - identifier
+    fields:
+      endpointA:
+        value: "localBlockLink"
+        targetLocalKind: "endpoint"
+      endpointB:
+        value: "localBlockLink"
+        targetLocalKind: "endpoint"
+      definition:
+        value: "noteLink"
+      identifier:
+        value: "text"
+    rules:
+      - "the owning note is the assembly/context that forms the connection."
+      - "a parent assembly does not connect through a child boundary to an internal endpoint."
+      - "connection endpoints are persisted as native Obsidian block links."
+
+  flow:
+    headingLevel: 5
+    parentLocalKind: "connection"
+    required:
+      - definition
+      - endpointA
+      - endpointB
+    optional:
+      - identifier
+    fields:
+      definition:
+        value: "noteLink"
+        targetSemanticKind: "Item Flow"
+      identifier:
+        value: "text"
+      endpointA:
+        value: "enum"
+        allowed:
+          - transmit
+          - receive
+          - exchange
+          - unspecified
+      endpointB:
+        value: "enum"
+        allowed:
+          - transmit
+          - receive
+          - exchange
+          - unspecified
+    rules:
+      - "the authoritative flow occurrence exists once under the connection that carries it."
+      - "Workbench derives interface-centric flow views rather than duplicating flow records."
+
+provenance:
+  inEngineeringRecord: false
+  sourceMap: "99_System/11_Import/Local Model Source Map.csv"
+  minimumSourceMapColumns:
+    - owner_uid
+    - local_id
+    - local_kind
+    - ea_guid
+    - ea_source_kind
+    - ea_owner_guid
+
+validation:
+  - "Exactly one managed Local Model region when Local Model records exist."
+  - "No duplicate local ID within an owner note."
+  - "Every block ID equals the record local ID."
+  - "Every local reference resolves to an existing local record of the permitted kind."
+  - "Every definition link resolves to a compatible first-class note."
+  - "A connection has exactly two valid endpoint references in schema 0.1."
+  - "A flow is nested under one connection and has valid endpoint roles."
+  - "Temporary equals is a review finding."
+  - "Source provenance is not embedded in engineering records."

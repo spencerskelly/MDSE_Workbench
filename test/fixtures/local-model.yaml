@@ -1,0 +1,164 @@
+schemaVersion: "0.2"
+purpose: "Machine-readable contract for governed Local Model Markdown records. This is a tooling/format schema, not a new first-class MDSE element schema."
+
+compatibility:
+  readableVersions: ["0.1", "0.2"]
+  writableVersion: "0.2"
+  version01Normalization: "A 0.1 part or endpoint is standard usage in memory. Reading 0.1 never mutates the file."
+  unknownVersion: "Markdown remains readable, but structured Local Model interaction is disabled."
+
+region:
+  heading: "Local Model"
+  headingLevel: 2
+  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->"
+  endMarker: "<!-- MDSE:LOCAL-MODEL END -->"
+  maxPerNote: 1
+  markerErrorsBlockStructuredEditing: true
+
+identity:
+  persistedAsNativeBlockId: true
+  blockIdMustEqualLocalId: true
+  visibleHeadingIsIdentity: false
+  tokenFormat: "^\\d{17}[a-z-]{13}$"
+  globalTokenNamespace: true
+  tokenMustNotMatchAnyNoteUidOrOtherLocalToken: true
+  representationChangeRetainsToken: true
+  kinds:
+    part: {prefix: "part-"}
+    endpoint: {prefix: "ep-"}
+    connection: {prefix: "conn-"}
+    flow: {prefix: "flow-"}
+  importedIdRule: "Allocate once from governed source provenance; Local Model Source Map is authoritative on rerun."
+  workbenchIdRule: "Allocate a globally unused 30-character token using the governed MDSE identity strategy."
+
+references:
+  principle: "Use native Obsidian links whenever a persisted reference can be represented natively."
+  definition:
+    kind: "noteLink"
+    example: "[[CAN Interface]]"
+  local:
+    kind: "obsidianBlockLink"
+    sameNoteExample: "[[#^ep-20260911143227002skellyspencer|J4]]"
+    crossNoteExample: "[[Control Assembly#^ep-20260911143227002skellyspencer|J4]]"
+    bareLocalIdsAsPersistedReferences: false
+
+usage:
+  allowed: [standard, variant, option]
+  omittedMeans: standard
+  appliesToLocalKinds: [part, endpoint]
+  forbiddenOnLocalKinds: [connection, flow]
+  candidateDerivation:
+    relationship: subtypeOf
+    transitive: true
+    includeRootWhenConcrete: true
+    excludeAbstract: true
+    persistCandidateList: false
+  semantics:
+    standard: "Occurrence is required and uses exactly the stated concrete definition."
+    variant: "Occurrence is required and resolves to exactly one concrete candidate in the specialization family rooted at definition."
+    option: "Occurrence may be absent; when present it resolves to the concrete root or one concrete candidate in the specialization family."
+
+sections:
+  part: "Part Occurrences"
+  endpoint: "Local Interfaces"
+  connection: "Connections"
+
+records:
+  part:
+    headingLevel: 4
+    required: [definition]
+    optional: [usage, identifier, multiplicity]
+    fields:
+      definition: {value: "noteLink", targetSemanticKind: "Object"}
+      usage: {value: "enum", allowed: [standard, variant, option]}
+      identifier: {value: "text"}
+      multiplicity: {value: "positiveIntegerOrSourceMultiplicity"}
+    rules:
+      - "definition points to the reusable Object/assembly definition."
+      - "omitted usage means standard; canonical writing omits usage: standard."
+      - "a standard occurrence cannot point at abstract: true."
+      - "variant/option candidates are derived transitively from subtypeOf and are not stored here."
+      - "multiplicity is allowed only for contextually interchangeable copies."
+      - "individually addressable copies are separate part records."
+
+  endpoint:
+    headingLevel: 4
+    required: [definition]
+    optional: [usage, identifier, part, parent, exposes, equals, multiplicity, kind]
+    fields:
+      definition: {value: "noteLink", targetSemanticKind: "Port"}
+      usage: {value: "enum", allowed: [standard, variant, option]}
+      identifier: {value: "text"}
+      part: {value: "localBlockLink", targetLocalKind: "part"}
+      parent: {value: "localBlockLink", targetLocalKind: "endpoint"}
+      exposes: {value: "localBlockLinkOrList", targetLocalKind: "endpoint", direction: "outer-to-inner"}
+      equals: {value: "localBlockLinkOrList", targetLocalKind: "endpoint", temporary: true, symmetricMeaning: true}
+      multiplicity: {value: "positiveIntegerOrSourceMultiplicity"}
+      kind: {value: "text"}
+    rules:
+      - "part and parent are mutually exclusive."
+      - "absence of both part and parent means an endpoint on the owning assembly boundary."
+      - "omitted usage means standard; canonical writing omits usage: standard."
+      - "a standard occurrence cannot point at abstract: true."
+      - "variant/option candidates are derived transitively from subtypeOf and are not stored here."
+      - "nested inherited members are materialized only when local context needs independent addressability."
+      - "exposes means the boundary endpoint makes the inner endpoint available at the next assembly level."
+      - "temporary equals preserves unresolved EA BindingConnector meaning; it is not automatically exposure."
+
+  connection:
+    headingLevel: 4
+    required: [endpointA, endpointB]
+    optional: [definition, identifier]
+    fields:
+      endpointA: {value: "localBlockLink", targetLocalKind: "endpoint"}
+      endpointB: {value: "localBlockLink", targetLocalKind: "endpoint"}
+      definition: {value: "noteLink"}
+      identifier: {value: "text"}
+    rules:
+      - "the owning note is the assembly/context that forms the connection."
+      - "a parent assembly connects to a child's boundary endpoint, not directly to an internal endpoint."
+      - "usage is not valid on a connection."
+
+  flow:
+    headingLevel: 5
+    parentLocalKind: "connection"
+    required: [definition, endpointA, endpointB]
+    optional: [identifier]
+    fields:
+      definition: {value: "noteLink", targetSemanticKind: "Item Flow"}
+      identifier: {value: "text"}
+      endpointA: {value: "enum", allowed: [transmit, receive, exchange, unspecified]}
+      endpointB: {value: "enum", allowed: [transmit, receive, exchange, unspecified]}
+    rules:
+      - "the authoritative flow occurrence exists once under the connection that carries it."
+      - "Workbench derives interface-centric flow views rather than duplicating flow records."
+      - "usage is not valid on a flow."
+
+provenance:
+  inEngineeringRecord: false
+  sourceMap: "99_System/11_Import/Local Model Source Map.csv"
+  rerunIdentityAuthority: true
+  minimumSourceMapColumns:
+    - source_model_id
+    - source_key
+    - owner_uid
+    - local_id
+    - local_kind
+    - ea_guid
+    - ea_source_kind
+    - ea_owner_guid
+
+validation:
+  - "Exactly one managed Local Model region when Local Model records exist."
+  - "Every 30-character identity token is globally unique across note UIDs and all Local Model records."
+  - "Every block ID equals the record local ID."
+  - "Every local reference resolves to an existing local record of the permitted kind."
+  - "Every definition link resolves to a compatible first-class note."
+  - "usage is absent or standard/variant/option on part/endpoint only."
+  - "standard definition is concrete."
+  - "variant has at least one concrete candidate."
+  - "option candidate family is valid even when no configuration currently includes it."
+  - "A connection has exactly two valid endpoint references."
+  - "A flow is nested under one connection and has valid endpoint roles."
+  - "Temporary equals is a review finding."
+  - "Source provenance is not embedded in engineering records."
