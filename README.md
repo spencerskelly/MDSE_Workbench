@@ -6,6 +6,18 @@ The vault's Markdown and YAML are the model. Workbench reads the vault's own sch
 
 Design notes and decisions live in the vault, in the `MDSE Workbench` folder (decision IDs `WB-…`). Model decisions live in the vault's Workspace Decision Log (`W-…`).
 
+## v0.8 implementation authority
+
+The current model/importer authority is the methodology vault's `MDSE v0.8 Cross-Repository Reconciliation - 2026-10-02.md` and Workspace Decision Log W-315 through W-319.
+
+Current schema target:
+- relationships 1.35;
+- element-types 1.17;
+- Local Model writer 0.2;
+- Workbench Local Model reader compatibility 0.1 + 0.2.
+
+See `WB106_IMPLEMENTATION_CONTRACT.md` for the exact next Workbench build boundary.
+
 ## Status: Phase 0 spike (M0)
 
 M0 replaces the riskiest assumptions with measurements before more is built (WB-081, gate R0 in WB-090). It is not for everyday use.
@@ -49,7 +61,7 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
   - **Behavior**: from a State Machine, State or Object: who has the states, initial and final states, order (`precedes`), nested states, and what triggers a state.
   - **Failure and risk**: from any note: what an Issue or Failure Mode affects, what affects an element, causes (`drives`), and the requirements and performers around the affected functions.
   - **Evidence**: from any note: the Artifacts, Documents and Info notes that describe it or sit under it, and what else each one describes.
-- **Note details on click**: on a generated view (a canvas in the views folder), clicking a note opens a popup with its type, id and status, its properties and its relationships (two collapsed dropdowns, with counts; a note listed several times shows once as ×27; a missing note is shown in red and is not clickable) and its rendered text, so the note does not have to be opened. The popup stays on screen while you click other notes; links inside it open in the popup (‹ goes back), **View…** opens the view picker for that note, so a view of any card can be started without leaving the canvas, **Open note** opens the note in a tab, and × or Esc closes it. Clicking an undefined card says it still has to be defined. Shift, Ctrl, Cmd or Alt clicks and drags are ignored, so selecting and moving cards works as before. **Edit** (WB-101) switches the popup into edit mode for the note it shows (off again for every other note): the text becomes a box with **Save text** and **Revert**; subtype is a dropdown of the class's subtypes, status a box that suggests Draft, Active and Retired, tags a comma-separated box, and other simple properties text boxes (type, id, uid, translator-written properties and relationships cannot be edited there, and properties are not added or dropped); each relationship has a ✕ that removes it and its inverse after a confirmation, and **Add relationship…** picks a note and then the relationship, with the rule check. Every edit is one step that **Undo** (or the command **Undo last Workbench edit**) reverses. A save is refused if the note changed since the popup showed it. It can be switched off in the settings. It relies on Canvas internals that Obsidian does not document (a fallback matches the card's position to the canvas file), so recheck it on each Obsidian version; **Check Canvas support** reports whether the card elements are reachable.
+- **Note details on click**: on a generated view (a canvas in the views folder), clicking a note opens a popup with its type, id and status, its properties and its relationships (two collapsed dropdowns, with counts; a repeated identical relationship target is shown once with an explicit duplicate marker (never as engineering quantity); a missing note is shown in red and is not clickable) and its rendered text, so the note does not have to be opened. The popup stays on screen while you click other notes; links inside it open in the popup (‹ goes back), **View…** opens the view picker for that note, so a view of any card can be started without leaving the canvas, **Open note** opens the note in a tab, and × or Esc closes it. Clicking an undefined card says it still has to be defined. Shift, Ctrl, Cmd or Alt clicks and drags are ignored, so selecting and moving cards works as before. **Edit** (WB-101) switches the popup into edit mode for the note it shows (off again for every other note): the text becomes a box with **Save text** and **Revert**; subtype is a dropdown of the class's subtypes, status a box that suggests Draft, Active and Retired, tags a comma-separated box, and other simple properties text boxes (type, id, uid, translator-written properties and relationships cannot be edited there, and properties are not added or dropped); each relationship has a ✕ that removes it and its inverse after a confirmation, and **Add relationship…** picks a note and then the relationship, with the rule check. Every edit is one step that **Undo** (or the command **Undo last Workbench edit**) reverses. A save is refused if the note changed since the popup showed it. It can be switched off in the settings. It relies on Canvas internals that Obsidian does not document (a fallback matches the card's position to the canvas file), so recheck it on each Obsidian version; **Check Canvas support** reports whether the card elements are reachable.
 - **Check whether this view is current**: compares the open generated view with the model and offers to refresh it.
 - **Relate current note to another note**: pick the other note by name (type and id shown beside it), then pick from only the relationships the endpoint rules allow, in either direction. `tracesTo` is offered last, as the provisional relationship (W-288).
 - **Undo last relationship change**: reverses both notes of the last relate, and refuses if either note was edited since. Use this, not Cmd/Ctrl-Z, which only undoes one open note and can leave a pair half-written. Give it a hotkey under Settings → Hotkeys. History is kept in memory and clears when Obsidian restarts.
@@ -65,7 +77,7 @@ Workspace decisions W-293/W-294/W-298 and Workbench decision WB-105 add addressa
 The next occurrence-aware Workbench build will treat that content as a separate **Local Model** surface:
 
 - Local Model is distinct from ordinary narrative text, Properties and note-level Relationships.
-- W-302 bounds it with the managed START/END markers and schema `0.1`; the ordinary text editor must exclude/protect that region.
+- W-302/W-319 bound it with managed START/END markers; Workbench must read schema `0.1` and `0.2`, while new writers use `0.2`; the ordinary text editor must exclude/protect that region.
 - W-303 gives local records durable `part-*`, `ep-*`, `conn-*`, and `flow-*` IDs independent of visible names.
 - W-304 fixes heading + named-field Markdown records. Parts reuse Object/assembly definitions; endpoints reuse Port/interface definitions; nested pins/contacts/sub-interfaces are recursive endpoint records using a parent address.
 - W-305 keeps inherited interface members implicit through the reusable definition until a local connection, Requirement target, override, or other contextual reference needs an independently addressable `ep-*` record. Workbench may display inherited members, but must distinguish them from materialized local occurrences.
@@ -73,14 +85,14 @@ The next occurrence-aware Workbench build will treat that content as a separate 
 - W-310 constrains local multiplicity: `multiplicity: N` means N contextually interchangeable, non-individually-addressed copies. If any copy needs distinct connections, Requirement applicability, state, override, flow or other local context, Workbench must represent it as its own `part-*` occurrence.
 - W-311 makes assembly boundaries authoritative for connection ownership: a parent connects to a child's boundary endpoint, while `exposes` relates that boundary endpoint to the child's internal endpoint. EA BindingConnector/temporary `equals` stays review evidence until confirmed.
 - W-312 requires persisted local references (`part`, `parent`, connection endpoints, exposure and temporary local `equals`) to use native Obsidian block links rather than bare IDs.
-- W-313 adds vault-side `local-model.yaml` schema 0.1 as the shared parser/validation contract for importer and Workbench.
+- W-313/W-319 use vault-side `local-model.yaml`; `0.2` is the canonical writer schema and `0.1` remains readable for backward compatibility as the shared parser/validation contract for importer and Workbench.
 - WB-106 makes Local Model read/navigation support a keepability gate for v0.8: addressable ModelRef identity, block-fragment preservation, Local Model parsing, occurrence-aware core views, governed-region protection and local model-health findings are required before the first import is accepted. Structured Local Model editing may follow later.
 - Repeated note-level relationship entries are not engineering quantity; true quantity comes from Local Model `multiplicity`.
 - Connection-owned flow records are stored once but indexed and shown from each participating endpoint/interface.
 - EA-only provenance is not required by Workbench and lives in the import-evidence `Local Model Source Map.csv` rather than engineering note records.
 - Read-only parsing/indexing comes before structured editing; high-value views navigate local records rather than flattening them into duplicate note-level links.
 
-**0.1.14 predates this contract. Do not use its body editor on notes containing `## Local Model` records.** The synchronized importer/base release after the current v0.7 merge candidate will start at v0.8.0; Workbench remains independently versioned.
+**0.1.15 still predates WB-106 parsing/indexing, but it now refuses ordinary body editing on a note containing a governed Local Model marker. It does not yet provide occurrence-aware views or Local Model structured editing.** The synchronized importer/base release after the current v0.7 merge candidate will start at v0.8.0; Workbench remains independently versioned.
 
 
 ## Design rules this code follows
@@ -102,7 +114,7 @@ npm run build       # typecheck and bundle main.js
 npm run bench:generate -- 60000 && npm run bench
 ```
 
-`test/fixtures/` holds copies of the vault's `relationships.yaml` (schema 1.35) and `element-types.yaml`. Refresh them when the schema changes.
+`test/fixtures/` holds copies of the vault's relationship and element schemas. The next WB-106 implementation must also add historical Local Model 0.1 and current 0.2 fixtures and test both readers.
 
 The CI and release workflows are in `ci-workflows/` because the access token used so far cannot write workflow files (it lacks the Workflows permission; GitHub refuses the push). With a token that has it, move both files to `.github/workflows/`. CI then runs the tests and the build on every push to `main` and on pull requests; the release workflow runs when a tag `v<version>` is pushed, checks the tag against `manifest.json`, builds, and publishes `main.js`, `manifest.json`, `styles.css` and the 60,000-note synthetic vault as a GitHub release. Both files parse, and the commands they run (`npm ci`, `npm test`, `npm run build`, `npm run bench:generate`) work here; neither workflow has run on GitHub yet.
 
