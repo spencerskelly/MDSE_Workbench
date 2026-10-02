@@ -68,6 +68,7 @@ The next occurrence-aware Workbench build will treat that content as a separate 
 - W-302 bounds it with the managed START/END markers and schema `0.1`; the ordinary text editor must exclude/protect that region.
 - W-303 gives local records durable `part-*`, `ep-*`, `conn-*`, and `flow-*` IDs independent of visible names.
 - W-304 fixes heading + named-field Markdown records. Parts reuse Object/assembly definitions; endpoints reuse Port/interface definitions; nested pins/contacts/sub-interfaces are recursive endpoint records using a parent address.
+- W-305 keeps inherited interface members implicit through the reusable definition until a local connection, Requirement target, override, or other contextual reference needs an independently addressable `ep-*` record. Workbench may display inherited members, but must distinguish them from materialized local occurrences.
 - Connection-owned flow records are stored once but indexed and shown from each participating endpoint/interface.
 - EA-only provenance is not required by Workbench and lives in the import-evidence `Local Model Source Map.csv` rather than engineering note records.
 - Read-only parsing/indexing comes before structured editing; high-value views navigate local records rather than flattening them into duplicate note-level links.
