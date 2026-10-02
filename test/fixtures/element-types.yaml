@@ -1,7 +1,12 @@
-schemaVersion: '1.16'
-date: '2026-09-30'
-basis: MDSE ruleset 1.21
-commonProperties: [type, subtype, id, uid, status, tags]   # order fixed by W-97; W-88 removed control, boundary, aliases and formerIds
+schemaVersion: '1.17'
+date: '2026-10-02'
+basis: MDSE ruleset 1.23
+commonProperties: [type, subtype, id, uid, status, tags]
+optionalProperties:
+  - name: abstract
+    value: boolean
+    default: false
+    omitWhenDefault: true
 relationshipFields: after tags, in the order of relationships.yaml; may hold lists (W-126)
 translatedOnlyProperties: [eaType]   # written by the translator, between status and tags (W-31, W-97)
 classes:
