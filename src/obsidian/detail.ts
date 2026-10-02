@@ -349,6 +349,10 @@ export class NoteDetailPanel extends Component {
 
   private textEditor(root: HTMLElement, file: TFile, md: string): void {
     this.bodyLoaded = md;
+    if (md.includes("<!-- MDSE:LOCAL-MODEL START schema=")) {
+      root.createDiv({ cls: "mdse-detail-state", text: "Text editing is disabled for this note because it contains a governed Local Model. Region-aware editing is part of WB-106." });
+      return;
+    }
     const area = root.createEl("textarea", { cls: "mdse-detail-text", attr: { spellcheck: "true", "aria-label": "Note text" } });
     area.value = md;
     area.rows = Math.min(30, Math.max(10, md.split("\n").length + 2));
