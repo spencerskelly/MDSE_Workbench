@@ -142,7 +142,7 @@ test("review: findings list, counts, filters and Previous / Next skipping", asyn
   assert.equal(neighbour(list, 3, 1, skip), -1, "no finding after the last");
 });
 
-test("quantity: a child listed several times is one card with a x-count label (WB-091)", () => {
+test("duplicate relationship entries are visible but never treated as engineering quantity (W-310)", () => {
   const idx = indexOf(schema, [
     { ...note("Top.md", "Object", { hasPart: ["Wire.md", "Jacket.md"] }), repeat: new Map([["hasPart|Wire.md", 3]]) },
     note("Wire.md", "Object"),
@@ -154,7 +154,7 @@ test("quantity: a child listed several times is one card with a x-count label (W
   assert.equal(idx.edgeCount(), 2, "links stay one per distinct target, so Review counts do not change");
   assert.deepEqual(v.tree.map((l) => [l.child, l.count]), [["Jacket.md", 1], ["Wire.md", 3]]);
   const labels = toCanvas(idx, v, profile).edges.map((e) => e.label);
-  assert.deepEqual(labels, ["hasPart", "hasPart ×3"]);
+  assert.deepEqual(labels, ["hasPart", "hasPart (duplicate ×3)"]);
   const once = indexOf(schema, [note("Top.md", "Object", { hasPart: ["Wire.md"] }), note("Wire.md", "Object")]);
   assert.notEqual(signature(v), signature(traverse(once, ["Top.md"], profile)));
 });
@@ -172,7 +172,7 @@ test("undefined: a link to a note that does not exist is an undefined card, not 
   const card = c.nodes.find((n) => n.type === "text" && n.text?.includes("Ghost"))!;
   assert.ok(card.text!.includes("undefined") && card.color === "1");
   assert.ok(c.nodes.filter((n) => n.type === "file").every((n) => n.file === "Top.md" || n.file === "Real.md"));
-  assert.equal(c.edges.find((e) => e.toNode === card.id)!.label, "hasPart ×2");
+  assert.equal(c.edges.find((e) => e.toNode === card.id)!.label, "hasPart (duplicate ×2)");
   assert.equal(idx.edgeCount(), 1, "Review counts unchanged");
 });
 
@@ -380,7 +380,7 @@ test("detail popup relationships: only relationship fields, a repeated link once
   const fields = new Set(["hasPart", "hasPort", "partOf"]);
   const rel = relationshipRows(fm, fields);
   assert.deepEqual(rel.map((r) => [r.key, r.count]), [["hasPart", 2], ["hasPort", 1]], "empty partOf is left out");
-  assert.deepEqual(rel[0].parts, [{ text: "Wire", link: "Wire" }, { text: " ×3" }, { text: ", " }, { text: "Jacket", link: "Jacket" }]);
+  assert.deepEqual(rel[0].parts, [{ text: "Wire", link: "Wire" }, { text: " (duplicate ×3)" }, { text: ", " }, { text: "Jacket", link: "Jacket" }]);
   assert.deepEqual(propertyRows(fm, fields).map((r) => r.key), ["type", "id", "tags"], "relationships are not repeated under Properties");
 });
 
