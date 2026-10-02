@@ -144,6 +144,7 @@ export class RelationshipWriter {
     const file = this.file(path);
     const tx: Transaction = { label: `edit text of ${file.basename}`, files: [] };
     const before = await this.app.vault.read(file);
+    if (before.includes("<!-- MDSE:LOCAL-MODEL START schema=")) throw new Error("Ordinary text editing is disabled on notes containing a governed Local Model until region-aware editing is implemented.");
     if (!bodyUnchanged(before, loadedBody)) throw new Error(`${file.basename} changed since the popup showed it. Close and reopen the popup, then edit again.`);
     const after = replaceBody(before, newBody);
     if (after !== before) {
