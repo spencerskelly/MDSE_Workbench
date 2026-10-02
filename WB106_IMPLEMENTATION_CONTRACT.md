@@ -6,7 +6,13 @@ This file is the standalone Workbench continuation contract for MDSE v0.8.
 
 The model remains Markdown/YAML in the vault. Workbench is a parser/index/view/editor over that model, never a second model database.
 
-Read the methodology workspace's 2026-10-02 reconciliation and W-315 through W-319 when semantic details are needed.
+Read the methodology workspace's `00 - Current State.md` first, then the 2026-10-02 reconciliation. W-315 through W-319 govern Local Model semantics; W-321 governs the lean runtime-base and cross-tool release chain.
+
+## Runtime/release compatibility
+
+Workbench remains independently versioned from MDSE. It should not embed a second copy of the MDSE release registry. At runtime it reads the vault's actual schemas. The final v0.8 base will pin a WB-106-capable Workbench release in `.obsidian/plugin-lock.yaml`.
+
+If the Local Model schema is unsupported, structured Local Model behavior is disabled rather than guessed. The methodology release checker verifies the pinned Workbench version and the portable schema fixtures before a base is issued.
 
 ## Required schema support
 
