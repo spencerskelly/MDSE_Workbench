@@ -18,6 +18,12 @@ Current schema target:
 
 See `WB106_IMPLEMENTATION_CONTRACT.md` for the exact next Workbench build boundary.
 
+Start from the methodology vault's `99_System/10_Docs/00 - Current State.md`: it lists the current rules, tool status and which files are historical. Release versions are recorded in `99_System/03_Schemas/mdse-release.yaml` there.
+
+**Fixtures are a copy of the authority schemas.** `test/fixtures/relationships.yaml` and `test/fixtures/element-types.yaml` must equal the vault's `99_System/03_Schemas` files. After any schema change, copy them over and run `npm test`. The vault's `python3 99_System/09_Tools/check-release.py --workbench <this clone>` fails if they differ or if the version in `package.json`, `manifest.json` and the release manifest disagree (W-320, WB-108).
+
+**CI note.** The CI and release workflows are kept in `ci-workflows/` and are not active (see the Workbench Decision Log). Until they are switched on, run `npm run build` and `npm test` before every push.
+
 ## Status: Phase 0 spike (M0)
 
 M0 replaces the riskiest assumptions with measurements before more is built (WB-081, gate R0 in WB-090). It is not for everyday use.

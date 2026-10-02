@@ -1,13 +1,14 @@
 schemaVersion: '1.17'
 date: '2026-10-02'
 basis: MDSE ruleset 1.23
-commonProperties: [type, subtype, id, uid, status, tags]
+commonProperties: [type, subtype, id, uid, status, tags]   # order fixed by W-97
 optionalProperties:
   - name: abstract
     value: boolean
     default: false
     omitWhenDefault: true
-relationshipFields: after tags, in the order of relationships.yaml; may hold lists (W-126)
+    meaning: "Reusable definition may organize/generalize a specialization family but cannot itself be selected as the effective definition of an occurrence. Abstractness is not inherited (W-314/W-319)."
+relationshipFields: after governed optional properties (or after tags when none are present), in the order of relationships.yaml; may hold lists (W-126, W-319)
 translatedOnlyProperties: [eaType]   # written by the translator, between status and tags (W-31, W-97)
 classes:
 - name: Object
