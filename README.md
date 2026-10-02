@@ -8,7 +8,7 @@ Design notes and decisions live in the vault, in the `MDSE Workbench` folder (de
 
 ## v0.8 implementation authority
 
-The current model/importer authority is the methodology vault's `MDSE v0.8 Cross-Repository Reconciliation - 2026-10-02.md` and Workspace Decision Log W-315 through W-319.
+Start from the methodology vault's `99_System/10_Docs/00 - Current State.md`; it names the current authority through W-321. The v0.8 reconciliation remains the implementation contract, with W-321 governing the lean runtime-base/release chain.
 
 Current schema target:
 - relationships 1.35;
@@ -20,7 +20,7 @@ See `WB106_IMPLEMENTATION_CONTRACT.md` for the exact next Workbench build bounda
 
 Start from the methodology vault's `99_System/10_Docs/00 - Current State.md`: it lists the current rules, tool status and which files are historical. Release versions are recorded in `99_System/03_Schemas/mdse-release.yaml` there.
 
-**Fixtures are a copy of the authority schemas.** `test/fixtures/relationships.yaml` and `test/fixtures/element-types.yaml` must equal the vault's `99_System/03_Schemas` files. After any schema change, copy them over and run `npm test`. The vault's `python3 99_System/09_Tools/check-release.py --workbench <this clone>` fails if they differ or if the version in `package.json`, `manifest.json` and the release manifest disagree (W-320, WB-108).
+**Fixtures are copies only where independent Workbench tests require them.** `test/fixtures/relationships.yaml`, `element-types.yaml`, and `local-model.yaml` must exactly equal the current authority schemas. `local-model-0.1.yaml` is a frozen historical compatibility fixture and must not be updated to current semantics. After any current-schema change, sync the current fixture and run `npm test`. The vault's `python3 99_System/09_Tools/check-release.py --workbench <this clone>` fails if they differ or if the version in `package.json`, `manifest.json` and the release manifest disagree (W-320, WB-108).
 
 **CI note.** The CI and release workflows are kept in `ci-workflows/` and are not active (see the Workbench Decision Log). Until they are switched on, run `npm run build` and `npm test` before every push.
 
