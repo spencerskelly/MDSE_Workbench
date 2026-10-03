@@ -38,3 +38,5 @@ jobs:
           fi
           git commit -m "Build Workbench 0.1.17 artifact"
           git push
+
+# Triggered for WB-106 artifact refresh.
