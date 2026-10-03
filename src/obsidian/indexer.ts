@@ -72,12 +72,17 @@ export class Indexer {
         broken.push({ field, link: fl.link });
         continue;
       }
+      const hash = fl.link.indexOf("#^");
+      if (hash >= 0) {
+        // A block-targeted relationship semantically points at the local occurrence, not at its owning note.
+        // Keep it out of note-to-note edges; occurrence-aware views resolve it through localRefs (WB-106).
+        localRefs.push({ field, path: dest.path, localId: fl.link.slice(hash + 2).split("|")[0].trim() });
+        continue;
+      }
       let list = fields.get(field);
       if (!list) fields.set(field, (list = []));
       if (!list.includes(dest.path)) list.push(dest.path);
       else repeat.set(`${field}|${dest.path}`, (repeat.get(`${field}|${dest.path}`) ?? 1) + 1);
-      const hash = fl.link.indexOf("#^");
-      if (hash >= 0) localRefs.push({ field, path: dest.path, localId: fl.link.slice(hash + 2).split("|")[0].trim() });
     }
     const str = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : String(v));
     const abstract = fm.abstract === true ? true : fm.abstract === false ? false : undefined;
