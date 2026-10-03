@@ -47,15 +47,12 @@ export interface ViewProfile {
 /** Spike default. View Profiles become vault configuration later (WB-001, review item 6). */
 export const STRUCTURE_PROFILE: ViewProfile = {
   name: "Structure",
-  description: "What it is made of: parts, children, states, included notes, ports, flows.",
+  description: "Definition/navigation hierarchy plus contextual part occurrences. Interface topology belongs in Internal or Interfaces.",
   steps: [
     { field: "hasPart", direction: "out" },
     { field: "hasChild", direction: "out" },
     { field: "hasState", direction: "out" },
     { field: "includes", direction: "out" },
-    { field: "hasPort", direction: "out" },
-    { field: "exposes", direction: "out" },
-    { field: "hasFlow", direction: "out" },
   ],
   depth: 2,
   nodeCap: 80,
