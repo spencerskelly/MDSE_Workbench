@@ -1014,7 +1014,7 @@ WB-106 remains the next required implementation: ModelRef identity, Local Model 
 
 **Status:** Decided and implemented (2026-10-02); no plugin behavior changed, version stays 0.1.15.
 
-The Workbench test fixtures `relationships.yaml` and `element-types.yaml` had drifted from the authority schemas in `99_System/03_Schemas` (wording changes from W-311/W-314/W-319 and the element-types 1.17 optional-property text). They were copied over; typecheck, 31 tests and the production build pass. Rule: the fixtures are a verbatim copy of the authority schemas. `99_System/09_Tools/check-release.py --workbench <clone>` (W-320) fails when they differ or when the Workbench version in `package.json`, `manifest.json` and `mdse-release.yaml` disagree. The Workbench README now points to `00 - Current State` and states the fixture and CI rules. Workbench CI remains inactive until switched on by a separate decision; run `npm run build` and `npm test` before each push.
+The Workbench test fixtures `relationships.yaml` and `element-types.yaml` had drifted from the authority schemas in `99_System/03_Schemas` (wording changes from W-311/W-314/W-319 and the element-types 1.17 optional-property text). They were copied over; typecheck, 31 tests and the production build pass. Rule: the fixtures are a verbatim copy of the authority schemas. `Base Vault/Tools/v0.8.0/check-release.py --workbench <clone>` (W-320) fails when they differ or when the Workbench version in `package.json`, `manifest.json` and `mdse-release.yaml` disagree. The Workbench README now points to `00 - Current State` and states the fixture and CI rules. Workbench CI remains inactive until switched on by a separate decision; run `npm run build` and `npm test` before each push.
 
 
 ### WB-109 — 2026-10-02 W-321 runtime-contract fixture boundary
@@ -1027,7 +1027,7 @@ Workbench does not copy the methodology release registry into its code. Runtime/
 
 **Status:** Decided (W-322). Amends WB-088.
 
-Workbench reaches engineers inside the base vault, not by per-machine install: the built `main.js`, `manifest.json` and `styles.css` are vendored in the methodology workspace (`99_System/09_Tools/runtime-plugins/mdse-workbench/`), pinned and hashed in `.obsidian/plugin-lock.yaml`, and MDSE Bootstrap 0.3.0 reports any difference. Pre-release bases pin 0.1.15. To ship a new Workbench build: build in `MDSE_Workbench`, copy the three files into the payload, run `update-plugin-lock.py`, set the version in `mdse-release.yaml`, and run `check-release.py --workbench <clone>`. The issued 0.8.0 base pins the WB-106 release (`wb106Version`). Workbench `data.json` (generated-view registry) and `Workbench Views/` are git-ignored in the base.
+Workbench reaches engineers inside the base vault, not by per-machine install: the built `main.js`, `manifest.json` and `styles.css` are vendored in the methodology workspace (`Base Vault/Tools/v0.8.0/runtime-plugins/mdse-workbench/`), pinned and hashed in `.obsidian/plugin-lock.yaml`, and MDSE Bootstrap 0.3.0 reports any difference. Pre-release bases pin 0.1.15. To ship a new Workbench build: build in `MDSE_Workbench`, copy the three files into the payload, run `update-plugin-lock.py`, set the version in `mdse-release.yaml`, and run `check-release.py --workbench <clone>`. The issued 0.8.0 base pins the WB-106 release (`wb106Version`). Workbench `data.json` (generated-view registry) and `Workbench Views/` are git-ignored in the base.
 
 ### WB-111 — 2026-10-03 Local Model reader, ModelRef and findings report (WB-106 part 1)
 
