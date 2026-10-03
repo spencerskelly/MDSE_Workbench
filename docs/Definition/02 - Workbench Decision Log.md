@@ -1137,3 +1137,11 @@ This adapter currently handles atomic single-file Local Model patch/create opera
 **Status:** Implemented.
 
 Immediate Local Model record patches now refuse a result that leaves the edited record with a required local validation error. The planner has an explicit allowInvalidTarget option reserved for staged structural transactions, where WB-114 permits temporary invalidity before final Apply validation. This keeps the immediate-edit path safe without forcing the future structural transaction editor to maintain validity after every intermediate gesture.
+
+
+### WB-121 — 2026-10-03 unified semantic history seam
+**Status:** Implemented.
+
+The existing RelationshipWriter now registers relationship/property/body edits into the same TransactionManager used by structured Local Model editing. Its mature schema checks and Obsidian frontmatter writing remain in place for now; only history/undo ownership moves to the shared coordinator. The writer exposes the same canUndo/undo behavior to existing UI callers, so prior screens do not need a parallel history implementation.
+
+TransactionManager has a recordApplied migration seam for governed writers that already performed their validated write. New Local Model/structural planners continue to use begin/add/apply before storage. This is an incremental migration path, not a second transaction architecture.

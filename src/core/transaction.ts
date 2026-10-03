@@ -161,6 +161,31 @@ export class TransactionManager {
     return !!last && last.entry.reversible && !!last.applied.redo;
   }
 
+  /**
+   * Migration seam for mature writers that already performed a governed edit before the WB-114
+   * coordinator existed. New planners should prefer begin/add/apply; existing writers register the
+   * same guarded undo/redo action here so all Workbench edits share one chronological history.
+   */
+  recordApplied(
+    transactionId: string,
+    label: string,
+    scope: EditScope,
+    changes: SemanticChange[],
+    applied: AppliedEdit,
+  ): SemanticHistoryEntry {
+    const entry: SemanticHistoryEntry = {
+      transactionId,
+      label,
+      scope,
+      appliedAt: this.now(),
+      changes: changes.map((x) => ({ ...x, refs: [...x.refs] })),
+      reversible: changes.every((x) => x.reversible !== false),
+    };
+    this.undoStack.push({ entry, applied });
+    this.redoStack.length = 0;
+    return { ...entry, changes: [...entry.changes] };
+  }
+
   history(): SemanticHistoryEntry[] {
     return this.undoStack.map((x) => ({ ...x.entry, changes: [...x.entry.changes] }));
   }

@@ -99,3 +99,24 @@ test("a non-reversible semantic change is retained in history but cannot undo", 
   assert.equal(manager.canUndo, false);
   await assert.rejects(manager.undo(), /non-reversible/);
 });
+
+
+test("an already-governed writer can join the same semantic history", async () => {
+  let state=1;
+  const manager=new TransactionManager([],()=> "2026-10-03T21:00:00.000Z");
+  manager.recordApplied(
+    "legacy-1",
+    "Add relationship",
+    "atomic",
+    [{kind:"relationship.add",summary:"A hasPart B",refs:[ref]}],
+    {
+      async undo(){state=0;},
+      async redo(){state=1;},
+    },
+  );
+  assert.equal(manager.history().length,1);
+  await manager.undo();
+  assert.equal(state,0);
+  await manager.redo();
+  assert.equal(state,1);
+});
