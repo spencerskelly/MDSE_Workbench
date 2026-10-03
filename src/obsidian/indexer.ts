@@ -4,9 +4,11 @@
  */
 import { App, getLinkpath, TFile } from "obsidian";
 import { ModelIndex, type NoteRecord } from "../core/model";
+import { LocalModelIndex, parseLocalModel } from "../core/localmodel";
 import type { Schema } from "../core/schema";
 
 const CHUNK = 500;
+const LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 /** Outside changes within one burst before a full rebuild is scheduled (WB-086). */
 const BURST_REBUILD = 300;
 /** Quiet time before a scheduled rebuild runs, so a pull or first-time indexing finishes first. */
@@ -29,12 +31,16 @@ export interface BuildStats {
  */
 export class Indexer {
   index: ModelIndex;
+  /** Parsed governed Local Model regions used by occurrence-aware views (WB-106). */
+  local = new LocalModelIndex();
   stats: BuildStats | null = null;
   private running: Promise<BuildStats> | null = null;
   private readonly dirty = new Set<string>();
   private burst = 0;
   private burstStarted = 0;
   private timer: number | null = null;
+  /** Prevents a slower cachedRead from overwriting a newer Local Model edit. */
+  private readonly localRevision = new Map<string, number>();
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -82,6 +88,14 @@ export class Indexer {
     };
   }
 
+  /** Metadata-only prefilter: body reads are limited to notes that can actually contain a Local Model region. */
+  private mayHaveLocalModel(file: TFile): boolean {
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache) return false;
+    if (cache.headings?.some((h) => h.level === 2 && h.heading.trim().toLowerCase() === "local model")) return true;
+    return Object.keys(cache.blocks ?? {}).some((id) => LOCAL_BLOCK_PREFIX.test(id));
+  }
+
   /** Builds the index; a second call while building returns the same promise. */
   build(): Promise<BuildStats> {
     if (!this.running) this.running = this.doBuild().finally(() => (this.running = null));
@@ -91,13 +105,17 @@ export class Indexer {
   private async doBuild(): Promise<BuildStats> {
     const t0 = performance.now();
     const index = new ModelIndex(this.schema);
+    const local = new LocalModelIndex();
     const files = this.app.vault.getMarkdownFiles();
     for (let i = 0; i < files.length; i++) {
-      const rec = this.record(files[i]);
+      const file = files[i];
+      const rec = this.record(file);
       if (rec) index.upsert(rec);
+      if (this.mayHaveLocalModel(file)) local.set(file.path, parseLocalModel(await this.app.vault.cachedRead(file)));
       if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
     }
     this.index = index;
+    this.local = local;
     // Apply what changed while building. A large backlog (first-time caching, a big pull)
     // is cheaper as one more chunked build after things go quiet than as one long loop.
     const backlog = this.dirty.size;
@@ -123,6 +141,19 @@ export class Indexer {
     const rec = f instanceof TFile ? this.record(f) : null;
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
+    this.applyLocal(path, f instanceof TFile ? f : null);
+  }
+
+  /** Update one governed Local Model region without rebuilding the whole vault. */
+  private applyLocal(path: string, file: TFile | null): void {
+    const revision = (this.localRevision.get(path) ?? 0) + 1;
+    this.localRevision.set(path, revision);
+    this.local.remove(path);
+    if (!file || !this.mayHaveLocalModel(file)) return;
+    void this.app.vault.cachedRead(file).then((text) => {
+      if (this.localRevision.get(path) !== revision) return;
+      this.local.set(path, parseLocalModel(text));
+    });
   }
 
   /** One file changed or was created. Cheap; never starts a build directly. */
