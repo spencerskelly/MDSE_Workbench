@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planLocalRecordPatch } from "../src/core/localmodel-edit";
+import { planLocalRecordCreate, planLocalRecordPatch } from "../src/core/localmodel-edit";
 import { parseLocalModel } from "../src/core/localmodel";
 
 const tokenA = "20261003133512742skellyspencer";
@@ -113,5 +113,64 @@ test("a connection cannot be given an unknown usage field", () => {
   assert.throws(
     () => planLocalRecordPatch(note(), "conn-" + tokenD, { fields: { usage: "variant" } }),
     /not a governed field|not valid/,
+  );
+});
+
+
+test("creates a first governed region using importer-compatible section formatting", () => {
+  const before = ["---", "type: Object", "---", "", "# Empty assembly", "", "Narrative."].join("\n");
+  const id = "part-" + tokenA;
+  const result = planLocalRecordCreate(before, {
+    kind: "part",
+    localId: id,
+    heading: "K1",
+    fields: { definition: "[[Main Contactor]]", identifier: "K1", usage: "standard" },
+  });
+  assert.match(result.after, /## Local Model\n<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->/);
+  assert.match(result.after, /### Part Occurrences\n\n#### K1\n- definition: \[\[Main Contactor\]\]\n- identifier: K1\n\^part-/);
+  assert.doesNotMatch(result.after, /- usage: standard/);
+  assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === id)?.kind, "part");
+});
+
+test("creates a missing section in canonical order", () => {
+  const id = "endpoint-" + tokenC;
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordCreate(note(), {
+    kind: "endpoint",
+    localId: endpointId,
+    heading: "J2",
+    fields: { definition: "[[CAN Port]]", part: "[[#^part-" + tokenA + "|K1]]" },
+  });
+  assert.ok(result.after.indexOf("### Local Interfaces") < result.after.indexOf("### Connections"));
+  assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === endpointId)?.kind, "endpoint");
+  assert.ok(id.length > 0);
+});
+
+test("creates a flow under its addressed connection", () => {
+  const id = "flow-" + tokenD;
+  const result = planLocalRecordCreate(note(), {
+    kind: "flow",
+    localId: id,
+    connectionId: "conn-" + tokenD,
+    heading: "Status",
+    fields: { definition: "[[Status Data]]", endpointA: "transmit", endpointB: "receive" },
+  });
+  const connectionPos = result.after.indexOf("#### Harness");
+  const flowPos = result.after.indexOf("##### Status");
+  const endPos = result.after.indexOf("<!-- MDSE:LOCAL-MODEL END -->");
+  assert.ok(connectionPos < flowPos && flowPos < endPos);
+  assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === id)?.kind, "flow");
+});
+
+test("does not commandeer an ambiguous ungoverned Local Model heading", () => {
+  const before = "# Note\n\n## Local Model\n\nNarrative only.";
+  assert.throws(
+    () => planLocalRecordCreate(before, {
+      kind: "part",
+      localId: "part-" + tokenA,
+      heading: "K1",
+      fields: { definition: "[[Main Contactor]]" },
+    }),
+    /ungoverned Local Model heading/,
   );
 });

@@ -127,3 +127,165 @@ function renderRecord(kind: LocalKind, heading: string, localId: string, fields:
   out.push("^" + localId);
   return out;
 }
+
+
+export interface NewLocalRecord {
+  kind: LocalKind;
+  localId: string;
+  heading: string;
+  fields: Readonly<Record<string, string>>;
+  /** Required only when kind is flow. */
+  connectionId?: string;
+}
+
+const SECTION_TITLE: Record<Exclude<LocalKind, "flow">, string> = {
+  part: "Part Occurrences",
+  endpoint: "Local Interfaces",
+  connection: "Connections",
+};
+
+const SECTION_ORDER: Array<Exclude<LocalKind, "flow">> = ["part", "endpoint", "connection"];
+
+export function planLocalRecordCreate(text: string, input: NewLocalRecord): PlannedLocalEdit {
+  validateNewRecord(input);
+
+  const existing = parseLocalModel(text);
+  if (!existing) {
+    if (/^##\s+Local Model\s*$/m.test(text)) {
+      throw new Error("This note already has an ungoverned Local Model heading. Resolve it before structured creation.");
+    }
+    if (input.kind === "flow") throw new Error("A flow requires an existing connection.");
+    const eol: "\n" | "\r\n" = text.includes("\r\n") ? "\r\n" : "\n";
+    const block = renderRecord(input.kind, input.heading.trim(), input.localId, normalizedFields(input.kind, input.fields));
+    const regionLines = [
+      "## Local Model",
+      "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+      "",
+      "### " + SECTION_TITLE[input.kind],
+      "",
+      ...block,
+      "",
+      "<!-- MDSE:LOCAL-MODEL END -->",
+    ];
+    const separator = text === "" || text.endsWith("\n") || text.endsWith("\r") ? "" : eol;
+    const prefix = text === "" ? "" : text + separator + eol;
+    return checkedCreate(text, prefix + regionLines.join(eol), input);
+  }
+
+  const editable = editableLocalRegion(text);
+  if (editable.region.records.some((r) => r.localId === input.localId)) {
+    throw new Error("Local Model record ^" + input.localId + " already exists in this note.");
+  }
+
+  const block = renderRecord(input.kind, input.heading.trim(), input.localId, normalizedFields(input.kind, input.fields));
+  const lines = editable.lines.slice();
+
+  if (input.kind === "flow") {
+    const connectionId = input.connectionId ?? "";
+    const connection = editable.region.records.find((r) => r.kind === "connection" && r.localId === connectionId);
+    if (!connection) throw new Error("Flow parent connection ^" + connectionId + " does not exist in this note.");
+    const insert = endOfConnection(lines, editable.region, connection);
+    const payload = [...block, ""];
+    lines.splice(insert, 0, ...payload);
+  } else {
+    const insert = sectionInsertPoint(lines, editable.region, input.kind);
+    if (insert.existing) {
+      lines.splice(insert.line, 0, ...block, "");
+    } else {
+      lines.splice(insert.line, 0, "### " + SECTION_TITLE[input.kind], "", ...block, "");
+    }
+  }
+
+  return checkedCreate(text, lines.join(editable.eol), input);
+}
+
+function checkedCreate(before: string, after: string, input: NewLocalRecord): PlannedLocalEdit {
+  const parsed = parseLocalModel(after);
+  if (!parsed?.structured) throw new Error("Planned creation would make the Local Model region structurally unreadable.");
+  const record = parsed.records.find((r) => r.localId === input.localId);
+  if (!record || record.kind !== input.kind) throw new Error("Planned creation did not produce the requested " + input.kind + " record.");
+  return { before, after, changed: after !== before, localId: input.localId, kind: input.kind, findings: parsed.findings.slice() };
+}
+
+function validateNewRecord(input: NewLocalRecord): void {
+  if (!input.heading.trim()) throw new Error("A Local Model record heading cannot be empty.");
+  const prefix: Record<LocalKind, string> = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
+  const want = prefix[input.kind];
+  if (!input.localId.startsWith(want) || !/^\d{17}[a-z-]{13}$/.test(input.localId.slice(want.length))) {
+    throw new Error("Local Model ID " + input.localId + " is not a valid " + input.kind + " identity.");
+  }
+  for (const key of Object.keys(input.fields)) {
+    if (!FIELD_ORDER[input.kind].includes(key)) throw new Error(key + " is not a governed field on a " + input.kind + " record.");
+  }
+  if ((input.kind === "part" || input.kind === "endpoint" || input.kind === "flow") && !input.fields.definition?.trim()) {
+    throw new Error("A " + input.kind + " record requires a definition.");
+  }
+  if (input.kind === "connection" && (!input.fields.endpointA?.trim() || !input.fields.endpointB?.trim())) {
+    throw new Error("A connection requires endpointA and endpointB.");
+  }
+  if (input.kind === "flow" && (!input.fields.endpointA?.trim() || !input.fields.endpointB?.trim())) {
+    throw new Error("A flow requires endpointA and endpointB roles.");
+  }
+}
+
+function normalizedFields(kind: LocalKind, source: Readonly<Record<string, string>>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const key of FIELD_ORDER[kind]) {
+    const value = source[key]?.trim();
+    if (!value || (key === "usage" && value === "standard")) continue;
+    out.set(key, value);
+  }
+  return out;
+}
+
+function sectionInsertPoint(
+  lines: readonly string[],
+  region: LocalRegion,
+  kind: Exclude<LocalKind, "flow">,
+): { line: number; existing: boolean } {
+  const title = SECTION_TITLE[kind].toLowerCase();
+  const end = region.endLine ? region.endLine - 1 : lines.length;
+  let section = -1;
+  for (let i = (region.startLine ?? 1); i < end; i++) {
+    const m = /^###\s+(.*?)\s*$/.exec(lines[i]);
+    if (m && m[1].trim().toLowerCase() === title) {
+      section = i;
+      break;
+    }
+  }
+  if (section >= 0) {
+    let insert = end;
+    for (let i = section + 1; i < end; i++) {
+      if (/^###\s+/.test(lines[i])) {
+        insert = i;
+        break;
+      }
+    }
+    while (insert > section + 1 && lines[insert - 1].trim() === "") insert--;
+    return { line: insert, existing: true };
+  }
+
+  const order = SECTION_ORDER.indexOf(kind);
+  for (let later = order + 1; later < SECTION_ORDER.length; later++) {
+    const laterTitle = SECTION_TITLE[SECTION_ORDER[later]].toLowerCase();
+    for (let i = (region.startLine ?? 1); i < end; i++) {
+      const m = /^###\s+(.*?)\s*$/.exec(lines[i]);
+      if (m && m[1].trim().toLowerCase() === laterTitle) return { line: i, existing: false };
+    }
+  }
+  return { line: end, existing: false };
+}
+
+function endOfConnection(lines: readonly string[], region: LocalRegion, connection: LocalRecord): number {
+  const start = connection.line - 1;
+  const end = region.endLine ? region.endLine - 1 : lines.length;
+  let insert = end;
+  for (let i = start + 1; i < end; i++) {
+    if (/^####\s+/.test(lines[i]) || /^###\s+/.test(lines[i])) {
+      insert = i;
+      break;
+    }
+  }
+  while (insert > start + 1 && lines[insert - 1].trim() === "") insert--;
+  return insert;
+}

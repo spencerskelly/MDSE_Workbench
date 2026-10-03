@@ -1111,3 +1111,13 @@ This slice intentionally edits existing records only. Record creation/deletion, 
 Workbench now has one pure identity allocator matching the current MDSE uid definition: 17 local-time digits plus the registered 13-character author code, with one-millisecond collision advancement in the global namespace shared by note UIDs and Local Model identity tokens. Local Model IDs add only the governed representation prefix (part-, ep-, conn-, flow-); the 30-character token remains the persistent identity.
 
 This is not a Workbench-private ID system. The Obsidian adapter will obtain the current person's registered author code and the used-token set from the vault, then call this allocator for note/Local Model creation.
+
+
+### WB-118 — 2026-10-03 Local Model record creation planner
+**Status:** Implemented in pure core; no user-facing version bump yet.
+
+Structured creation now uses the same Local Model 0.2 planner boundary as record edits. A new record receives its already-allocated governed identity, is inserted into the importer-compatible Part Occurrences / Local Interfaces / Connections structure, and the result is reparsed before it can be applied. A flow is inserted only under an addressed existing connection.
+
+When a note has no Local Model, Workbench may create the canonical governed 0.2 region. If an ungoverned section already uses the exact Local Model heading, creation refuses instead of silently taking ownership of ambiguous narrative. Standard usage is omitted canonically.
+
+Creation still does not write the vault directly. UID/token allocation is supplied by WB-117, and actual storage remains behind the WB-115 transaction executor.
