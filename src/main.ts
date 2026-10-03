@@ -8,7 +8,7 @@ import type { NoteRecord } from "./core/model";
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
-import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
+import { INTERNAL_PROFILE, PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal, ViewPicker } from "./obsidian/ui";
@@ -85,6 +85,11 @@ export default class MdseWorkbench extends Plugin {
       id: "explore-structure",
       name: "Explore structure of current note",
       checkCallback: (checking) => this.withActive(checking, (f) => this.explore([f.path])),
+    });
+    this.addCommand({
+      id: "explore-internal",
+      name: "Explore internal structure of current Object",
+      checkCallback: (checking) => this.withActive(checking, (f) => this.explore([f.path], INTERNAL_PROFILE)),
     });
     this.addCommand({
       id: "explore-functional",
