@@ -7,7 +7,7 @@ import { App, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Settin
 import type { NoteRecord } from "./core/model";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
-import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "./core/views";
+import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalStructure, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal, ViewPicker } from "./obsidian/ui";
@@ -308,7 +308,8 @@ export default class MdseWorkbench extends Plugin {
         return;
       }
     }
-    const view = traverse(index, starts, profile);
+    const baseView = traverse(index, starts, profile);
+    const view = profile.name === STRUCTURE_PROFILE.name ? withLocalStructure(index, this.indexer!.local, baseView, profile) : baseView;
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
       new Notice(`Nothing to show: this note has no links the ${profile.name} view follows (${[...new Set(profile.steps.map((s) => s.field))].join(", ")}).`);
       return;
@@ -326,7 +327,7 @@ export default class MdseWorkbench extends Plugin {
     await this.saveAll();
     const ms = Math.round(performance.now() - t0);
     await this.app.workspace.getLeaf(true).openFile(file);
-    new Notice(`${view.profile}: ${view.depthOf.size} notes${view.undefinedCount ? ` (${view.undefinedCount} undefined)` : ""} in ${ms} ms${view.capReached ? `, stopped at the ${profile.nodeCap}-note limit` : ""}.`);
+    new Notice(`${view.profile}: ${view.depthOf.size} items${view.localNodes.size ? ` (${view.localNodes.size} local occurrences)` : ""}${view.undefinedCount ? `, ${view.undefinedCount} undefined` : ""} in ${ms} ms${view.capReached ? `, stopped at the ${profile.nodeCap}-item limit` : ""}.`);
   }
 
   /**
@@ -406,7 +407,10 @@ export default class MdseWorkbench extends Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
-    const now = signature(traverse(this.indexer!.index, meta.starts, profile));
+    const index = this.indexer!.index;
+    const baseView = traverse(index, meta.starts, profile);
+    const current = profile.name === STRUCTURE_PROFILE.name ? withLocalStructure(index, this.indexer!.local, baseView, profile) : baseView;
+    const now = signature(current);
     if (now === meta.signature) new Notice("This view is current.");
     else
       new ConfirmModal(this.app, "The model changed since this view was generated.", "Refresh view", () => void this.explore(meta.starts, profile)).open();
