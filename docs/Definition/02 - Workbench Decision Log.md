@@ -1040,3 +1040,23 @@ Spencer: bring Workbench up to date before the next importer run so each run is 
 **Status:** Built in plugin 0.1.16. Answers the open point of W-324.
 
 Finding: the indexer already resolved links through Obsidian's own resolver (`getFirstLinkpathDest`), so file-name links and path links, with or without a `#^block` fragment, were read correctly. The writer was the fault: Relate, Replace and Write missing inverse always wrote `[[<file name>]]`, which points at the wrong note where two notes share a name (about 17% of the notes in the EA8647 extract), and a repeat or a removal compared link text, so a target linked as `[[Folder/Name]]` was missed. Now the link text is what Obsidian writes for that target from that note (`generateMarkdownLink`, following `newLinkFormat`, with `fileToLinktext` as fallback): the file name when unique, else the shortest unique path. An existing entry is matched by the note it resolves to, not by its text. Undo restores the whole note as before.
+
+
+### WB-113 — 2026-10-03 WB-106 occurrence-aware keepability gate
+
+**Status:** Built in Workbench 0.1.17 candidate; standalone tests/build pass. WB-106 implementation complete pending the normal controlled release/integration chain.
+
+The remaining WB-106 work after 0.1.16 is implemented without changing the governed Local Model syntax or inventing occurrence notes:
+
+1. **Index seam.** The normal indexer now maintains parsed Local Model regions incrementally. Body reads are metadata-prefiltered to notes that can contain governed records.
+2. **Exact local relationship identity.** A frontmatter relationship that names `#^local-id` is recorded as a local target only; it is not also turned into a note-to-note edge. This prevents local Requirement applicability from leaking to the containing assembly.
+3. **Structure.** Local part occurrences appear as contextual nodes. Their definition stays a link and the definition's internals are not flattened through the occurrence.
+4. **Interfaces.** Local endpoints, exposure/parent topology, connections and connection-owned flows are rendered. Port and Item Flow definitions can show their contextual occurrences.
+5. **Where Used.** Reusable definitions show Local Model occurrences across owner notes.
+6. **Requirements.** `appliesTo [[Owner#^local-id]]` resolves to the exact local occurrence.
+7. **Canvas.** Local records are derived text nodes with native block links, not invented notes. Local occurrence content is included in the stale-view signature.
+8. **Details.** Clicking a generated local-record node opens a read-only Local Model popup with owner/occurrence navigation and contextual fields.
+9. **Review.** Local Model validation findings are a sixth Review category. WB-106 does not rewrite those records.
+
+Guardrail retained: structured Local Model editing, persisted configurations, topology variation and other W-314 follow-on work remain deferred. The Workbench schema fixtures were rechecked against the live authority and are byte-identical for relationships 1.35, element-types 1.17 and Local Model 0.2.
+
