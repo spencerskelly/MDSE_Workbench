@@ -3,11 +3,11 @@
  * Commands: diagnostics, rebuild index, explore Structure from the current note,
  * relate the current note to another, undo, and the Canvas probe.
  */
-import { App, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
-import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalStructure, type ViewProfile } from "./core/views";
+import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal, ViewPicker } from "./obsidian/ui";
@@ -309,7 +309,8 @@ export default class MdseWorkbench extends Plugin {
       }
     }
     const baseView = traverse(index, starts, profile);
-    const view = profile.name === STRUCTURE_PROFILE.name ? withLocalStructure(index, this.indexer!.local, baseView, profile) : baseView;
+    const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+    const view = withLocalOccurrences(index, this.indexer!.local, resolve, baseView, profile);
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
       new Notice(`Nothing to show: this note has no links the ${profile.name} view follows (${[...new Set(profile.steps.map((s) => s.field))].join(", ")}).`);
       return;
@@ -409,7 +410,8 @@ export default class MdseWorkbench extends Plugin {
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
     const index = this.indexer!.index;
     const baseView = traverse(index, meta.starts, profile);
-    const current = profile.name === STRUCTURE_PROFILE.name ? withLocalStructure(index, this.indexer!.local, baseView, profile) : baseView;
+    const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+    const current = withLocalOccurrences(index, this.indexer!.local, resolve, baseView, profile);
     const now = signature(current);
     if (now === meta.signature) new Notice("This view is current.");
     else
