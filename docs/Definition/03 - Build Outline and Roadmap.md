@@ -312,3 +312,25 @@ Implementation order:
    - impact-review gates.
 
 The architecture must keep UI, semantic operations and storage adapters separable so future Local Model/schema changes do not require rewriting every view.
+
+
+## Internal Structure validation — WB-123
+
+Before the expanded WB-106 editor gate can be promoted:
+
+1. Open Internal from the existing note-details **View…** picker on representative occurrence-owning Object notes.
+2. Confirm the selected note is a Canvas group boundary.
+3. Confirm local part occurrences are inside the boundary and reusable-definition internals are not flattened into it.
+4. Confirm assembly-boundary endpoint occurrences are compact and visually attached to the boundary.
+5. Confirm part-owned endpoints remain close to their owning part.
+6. Confirm local connections connect the correct endpoint occurrences and connection-owned flows remain associated with the connection.
+7. Confirm `exposes` reads clearly from the boundary endpoint to the exposed internal endpoint.
+8. Manually improve a complex layout, refresh after a semantic model change, and verify surviving stable nodes retain their position/size.
+9. Verify manually moving/drawing Canvas geometry never authors MDSE semantic relationships.
+10. Evaluate at least one multi-level assembly and use semantic navigation into the next reusable definition/context rather than flattening several levels into one view.
+
+The automatic layout is successful when it produces a useful first draft; it is not required to solve every routing problem. Human layout work is expected for complex engineering diagrams.
+
+## Engineer guide — WB-124
+
+The engineer-facing guide is `docs/User Guide/MDSE Workbench User Guide.md`. The controlled Base Vault ships an exact release-managed copy. Changes to user-visible behavior should update the guide in the same development change, while candidate features must stay visibly marked until release promotion.
