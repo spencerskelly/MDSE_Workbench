@@ -561,6 +561,85 @@ function linkedLocal(index: ModelIndex, local: LocalModelIndex, resolve: Resolve
   return key ? { path, record, key } : null;
 }
 
+
+/** WB-106 Interfaces: materialize the local boundary/topology graph without inventing notes. */
+export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile = INTERFACES_PROFILE): ViewResult {
+  if (profile.name !== INTERFACES_PROFILE.name) return base;
+  const m = mutableLocal(base);
+  const starts = base.starts.filter((p) => index.notes.has(p));
+
+  for (const ownerPath of starts.filter((p) => index.notes.get(p)?.type === "Object")) {
+    const ownerDepth = m.depthOf.get(ownerPath) ?? 0;
+    const records = local.recordsOf(ownerPath);
+    const endpoints = records.filter((r) => r.kind === "endpoint" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    const connections = records.filter((r) => r.kind === "connection" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    const flows = records.filter((r) => r.kind === "flow" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+
+    for (const r of endpoints) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 1, profile);
+      if (k) m.tree.push({ parent: ownerPath, child: k, field: "interface occurrence", direction: "out", count: 1 });
+    }
+    for (const r of connections) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 1, profile);
+      if (k) m.tree.push({ parent: ownerPath, child: k, field: "connection", direction: "out", count: 1 });
+    }
+    for (const r of flows) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 2, profile);
+      if (!k) continue;
+      const parent = r.connectionId ? records.find((x) => x.kind === "connection" && x.localId === r.connectionId) : undefined;
+      const pk = parent ? localKeyFor(index, local, ownerPath, parent) : null;
+      m.tree.push({ parent: pk && m.depthOf.has(pk) ? pk : ownerPath, child: k, field: "flow occurrence", direction: "out", count: 1 });
+    }
+
+    for (const r of endpoints) {
+      const a = localKeyFor(index, local, ownerPath, r);
+      if (!a || !m.depthOf.has(a)) continue;
+      const groups: Array<[string, LinkRef[]]> = [
+        ["exposes", r.exposes],
+        ["equals", r.equals],
+        ["parent", r.parent ? [r.parent] : []],
+      ];
+      for (const [field, links] of groups) {
+        for (const link of links) {
+          const t = linkedLocal(index, local, resolve, ownerPath, link);
+          if (!t) continue;
+          addLocalNode(index, local, m, t.path, t.record, ownerDepth + 1, profile);
+          if (m.depthOf.has(t.key)) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+        }
+      }
+    }
+
+    for (const r of connections) {
+      const a = localKeyFor(index, local, ownerPath, r);
+      if (!a || !m.depthOf.has(a)) continue;
+      const ends: Array<[string, LinkRef | null]> = [["endpointA", r.endpointA], ["endpointB", r.endpointB]];
+      for (const [field, link] of ends) {
+        const t = linkedLocal(index, local, resolve, ownerPath, link);
+        if (!t) continue;
+        addLocalNode(index, local, m, t.path, t.record, ownerDepth + 1, profile);
+        if (m.depthOf.has(t.key)) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+      }
+    }
+  }
+
+  for (const definitionPath of starts.filter((p) => ["Port", "Item Flow"].includes(index.notes.get(p)?.type ?? ""))) {
+    const d = m.depthOf.get(definitionPath) ?? 0;
+    const expected = index.notes.get(definitionPath)?.type === "Port" ? "endpoint" : "flow";
+    const occurrences = local.occurrencesOf(definitionPath, resolve)
+      .filter(({ record }) => record.kind === expected)
+      .sort((a, b) => a.path.localeCompare(b.path) || a.record.identifier.localeCompare(b.record.identifier));
+    for (const { path, record } of occurrences) {
+      const k = addLocalNode(index, local, m, path, record, d + 1, profile);
+      if (k) m.tree.push({ parent: definitionPath, child: k, field: "occurrence", direction: "out", count: 1 });
+    }
+  }
+
+  return { ...base, ...m };
+}
+
 /** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
 export function signature(view: ViewResult): string {
   const nodes = [...view.depthOf.keys()].sort().join("\n");
