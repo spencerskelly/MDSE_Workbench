@@ -44,6 +44,11 @@ interface Stored {
   views: Record<string, { starts: string[]; profile: string; signature: string; at: number }>;
 }
 
+function localCardTarget(text: string | undefined): { target: string; localId: string } | null {
+  const m = /\[\[([^#\]|]+)#\^([^\]|]+)(?:\|[^\]]*)?\]\]/.exec(text ?? "");
+  return m ? { target: m[1].trim(), localId: m[2].trim() } : null;
+}
+
 export default class MdseWorkbench extends Plugin {
   settings: Settings = { ...DEFAULTS };
   views: Stored["views"] = {};
@@ -368,6 +373,7 @@ export default class MdseWorkbench extends Plugin {
     const view = this.app.workspace.getLeavesOfType("canvas").map((l) => l.view as any).find((v) => v?.containerEl?.contains(cardEl)); // eslint-disable-line @typescript-eslint/no-explicit-any
     if (!view || !this.isWorkbenchCanvas(view.file)) return;
     let file: TFile | null = null;
+    let localTarget: { target: string; localId: string } | null = null;
     let missing: string | null = null;
     // 1. Obsidian's own card objects (undocumented).
     try {
@@ -375,7 +381,8 @@ export default class MdseWorkbench extends Plugin {
       const list: any[] = nodes instanceof Map ? [...nodes.values()] : Array.isArray(nodes) ? nodes : []; // eslint-disable-line @typescript-eslint/no-explicit-any
       const node = list.find((n) => n?.nodeEl === cardEl);
       if (node?.file instanceof TFile) file = node.file;
-      else if (node) missing = undefinedName(node.text);
+      else if (node) localTarget = localCardTarget(node.text) ?? null;
+      if (node && !localTarget && !file) missing = undefinedName(node.text);
     } catch {
       /* fall through to the position match */
     }
@@ -389,13 +396,21 @@ export default class MdseWorkbench extends Plugin {
           if (n?.file) {
             const f = this.app.vault.getAbstractFileByPath(n.file);
             if (f instanceof TFile) file = f;
-          } else if (n) missing = undefinedName(n.text);
+          } else if (n) {
+            localTarget = localCardTarget(n.text) ?? null;
+            if (!localTarget) missing = undefinedName(n.text);
+          }
         } catch {
           /* nothing to show */
         }
       }
     }
-    if (file) await this.detail?.show(file);
+    if (localTarget) {
+      const owner = this.app.metadataCache.getFirstLinkpathDest(getLinkpath(localTarget.target), view.file.path);
+      const record = owner ? this.indexer?.local.recordsOf(owner.path).find((r) => r.localId === localTarget?.localId) : undefined;
+      if (owner && record) this.detail?.showLocal(owner, record);
+      else if (owner) new Notice(`Local Model record ${localTarget.localId} was not found in ${owner.basename}.`);
+    } else if (file) await this.detail?.show(file);
     else if (missing) this.detail?.showUndefined(missing);
   }
 
