@@ -837,3 +837,16 @@ The model-side contract is now settled by W-315 through W-319.
 - WB-106 remains the keepability gate before a full v0.8 import can be accepted.
 
 Standalone Workbench 0.1.15 is a safety/alignment build: it labels repeated links as duplicate evidence and refuses ordinary body editing on notes containing a governed Local Model marker. It does not yet implement the WB-106 parser/index/view foundation.
+
+
+## Internal Structure view
+
+Internal Structure is the preferred occurrence-native view for an Object that owns Local Model content.
+
+The selected note is shown as the visual boundary. Contextual part occurrences are inside it. Boundary endpoint occurrences are compact boxes at the edge. Part-owned endpoints stay near their part where practical. Context-owned connections are drawn between endpoint occurrences, and connection-owned flows may be summarized on the connection.
+
+The view answers **what is inside this context and how is it connected?** It does not attempt to show every related definition, requirement or where-used fact at the same time.
+
+Reusable-definition internals are reached by changing context to that definition's own Internal view rather than flattening deeper levels into the current view.
+
+Automatic layout is a starting point. Engineers may curate the Canvas for readability. Geometry is presentation only and never creates model semantics. Refresh of a curated Internal view preserves surviving stable-node positions where practical.
