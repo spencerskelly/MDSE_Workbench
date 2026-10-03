@@ -3,11 +3,12 @@
  * Commands: diagnostics, rebuild index, explore Structure from the current note,
  * relate the current note to another, undo, and the Canvas probe.
  */
-import { App, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
+import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
-import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "./core/views";
+import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal, ViewPicker } from "./obsidian/ui";
@@ -42,6 +43,11 @@ interface Stored {
   settings: Settings;
   /** Generated canvas path → signature at generation, for stale-view checks (WB-035). */
   views: Record<string, { starts: string[]; profile: string; signature: string; at: number }>;
+}
+
+function localCardTarget(text: string | undefined): { target: string; localId: string } | null {
+  const m = /\[\[([^#\]|]+)#\^([^\]|]+)(?:\|[^\]]*)?\]\]/.exec(text ?? "");
+  return m ? { target: m[1].trim(), localId: m[2].trim() } : null;
 }
 
 export default class MdseWorkbench extends Plugin {
@@ -140,6 +146,11 @@ export default class MdseWorkbench extends Plugin {
           index: () => (this.indexer as Indexer).index,
           schema: () => this.schema as Schema,
           writer: () => this.writer as RelationshipWriter,
+          localFindings: () => {
+            const indexer = this.indexer as Indexer;
+            const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+            return validateLocalModels({ index: indexer.index, local: indexer.local, resolve });
+          },
         }),
     );
     this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
@@ -308,7 +319,9 @@ export default class MdseWorkbench extends Plugin {
         return;
       }
     }
-    const view = traverse(index, starts, profile);
+    const baseView = traverse(index, starts, profile);
+    const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+    const view = withLocalOccurrences(index, this.indexer!.local, resolve, baseView, profile);
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
       new Notice(`Nothing to show: this note has no links the ${profile.name} view follows (${[...new Set(profile.steps.map((s) => s.field))].join(", ")}).`);
       return;
@@ -326,7 +339,7 @@ export default class MdseWorkbench extends Plugin {
     await this.saveAll();
     const ms = Math.round(performance.now() - t0);
     await this.app.workspace.getLeaf(true).openFile(file);
-    new Notice(`${view.profile}: ${view.depthOf.size} notes${view.undefinedCount ? ` (${view.undefinedCount} undefined)` : ""} in ${ms} ms${view.capReached ? `, stopped at the ${profile.nodeCap}-note limit` : ""}.`);
+    new Notice(`${view.profile}: ${view.depthOf.size} items${view.localNodes.size ? ` (${view.localNodes.size} local occurrences)` : ""}${view.undefinedCount ? `, ${view.undefinedCount} undefined` : ""} in ${ms} ms${view.capReached ? `, stopped at the ${profile.nodeCap}-item limit` : ""}.`);
   }
 
   /**
@@ -366,6 +379,7 @@ export default class MdseWorkbench extends Plugin {
     const view = this.app.workspace.getLeavesOfType("canvas").map((l) => l.view as any).find((v) => v?.containerEl?.contains(cardEl)); // eslint-disable-line @typescript-eslint/no-explicit-any
     if (!view || !this.isWorkbenchCanvas(view.file)) return;
     let file: TFile | null = null;
+    let localTarget: { target: string; localId: string } | null = null;
     let missing: string | null = null;
     // 1. Obsidian's own card objects (undocumented).
     try {
@@ -373,7 +387,8 @@ export default class MdseWorkbench extends Plugin {
       const list: any[] = nodes instanceof Map ? [...nodes.values()] : Array.isArray(nodes) ? nodes : []; // eslint-disable-line @typescript-eslint/no-explicit-any
       const node = list.find((n) => n?.nodeEl === cardEl);
       if (node?.file instanceof TFile) file = node.file;
-      else if (node) missing = undefinedName(node.text);
+      else if (node) localTarget = localCardTarget(node.text) ?? null;
+      if (node && !localTarget && !file) missing = undefinedName(node.text);
     } catch {
       /* fall through to the position match */
     }
@@ -387,13 +402,21 @@ export default class MdseWorkbench extends Plugin {
           if (n?.file) {
             const f = this.app.vault.getAbstractFileByPath(n.file);
             if (f instanceof TFile) file = f;
-          } else if (n) missing = undefinedName(n.text);
+          } else if (n) {
+            localTarget = localCardTarget(n.text) ?? null;
+            if (!localTarget) missing = undefinedName(n.text);
+          }
         } catch {
           /* nothing to show */
         }
       }
     }
-    if (file) await this.detail?.show(file);
+    if (localTarget) {
+      const owner = this.app.metadataCache.getFirstLinkpathDest(getLinkpath(localTarget.target), view.file.path);
+      const record = owner ? this.indexer?.local.recordsOf(owner.path).find((r) => r.localId === localTarget?.localId) : undefined;
+      if (owner && record) this.detail?.showLocal(owner, record);
+      else if (owner) new Notice(`Local Model record ${localTarget.localId} was not found in ${owner.basename}.`);
+    } else if (file) await this.detail?.show(file);
     else if (missing) this.detail?.showUndefined(missing);
   }
 
@@ -406,7 +429,11 @@ export default class MdseWorkbench extends Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
-    const now = signature(traverse(this.indexer!.index, meta.starts, profile));
+    const index = this.indexer!.index;
+    const baseView = traverse(index, meta.starts, profile);
+    const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+    const current = withLocalOccurrences(index, this.indexer!.local, resolve, baseView, profile);
+    const now = signature(current);
     if (now === meta.signature) new Notice("This view is current.");
     else
       new ConfirmModal(this.app, "The model changed since this view was generated.", "Refresh view", () => void this.explore(meta.starts, profile)).open();

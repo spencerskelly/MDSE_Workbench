@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "../src/core/views";
+import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, INTERNAL_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, WHERE_USED_PROFILE, withLocalInterfaces, withLocalRequirements, withLocalStructure, withLocalWhereUsed, type ViewProfile } from "../src/core/views";
+import { buildInternalView, preserveInternalLayout } from "../src/core/internal-view";
+import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
 const schema = fixtureSchema();
@@ -50,7 +52,7 @@ test("findings: missing inverse, orphan inverse, off-rule, provisional", () => {
   ]);
   const f = idx.findings();
   assert.deepEqual(f.missingInverse.map((e) => `${e.from}>${e.to}`), ["F.md>R.md"]);
-  assert.equal(f.orphanInverse.length, 0, "S.md does satisfy R.md");
+  assert.equal(f.orphanInverse.length, 0, "the stored inverse pair is present even though State -> Requirement is off-rule");
   assert.deepEqual(f.offRule.map((e) => e.from), ["S.md"]);
   assert.equal(f.provisional.length, 1);
 });
@@ -77,6 +79,140 @@ test("traversal: the node cap wins over depth and omissions are counted", () => 
   assert.ok(c.nodes.some((n) => n.type === "text" && n.text === "**+7 more**"));
   assert.ok(c.edges.every((e) => e.fromNode && e.toNode), "every edge has both ends");
   assert.equal(signature(v), signature(traverse(idx, ["Top.md"], profile)), "deterministic");
+});
+
+test("WB-106 Structure shows local part occurrences without flattening child internals", () => {
+  const ownerUid = "20261003123456789assemblyowner";
+  const token = "20261003123456789abcdefghijklm";
+  const idx = indexOf(schema, [
+    { ...note("Assembly.md", "Object"), uid: ownerUid },
+    note("Pump.md", "Object", { hasPart: ["Impeller.md"] }),
+    note("Impeller.md", "Object"),
+  ]);
+  const local = new LocalModelIndex();
+  const region = parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "## Local Model",
+    "### Part Occurrences",
+    "#### Pump A",
+    "- definition: [[Pump]]",
+    "- multiplicity: 2",
+    `^part-${token}`,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+  assert.ok(region?.structured);
+  local.set("Assembly.md", region);
+
+  const view = withLocalStructure(idx, local, traverse(idx, ["Assembly.md"], STRUCTURE_PROFILE), STRUCTURE_PROFILE);
+  assert.equal(view.localNodes.size, 1);
+  assert.equal(view.depthOf.size, 2, "assembly + local occurrence only");
+  assert.ok(!view.depthOf.has("Pump.md"), "definition is linked from the occurrence, not flattened into the parent structure");
+  const localId = [...view.localNodes.keys()][0];
+  assert.match(localId, /^local:/);
+  const link = view.tree.find((x) => x.child === localId)!;
+  assert.equal(link.field, "part occurrence");
+
+  const canvas = toCanvas(idx, view, STRUCTURE_PROFILE);
+  const node = canvas.nodes.find((n) => n.type === "text" && n.text?.includes("Pump A"))!;
+  assert.ok(node.text?.includes(`Assembly#^part-${token}`), "occurrence card keeps the native block link");
+  assert.ok(node.text?.includes("[[Pump]]"));
+  assert.ok(node.text?.includes("Multiplicity: 2"));
+
+  const region2 = parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "## Local Model",
+    "### Part Occurrences",
+    "#### Pump A",
+    "- definition: [[Pump]]",
+    "- multiplicity: 3",
+    `^part-${token}`,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+  local.set("Assembly.md", region2);
+  const changed = withLocalStructure(idx, local, traverse(idx, ["Assembly.md"], STRUCTURE_PROFILE), STRUCTURE_PROFILE);
+  assert.notEqual(signature(view), signature(changed), "stale-view signature includes local occurrence data");
+});
+
+
+test("WB-106 Interfaces renders local endpoints, connections and connection-scoped flows", () => {
+  const idx = indexOf(schema, [
+    { ...note("Assembly.md", "Object"), uid: "20261003123456789assemblyowner" },
+    note("PortDef.md", "Port"),
+    note("FlowDef.md", "Item Flow"),
+  ]);
+  const ids = {
+    a: "20261003123456789aaaaaaaaaaaaa",
+    b: "20261003123456789bbbbbbbbbbbbb",
+    c: "20261003123456789ccccccccccccc",
+    f: "20261003123456789fffffffffffff",
+  };
+  const local = new LocalModelIndex();
+  local.set("Assembly.md", parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "## Local Model",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[PortDef]]",
+    `^ep-${ids.a}`,
+    "#### J2",
+    "- definition: [[PortDef]]",
+    `- exposes: [[#^ep-${ids.a}|J1]]`,
+    `^ep-${ids.b}`,
+    "### Connections",
+    "#### Harness",
+    `- endpointA: [[#^ep-${ids.a}|J1]]`,
+    `- endpointB: [[#^ep-${ids.b}|J2]]`,
+    `^conn-${ids.c}`,
+    "##### CAN Tx",
+    "- definition: [[FlowDef]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    `^flow-${ids.f}`,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+  const resolve = (target: string) => `${target}.md`;
+  const view = withLocalInterfaces(idx, local, resolve, traverse(idx, ["Assembly.md"], INTERFACES_PROFILE), INTERFACES_PROFILE);
+  assert.equal(view.localNodes.size, 4);
+  assert.ok(view.localEdges.some((e) => e.field === "endpointA"));
+  assert.ok(view.localEdges.some((e) => e.field === "endpointB"));
+  assert.ok(view.localEdges.some((e) => e.field === "exposes"));
+  const flowKey = [...view.localNodes].find(([, n]) => n.record.kind === "flow")?.[0];
+  const connKey = [...view.localNodes].find(([, n]) => n.record.kind === "connection")?.[0];
+  assert.ok(flowKey && connKey && view.tree.some((e) => e.parent === connKey && e.child === flowKey));
+  assert.equal(toCanvas(idx, view, INTERFACES_PROFILE).nodes.length, 5);
+});
+
+test("WB-106 Where Used includes each contextual occurrence of a definition", () => {
+  const idx = indexOf(schema, [
+    note("PortDef.md", "Port"),
+    { ...note("A.md", "Object"), uid: "20261003123456789aaaaaaaaaaaaa" },
+    { ...note("B.md", "Object"), uid: "20261003123456789bbbbbbbbbbbbb" },
+  ]);
+  const local = new LocalModelIndex();
+  const region = (token: string, name: string) => parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->", "## Local Model", "### Local Interfaces", `#### ${name}`,
+    "- definition: [[PortDef]]", `^ep-${token}`, "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+  local.set("A.md", region("20261003123456789ccccccccccccc", "J1"));
+  local.set("B.md", region("20261003123456789ddddddddddddd", "J2"));
+  const view = withLocalWhereUsed(idx, local, (t) => `${t}.md`, traverse(idx, ["PortDef.md"], WHERE_USED_PROFILE), WHERE_USED_PROFILE);
+  assert.equal(view.localNodes.size, 2);
+  assert.deepEqual(view.tree.filter((e) => e.field === "occurrence").map((e) => view.localNodes.get(e.child)?.record.identifier).sort(), ["J1", "J2"]);
+});
+
+test("WB-106 Requirements keeps appliesTo on the exact local occurrence", () => {
+  const partToken = "20261003123456789ppppppppppppp";
+  const req = { ...note("Req.md", "Requirement"), localRefs: [{ field: "appliesTo", path: "Assembly.md", localId: `part-${partToken}` }] };
+  const idx = indexOf(schema, [req, { ...note("Assembly.md", "Object"), uid: "20261003123456789assemblyowner" }, note("Pump.md", "Object")]);
+  const local = new LocalModelIndex();
+  local.set("Assembly.md", parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->", "## Local Model", "### Part Occurrences", "#### Pump A",
+    "- definition: [[Pump]]", `^part-${partToken}`, "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+  const view = withLocalRequirements(idx, local, traverse(idx, ["Req.md"], REQUIREMENTS_PROFILE), REQUIREMENTS_PROFILE);
+  assert.equal(view.localNodes.size, 1);
+  assert.ok(view.tree.some((e) => e.parent === "Req.md" && e.field === "appliesTo"));
+  assert.ok(!view.depthOf.has("Assembly.md"), "local appliesTo must not degrade into appliesTo the owning note");
 });
 
 test("frontmatter: add, dedupe, sort and order properties", () => {
@@ -130,19 +266,19 @@ test("review: findings list, counts, filters and Previous / Next skipping", asyn
     note("S.md", "State", { satisfies: ["R.md"] }),
     note("O.md", "Object", { tracesFrom: ["F.md"] }),
   ]);
-  const list = toFindings(idx.findings());
+  const list = toFindings(idx.findings(), [{ code: "ref.local-kind", severity: "error", message: "Endpoint points at the wrong local kind.", path: "F.md", localId: "ep-test" }]);
   const n = countByCategory(list);
-  assert.deepEqual([n.provisional, n.missingInverse, n.orphanInverse, n.offRule, n.broken], [1, 1, 0, 1, 1]);
+  assert.deepEqual([n.provisional, n.missingInverse, n.orphanInverse, n.offRule, n.broken, n.localModel], [1, 1, 0, 1, 1, 1]);
   assert.equal(new Set(list.map((x) => x.key)).size, list.length, "keys are unique");
-  assert.deepEqual(list.map((x) => x.category), ["provisional", "missingInverse", "offRule", "broken"], "category order");
+  assert.deepEqual(list.map((x) => x.category), ["provisional", "missingInverse", "offRule", "broken", "localModel"], "category order");
   assert.equal(filterFindings(list, idx, { category: "offRule" }).length, 1);
-  assert.equal(filterFindings(list, idx, { type: "Function" }).length, 3);
+  assert.equal(filterFindings(list, idx, { type: "Function" }).length, 4);
   assert.equal(filterFindings(list, idx, { text: "ghost" }).length, 1);
   assert.equal(filterFindings(list, idx, { field: "tracesTo" })[0].to, "O.md");
   const skip = new Set([list[1].key]);
   assert.equal(neighbour(list, 0, 1, skip), 2, "next skips a resolved finding");
   assert.equal(neighbour(list, 2, -1, skip), 0, "previous skips it too");
-  assert.equal(neighbour(list, 3, 1, skip), -1, "no finding after the last");
+  assert.equal(neighbour(list, 4, 1, skip), -1, "no finding after the last");
 });
 
 test("duplicate relationship entries are visible but never treated as engineering quantity (W-310)", () => {
@@ -320,20 +456,23 @@ test("requirements view from a Requirement: owner, parent, children, derivation,
   assert.ok(c.edges.every((e) => e.fromNode && e.toNode));
 });
 
-test("requirements view from a Function, Object and Verification: the requirements they hold, satisfy, are applied to, or verify (WB-098)", () => {
+test("requirements view from a Function, Object, State and Verification: valid satisfaction, applicability and verification only (WB-098, W-327)", () => {
   const idx = indexOf(schema, [
     note("Fn.md", "Function", { satisfies: ["R1.md"], hasChild: ["R2.md"] }),
     note("Obj.md", "Object"),
+    note("State.md", "State"),
     note("R1.md", "Requirement", { hasChild: ["R1a.md"] }),
     note("R1a.md", "Requirement"),
     note("R2.md", "Requirement"),
     note("R3.md", "Requirement", { appliesTo: ["Obj.md"] }),
+    note("R4.md", "Requirement", { appliesTo: ["State.md"] }),
     note("Ver.md", "Verification", { verifies: ["R2.md"] }),
     note("Fn2.md", "Function", { satisfies: ["R1.md"] }),
   ]);
   const fn = traverse(idx, ["Fn.md"], REQUIREMENTS_PROFILE);
   assert.deepEqual([...fn.depthOf.keys()].sort(), ["Fn.md", "Fn2.md", "R1.md", "R1a.md", "R2.md", "Ver.md"], "co-satisfier and verifier come in at the second level");
   assert.deepEqual([...traverse(idx, ["Obj.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["Obj.md", "R3.md"]);
+  assert.deepEqual([...traverse(idx, ["State.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["R4.md", "State.md"], "State reaches scoped requirements only through appliesTo");
   assert.deepEqual([...traverse(idx, ["Ver.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["R2.md", "Ver.md"], "the owner of a requirement is shown only when the requirement is the start");
 });
 
@@ -491,7 +630,7 @@ test("verification, design, scenario (WB-102)", () => {
     note("Des.md", "Design", { satisfies: ["R2.md"] }),
   ]);
   assert.deepEqual(keysOf(v, "R.md", "Verification"), ["Fn.md", "R.md", "R2.md", "V.md"], "verifier, its other requirement, satisfier");
-  assert.deepEqual(keysOf(v, "V.md", "Verification"), ["Des.md", "Fn.md", "R.md", "R2.md", "V.md"], "requirements verified, then who satisfies them");
+  assert.deepEqual(keysOf(v, "V.md", "Verification"), ["Des.md", "Fn.md", "R.md", "R2.md", "V.md"], "requirements verified, then valid Function/Design satisfiers");
   assert.deepEqual(keysOf(v, "Fn.md", "Verification"), ["Fn.md", "R.md", "V.md"]);
   assert.equal(arrow(v, "R.md", "Verification")("V.md", "R.md")?.label, "verifies");
 
@@ -543,4 +682,53 @@ test("behavior, failure and risk, evidence (WB-102)", () => {
   assert.deepEqual(keysOf(e, "Req.md", "Evidence"), ["Art.md", "Art2.md", "Req.md", "Req2.md"]);
   assert.deepEqual(keysOf(e, "Art.md", "Evidence"), ["Art.md", "Req.md", "Req2.md", "Art2.md"].sort());
   assert.equal(arrow(e, "Req.md", "Evidence")("Art.md", "Req.md")?.label, "describes");
+});
+
+
+test("Internal view uses the owner as a group boundary and keeps interfaces simple", () => {
+  const idx=indexOf(schema,[
+    {...note("Assembly.md","Object"),uid:"20261003123456789assemblyowner"},
+    note("Pump.md","Object"),note("PortDef.md","Port"),note("FlowDef.md","Item Flow"),
+  ]);
+  const local=new LocalModelIndex();
+  const p="20261003123456789ppppppppppppp";
+  const inner="20261003123456789iiiiiiiiiiiii";
+  const outer="20261003123456789ooooooooooooo";
+  const conn="20261003123456789ccccccccccccc";
+  const flow="20261003123456789fffffffffffff";
+  local.set("Assembly.md",parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->","## Local Model",
+    "### Part Occurrences","#### Pump A","- definition: [[Pump]]","^part-"+p,
+    "### Local Interfaces","#### P1","- definition: [[PortDef]]","- part: [[#^part-"+p+"|Pump A]]","^ep-"+inner,
+    "#### J1","- definition: [[PortDef]]","- exposes: [[#^ep-"+inner+"|P1]]","^ep-"+outer,
+    "### Connections","#### Harness","- endpointA: [[#^ep-"+outer+"|J1]]","- endpointB: [[#^ep-"+inner+"|P1]]","^conn-"+conn,
+    "##### Power","- definition: [[FlowDef]]","- endpointA: transmit","- endpointB: receive","^flow-"+flow,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+  const result=buildInternalView(idx,local,"Assembly.md",(target)=>target+".md");
+  const group=result.canvas.nodes.find((n)=>n.type==="group");
+  assert.equal(group?.label,"Assembly");
+  assert.ok(result.canvas.nodes.some((n)=>n.id==="local:part-"+p));
+  const boundary=result.canvas.nodes.find((n)=>n.id==="local:ep-"+outer)!;
+  assert.ok(boundary.x<0 || boundary.x+boundary.width>group!.width,"boundary interface straddles the owner boundary");
+  assert.ok(result.canvas.edges.some((e)=>e.id==="expose:ep-"+outer+":ep-"+inner && e.label==="exposes"));
+  assert.ok(result.canvas.edges.some((e)=>e.id==="connection:conn-"+conn && e.label?.includes("Harness") && e.label?.includes("Power")));
+  assert.equal(PROFILES.Internal,INTERNAL_PROFILE);
+});
+
+test("Internal curated refresh preserves stable node placement",()=>{
+  const generated={nodes:[
+    {id:"internal:boundary",type:"group" as const,label:"A",x:0,y:0,width:1000,height:700},
+    {id:"local:part-x",type:"text" as const,text:"x",x:100,y:100,width:200,height:100},
+    {id:"local:part-new",type:"text" as const,text:"new",x:400,y:100,width:200,height:100},
+  ],edges:[]};
+  const existing={nodes:[
+    {id:"internal:boundary",type:"group" as const,label:"A",x:20,y:30,width:1200,height:800},
+    {id:"local:part-x",type:"text" as const,text:"old",x:777,y:333,width:240,height:130},
+  ],edges:[]};
+  const merged=preserveInternalLayout(generated,existing);
+  const kept=merged.nodes.find((n)=>n.id==="local:part-x")!;
+  assert.deepEqual([kept.x,kept.y,kept.width,kept.height],[777,333,240,130]);
+  const added=merged.nodes.find((n)=>n.id==="local:part-new")!;
+  assert.deepEqual([added.x,added.y],[400,100]);
 });

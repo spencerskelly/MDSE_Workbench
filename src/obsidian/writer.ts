@@ -5,6 +5,8 @@
  */
 import { App, getLinkpath, TFile } from "obsidian";
 import { bodyUnchanged, PROTECTED_PROPERTIES, replaceBody } from "../core/edit";
+import { noteRef, type ModelRef } from "../core/localmodel";
+import { TransactionManager, type AppliedEdit, type SemanticChange } from "../core/transaction";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink, type SameNote } from "../core/frontmatter";
 import type { ModelIndex } from "../core/model";
 import { allows } from "../core/rules";
@@ -47,9 +49,14 @@ export function pointsAt(app: App, target: TFile, sourcePath: string): SameNote 
 }
 
 export class RelationshipWriter {
-  private undoStack: Transaction[] = [];
+  private sequence = 0;
 
-  constructor(private readonly app: App, private readonly getSchema: () => Schema, private readonly getIndex: () => ModelIndex) {}
+  constructor(
+    private readonly app: App,
+    private readonly getSchema: () => Schema,
+    private readonly getIndex: () => ModelIndex,
+    private readonly transactions: TransactionManager = new TransactionManager(),
+  ) {}
 
   private file(path: string): TFile {
     const f = this.app.vault.getAbstractFileByPath(path);
@@ -94,7 +101,7 @@ export class RelationshipWriter {
     const back = def.kind === "symmetric" ? def.field : def.inverse;
     if (back) await edit(target, back, owner);
 
-    if (tx.files.length) this.undoStack.push(tx);
+    if (tx.files.length) this.record(tx, "relationship.add", this.refs(ownerPath, targetPath));
     return tx;
   }
 
@@ -114,7 +121,7 @@ export class RelationshipWriter {
     await edit(owner, def.field, target);
     const back = def.kind === "symmetric" ? def.field : def.inverse;
     if (back) await edit(target, back, owner);
-    if (tx.files.length) this.undoStack.push(tx);
+    if (tx.files.length) this.record(tx, "relationship.remove", this.refs(ownerPath, targetPath));
     return tx;
   }
 
@@ -128,7 +135,7 @@ export class RelationshipWriter {
       changed = removeLink(fm, field, linkText);
     });
     if (changed) tx.files.push({ path: file.path, before, after: await this.app.vault.read(file) });
-    if (tx.files.length) this.undoStack.push(tx);
+    if (tx.files.length) this.record(tx, "relationship.remove-missing", this.refs(path));
     return tx;
   }
 
@@ -157,7 +164,7 @@ export class RelationshipWriter {
     const after = await this.app.vault.read(file);
     if (after !== before) {
       tx.files.push({ path: file.path, before, after });
-      this.undoStack.push(tx);
+      this.record(tx, "property.set", this.refs(path));
     }
     return tx;
   }
@@ -175,31 +182,65 @@ export class RelationshipWriter {
     if (after !== before) {
       await this.app.vault.modify(file, after);
       tx.files.push({ path: file.path, before, after });
-      this.undoStack.push(tx);
+      this.record(tx, "body.edit", this.refs(path));
     }
     return tx;
   }
 
   get canUndo(): boolean {
-    return this.undoStack.length > 0;
+    return this.transactions.canUndo;
   }
 
-  /**
-   * Undo the last transaction, but only if no note in it changed since (WB-086).
-   * Nothing is written unless every file still matches.
-   */
+  get canRedo(): boolean {
+    return this.transactions.canRedo;
+  }
+
   async undo(): Promise<string> {
-    const tx = this.undoStack[this.undoStack.length - 1];
-    if (!tx) return "Nothing to undo.";
-    for (const s of tx.files) {
-      const current = await this.app.vault.read(this.file(s.path));
-      if (current !== s.after) {
-        this.undoStack.pop();
-        return `Not undone: ${s.path} changed after "${tx.label}". Fix it by hand or from Git history.`;
-      }
+    try {
+      const entry = await this.transactions.undo();
+      return "Undone: " + entry.label + ".";
+    } catch (e) {
+      return "Not undone: " + (e as Error).message;
     }
-    for (const s of tx.files) await this.app.vault.modify(this.file(s.path), s.before);
-    this.undoStack.pop();
-    return `Undone: ${tx.label}.`;
+  }
+
+  async redo(): Promise<string> {
+    try {
+      const entry = await this.transactions.redo();
+      return "Redone: " + entry.label + ".";
+    } catch (e) {
+      return "Not redone: " + (e as Error).message;
+    }
+  }
+
+  private refs(...paths: string[]): ModelRef[] {
+    const out: ModelRef[] = [];
+    for (const path of paths) {
+      const uid = this.getIndex().notes.get(path)?.uid;
+      if (uid) out.push(noteRef(uid));
+    }
+    return out;
+  }
+
+  private record(tx: Transaction, kind: string, refs: ModelRef[]): void {
+    const id = "legacy-" + Date.now().toString(36) + "-" + (++this.sequence).toString(36);
+    const change: SemanticChange = { kind, summary: tx.label, refs };
+    const applied: AppliedEdit = {
+      undo: async () => {
+        for (const s of tx.files) {
+          const current = await this.app.vault.read(this.file(s.path));
+          if (current !== s.after) throw new Error(s.path + " changed after \"" + tx.label + "\".");
+        }
+        for (const s of tx.files) await this.app.vault.modify(this.file(s.path), s.before);
+      },
+      redo: async () => {
+        for (const s of tx.files) {
+          const current = await this.app.vault.read(this.file(s.path));
+          if (current !== s.before) throw new Error(s.path + " changed after undoing \"" + tx.label + "\".");
+        }
+        for (const s of tx.files) await this.app.vault.modify(this.file(s.path), s.after);
+      },
+    };
+    this.transactions.recordApplied(id, tx.label, "atomic", [change], applied);
   }
 }

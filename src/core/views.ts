@@ -3,6 +3,8 @@
  * and native JSON Canvas output (WB-034). Pure TypeScript.
  */
 import type { Edge, ModelIndex } from "./model";
+import { refKey, type LinkRef, type LocalModelIndex, type LocalRecord, type ModelRef } from "./localmodel";
+import { buildInternalView } from "./internal-view";
 
 export type Direction = "out" | "in";
 
@@ -60,6 +62,15 @@ export const STRUCTURE_PROFILE: ViewProfile = {
   perParent: 12,
 };
 
+export const INTERNAL_PROFILE: ViewProfile = {
+  name: "Internal",
+  description: "Inside this assembly: contextual part occurrences, boundary interfaces, exposure and local connections.",
+  startTypes: ["Object"],
+  steps: [],
+  depth: 0,
+  nodeCap: 200,
+};
+
 /**
  * Functional view (WB-097, amended by WB-103): from an Object, the functions it performs and their
  * decomposition and flow; from a Function, who performs it, its parent and sub-functions, and what comes
@@ -88,7 +99,8 @@ const REQ_HOLDERS = ["Object", "Function", "Design", "State", "Use Case", "Verif
  * Requirements view (WB-098): from a Requirement, where it sits (owner element, parent requirement), its
  * sub-requirements, what it is derived from or refined by, what it references, what satisfies, verifies,
  * applies to or drives it. From an Object, Function, Design, State, Use Case or Verification, the
- * requirements it holds, satisfies, verifies, drives or that apply to it, each then opened as a Requirement.
+ * requirements reached through relationships valid for that class are shown; only Function and Design
+ * satisfy Requirements, while State/State Machine reach scoped Requirements through inverse appliesTo.
  */
 export const REQUIREMENTS_PROFILE: ViewProfile = {
   name: "Requirements",
@@ -103,8 +115,8 @@ export const REQUIREMENTS_PROFILE: ViewProfile = {
     { field: "refines", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "refines", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "references", direction: "out", from: ["Requirement"], to: ["Requirement", "Document"] },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design", "State"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
+    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "appliesTo", direction: "out", from: ["Requirement"] },
@@ -171,8 +183,9 @@ export const VERIFICATION_PROFILE: ViewProfile = {
   steps: [
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], undefinedOk: true },
-    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design", "State"] },
+    { field: "appliesTo", direction: "in", from: ["State"], to: ["Requirement"], atStartOnly: true },
+    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -248,7 +261,7 @@ export const FAILURE_PROFILE: ViewProfile = {
     { field: "affects", direction: "in", to: ["Issue", "Failure Mode", "Use Case"] },
     { field: "drives", direction: "out", from: ["Issue", "Failure Mode"] },
     { field: "drives", direction: "in", from: ["Issue", "Failure Mode"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], undefinedOk: true },
+    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], undefinedOk: true },
     { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
   ],
   depth: 2,
@@ -273,6 +286,7 @@ export const EVIDENCE_PROFILE: ViewProfile = {
 };
 
 export const PROFILES: Record<string, ViewProfile> = {
+  [INTERNAL_PROFILE.name]: INTERNAL_PROFILE,
   [STRUCTURE_PROFILE.name]: STRUCTURE_PROFILE,
   [FUNCTIONAL_PROFILE.name]: FUNCTIONAL_PROFILE,
   [REQUIREMENTS_PROFILE.name]: REQUIREMENTS_PROFILE,
@@ -303,6 +317,13 @@ export interface TreeLink {
   count: number;
 }
 
+export interface LocalViewNode {
+  /** Durable semantic identity of the occurrence. */
+  ref: ModelRef;
+  ownerPath: string;
+  record: LocalRecord;
+}
+
 export interface ViewResult {
   profile: string;
   starts: string[];
@@ -319,6 +340,12 @@ export interface ViewResult {
   capReached: boolean;
   /** Undefined cards in the view (links to notes that do not exist, WB-092). */
   undefinedCount: number;
+  /** Local occurrences shown as derived/text nodes; keyed by refKey(ModelRef). */
+  localNodes: Map<string, LocalViewNode>;
+  /** Non-tree links between local records, such as connection ends and exposure. */
+  localEdges: TreeLink[];
+  /** Specialized Canvas layout, used by occurrence-native Internal Structure. */
+  specialCanvas?: CanvasData;
 }
 
 export function traverse(index: ModelIndex, starts: string[], profile: ViewProfile): ViewResult {
@@ -428,7 +455,270 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
       if (!treeKey.has(`${e.from}|${e.field}|${e.to}`)) cross.push(e);
     }
   }
-  return { profile: profile.name, starts: [...depthOf.keys()].filter((p) => depthOf.get(p) === 0), depthOf, tree, edges, cross, omitted, capReached, undefinedCount: [...depthOf.keys()].filter(isUndefinedId).length };
+  return {
+    profile: profile.name,
+    starts: [...depthOf.keys()].filter((p) => depthOf.get(p) === 0),
+    depthOf,
+    tree,
+    edges,
+    cross,
+    omitted,
+    capReached,
+    undefinedCount: [...depthOf.keys()].filter(isUndefinedId).length,
+    localNodes: new Map(),
+    localEdges: [],
+  };
+}
+
+/**
+ * WB-106 Structure seam: show part occurrences owned by every note already visible in the bounded Structure view.
+ * The occurrence is the structural fact. Its reusable definition stays a link on the text card; we deliberately do
+ * not flatten the definition's internals into the parent's structure (no parent reach-through).
+ */
+export function withLocalStructure(index: ModelIndex, local: LocalModelIndex, base: ViewResult, profile: ViewProfile = STRUCTURE_PROFILE): ViewResult {
+  if (profile.name !== STRUCTURE_PROFILE.name) return base;
+  const depthOf = new Map(base.depthOf);
+  const tree = base.tree.slice();
+  const omitted = new Map(base.omitted);
+  const localNodes = new Map(base.localNodes);
+  let capReached = base.capReached;
+  const perParent = profile.perParent ?? Infinity;
+
+  const owners = [...depthOf.entries()]
+    .filter(([path, depth]) => depth < profile.depth && index.notes.has(path))
+    .sort((a, b) => a[1] - b[1] || (index.notes.get(a[0])?.name ?? a[0]).localeCompare(index.notes.get(b[0])?.name ?? b[0]));
+
+  for (const [ownerPath, ownerDepth] of owners) {
+    const owner = index.notes.get(ownerPath);
+    if (!owner?.uid) continue; // a local ModelRef is not valid without the owner's durable uid
+    const records = local.recordsOf(ownerPath, "part")
+      .filter((r) => !!r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    if (!records.length) continue;
+
+    const existingChildren = tree.filter((l) => l.parent === ownerPath).length;
+    const roomForParent = Math.max(0, perParent - existingChildren);
+    const roomForView = Math.max(0, profile.nodeCap - depthOf.size);
+    const show = records.slice(0, Math.min(roomForParent, roomForView));
+    for (const record of show) {
+      const ref = local.refOf(owner.uid, record);
+      if (!ref) continue;
+      const id = refKey(ref);
+      if (depthOf.has(id)) continue;
+      localNodes.set(id, { ref, ownerPath, record });
+      depthOf.set(id, ownerDepth + 1);
+      tree.push({ parent: ownerPath, child: id, field: "part occurrence", direction: "out", count: 1 });
+    }
+    const hidden = records.length - show.length;
+    if (hidden > 0) {
+      omitted.set(ownerPath, (omitted.get(ownerPath) ?? 0) + hidden);
+      if (roomForView < records.length) capReached = true;
+    }
+  }
+
+  return { ...base, depthOf, tree, omitted, capReached, localNodes };
+}
+
+
+export type ResolvePath = (target: string, fromPath: string) => string | undefined;
+
+interface MutableLocalView {
+  depthOf: Map<string, number>;
+  tree: TreeLink[];
+  omitted: Map<string, number>;
+  localNodes: Map<string, LocalViewNode>;
+  localEdges: TreeLink[];
+  capReached: boolean;
+}
+
+function mutableLocal(base: ViewResult): MutableLocalView {
+  return {
+    depthOf: new Map(base.depthOf),
+    tree: base.tree.slice(),
+    omitted: new Map(base.omitted),
+    localNodes: new Map(base.localNodes),
+    localEdges: base.localEdges.slice(),
+    capReached: base.capReached,
+  };
+}
+
+function localKeyFor(index: ModelIndex, local: LocalModelIndex, ownerPath: string, record: LocalRecord): string | null {
+  const uid = index.notes.get(ownerPath)?.uid;
+  const ref = uid ? local.refOf(uid, record) : null;
+  return ref ? refKey(ref) : null;
+}
+
+function addLocalNode(index: ModelIndex, local: LocalModelIndex, m: MutableLocalView, ownerPath: string, record: LocalRecord, depth: number, profile: ViewProfile): string | null {
+  const key = localKeyFor(index, local, ownerPath, record);
+  if (!key) return null;
+  if (m.depthOf.has(key)) return key;
+  if (m.depthOf.size >= profile.nodeCap) {
+    m.capReached = true;
+    return null;
+  }
+  const uid = index.notes.get(ownerPath)?.uid;
+  const ref = uid ? local.refOf(uid, record) : null;
+  if (!ref) return null;
+  m.localNodes.set(key, { ref, ownerPath, record });
+  m.depthOf.set(key, depth);
+  return key;
+}
+
+function linkedLocal(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, fromPath: string, link: LinkRef | null): { path: string; record: LocalRecord; key: string } | null {
+  if (!link?.blockId) return null;
+  const path = link.target ? resolve(link.target, fromPath) : fromPath;
+  if (!path) return null;
+  const record = local.recordsOf(path).find((r) => r.localId === link.blockId);
+  if (!record) return null;
+  const key = localKeyFor(index, local, path, record);
+  return key ? { path, record, key } : null;
+}
+
+
+/** WB-106 Interfaces: materialize the local boundary/topology graph without inventing notes. */
+export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile = INTERFACES_PROFILE): ViewResult {
+  if (profile.name !== INTERFACES_PROFILE.name) return base;
+  const m = mutableLocal(base);
+  const starts = base.starts.filter((p) => index.notes.has(p));
+
+  for (const ownerPath of starts.filter((p) => index.notes.get(p)?.type === "Object")) {
+    const ownerDepth = m.depthOf.get(ownerPath) ?? 0;
+    const records = local.recordsOf(ownerPath);
+    const endpoints = records.filter((r) => r.kind === "endpoint" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    const connections = records.filter((r) => r.kind === "connection" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    const flows = records.filter((r) => r.kind === "flow" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+
+    for (const r of endpoints) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 1, profile);
+      if (k) m.tree.push({ parent: ownerPath, child: k, field: "interface occurrence", direction: "out", count: 1 });
+    }
+    for (const r of connections) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 1, profile);
+      if (k) m.tree.push({ parent: ownerPath, child: k, field: "connection", direction: "out", count: 1 });
+    }
+    for (const r of flows) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 2, profile);
+      if (!k) continue;
+      const parent = r.connectionId ? records.find((x) => x.kind === "connection" && x.localId === r.connectionId) : undefined;
+      const pk = parent ? localKeyFor(index, local, ownerPath, parent) : null;
+      m.tree.push({ parent: pk && m.depthOf.has(pk) ? pk : ownerPath, child: k, field: "flow occurrence", direction: "out", count: 1 });
+    }
+
+    for (const r of endpoints) {
+      const a = localKeyFor(index, local, ownerPath, r);
+      if (!a || !m.depthOf.has(a)) continue;
+      const groups: Array<[string, LinkRef[]]> = [
+        ["exposes", r.exposes],
+        ["equals", r.equals],
+        ["parent", r.parent ? [r.parent] : []],
+      ];
+      for (const [field, links] of groups) {
+        for (const link of links) {
+          const t = linkedLocal(index, local, resolve, ownerPath, link);
+          if (!t) continue;
+          const alreadyPlaced = m.depthOf.has(t.key);
+          addLocalNode(index, local, m, t.path, t.record, ownerDepth + 1, profile);
+          if (!m.depthOf.has(t.key)) continue;
+          if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+          else m.tree.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+        }
+      }
+    }
+
+    for (const r of connections) {
+      const a = localKeyFor(index, local, ownerPath, r);
+      if (!a || !m.depthOf.has(a)) continue;
+      const ends: Array<[string, LinkRef | null]> = [["endpointA", r.endpointA], ["endpointB", r.endpointB]];
+      for (const [field, link] of ends) {
+        const t = linkedLocal(index, local, resolve, ownerPath, link);
+        if (!t) continue;
+        const alreadyPlaced = m.depthOf.has(t.key);
+        addLocalNode(index, local, m, t.path, t.record, ownerDepth + 1, profile);
+        if (!m.depthOf.has(t.key)) continue;
+        if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+        else m.tree.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+      }
+    }
+  }
+
+  for (const definitionPath of starts.filter((p) => ["Port", "Item Flow"].includes(index.notes.get(p)?.type ?? ""))) {
+    const d = m.depthOf.get(definitionPath) ?? 0;
+    const expected = index.notes.get(definitionPath)?.type === "Port" ? "endpoint" : "flow";
+    const occurrences = local.occurrencesOf(definitionPath, resolve)
+      .filter(({ record }) => record.kind === expected)
+      .sort((a, b) => a.path.localeCompare(b.path) || a.record.identifier.localeCompare(b.record.identifier));
+    for (const { path, record } of occurrences) {
+      const k = addLocalNode(index, local, m, path, record, d + 1, profile);
+      if (k) m.tree.push({ parent: definitionPath, child: k, field: "occurrence", direction: "out", count: 1 });
+    }
+  }
+
+  return { ...base, ...m };
+}
+
+
+/** WB-106 Where Used: show contextual occurrences of a reusable definition. */
+export function withLocalWhereUsed(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile = WHERE_USED_PROFILE): ViewResult {
+  if (profile.name !== WHERE_USED_PROFILE.name) return base;
+  const m = mutableLocal(base);
+  for (const definitionPath of base.starts.filter((p) => index.notes.has(p))) {
+    const d = m.depthOf.get(definitionPath) ?? 0;
+    const occurrences = local.occurrencesOf(definitionPath, resolve)
+      .sort((a, b) => a.path.localeCompare(b.path) || a.record.kind.localeCompare(b.record.kind) || a.record.identifier.localeCompare(b.record.identifier));
+    for (const { path, record } of occurrences) {
+      const k = addLocalNode(index, local, m, path, record, d + 1, profile);
+      if (k) m.tree.push({ parent: definitionPath, child: k, field: "occurrence", direction: "out", count: 1 });
+    }
+  }
+  return { ...base, ...m };
+}
+
+/** WB-106 Requirements: block-targeted appliesTo remains attached to the exact local occurrence. */
+export function withLocalRequirements(index: ModelIndex, local: LocalModelIndex, base: ViewResult, profile: ViewProfile = REQUIREMENTS_PROFILE): ViewResult {
+  if (profile.name !== REQUIREMENTS_PROFILE.name) return base;
+  const m = mutableLocal(base);
+  for (const requirementPath of base.starts.filter((p) => index.notes.get(p)?.type === "Requirement")) {
+    const d = m.depthOf.get(requirementPath) ?? 0;
+    const refs = (index.notes.get(requirementPath)?.localRefs ?? [])
+      .filter((r) => r.field === "appliesTo")
+      .sort((a, b) => a.path.localeCompare(b.path) || a.localId.localeCompare(b.localId));
+    for (const ref of refs) {
+      const record = local.recordsOf(ref.path).find((r) => r.localId === ref.localId);
+      if (!record) continue;
+      const k = addLocalNode(index, local, m, ref.path, record, d + 1, profile);
+      if (k) m.tree.push({ parent: requirementPath, child: k, field: "appliesTo", direction: "out", count: 1 });
+    }
+  }
+  return { ...base, ...m };
+}
+
+/** Adds Local Model occurrences only for the four WB-106 views that own them. */
+export function withLocalInternal(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile = INTERNAL_PROFILE): ViewResult {
+  if (profile.name !== INTERNAL_PROFILE.name) return base;
+  const ownerPath = base.starts[0];
+  if (!ownerPath || index.notes.get(ownerPath)?.type !== "Object") return base;
+  const records = local.recordsOf(ownerPath);
+  if (!records.length) return base;
+
+  const m = mutableLocal(base);
+  for (const record of records) addLocalNode(index, local, m, ownerPath, record, 1, profile);
+  const internal = buildInternalView(index, local, ownerPath, resolve);
+  return { ...base, ...m, specialCanvas: internal.canvas };
+}
+
+
+export function withLocalOccurrences(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile): ViewResult {
+  switch (profile.name) {
+    case "Internal": return withLocalInternal(index, local, resolve, base, profile);
+    case "Structure": return withLocalStructure(index, local, base, profile);
+    case "Interfaces": return withLocalInterfaces(index, local, resolve, base, profile);
+    case "Where Used": return withLocalWhereUsed(index, local, resolve, base, profile);
+    case "Requirements": return withLocalRequirements(index, local, base, profile);
+    default: return base;
+  }
 }
 
 /** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
@@ -437,8 +727,13 @@ export function signature(view: ViewResult): string {
   const edges = view.edges.map((e) => `${e.from}|${e.field}|${e.to}`).sort().join("\n");
   const dupes = view.tree.filter((l) => l.count > 1).map((l) => `${l.parent}|${l.field}|${l.child}x${l.count}`).sort().join("\n");
   const more = [...view.omitted].map(([p, n]) => `${p}:${n}`).sort().join("\n");
+  const local = [...view.localNodes.entries()].map(([id, n]) => {
+    const r = n.record;
+    return `${id}|${r.identifier}|${r.definition?.text ?? ""}|${r.multiplicity ?? ""}|${r.usage}`;
+  }).sort().join("\n");
+  const localEdges = view.localEdges.map((e) => `${e.parent}|${e.field}|${e.child}|${e.direction}`).sort().join("\n");
   let h = 2166136261;
-  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${dupes}`) {
+  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${dupes}\n${local}\n${localEdges}`) {
     h ^= ch.charCodeAt(0);
     h = Math.imul(h, 16777619);
   }
@@ -465,9 +760,11 @@ const PALETTE = ["4", "5", "6", "2", "3", "#9aa0a6", "#b5835a", "#7f9cf5", "#c9b
 
 export interface CanvasNode {
   id: string;
-  type: "file" | "text";
+  type: "file" | "text" | "group";
   file?: string;
   text?: string;
+  /** JSON Canvas group label; used by Internal Structure boundaries. */
+  label?: string;
   x: number;
   y: number;
   width: number;
@@ -496,9 +793,12 @@ export interface CanvasData {
  * its children. One label per relationship group, colored by relationship. Deterministic.
  */
 export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfile = STRUCTURE_PROFILE): CanvasData {
-  const nameOf = (p: string) => (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
+  if (profile.name === INTERNAL_PROFILE.name && view.specialCanvas) return view.specialCanvas;
+  const nameOf = (p: string) => view.localNodes.get(p)?.record.identifier ?? (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
   const colorOf = new Map<string, string>();
   for (const s of profile.steps) if (!colorOf.has(s.field)) colorOf.set(s.field, PALETTE[colorOf.size % PALETTE.length]);
+  const localFields = [...view.tree, ...view.localEdges].map((l) => l.field);
+  for (const field of localFields) if (!colorOf.has(field)) colorOf.set(field, PALETTE[colorOf.size % PALETTE.length]);
   const plainFields = new Set(profile.steps.filter((s) => s.noArrow).map((s) => s.field));
   const kids = new Map<string, TreeLink[]>();
   for (const l of view.tree) {
@@ -552,7 +852,27 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
     const id = `n${nodes.length}`;
     idOf.set(p, id);
     const y = Math.round(centre - NODE_H / 2);
-    if (isUndefinedId(p)) nodes.push({ id, type: "text", text: `**${undefinedName(p)}**\n*undefined*`, x, y, width: NODE_W, height: NODE_H, color: UNDEFINED_COLOR });
+    const localNode = view.localNodes.get(p);
+    if (localNode) {
+      const r = localNode.record;
+      const owner = localNode.ownerPath.replace(/\.md$/i, "");
+      const selfLink = `[[${owner}#^${r.localId}|${r.identifier}]]`;
+      const kind = r.kind === "part" ? "part occurrence" : r.kind === "endpoint" ? "interface occurrence" : r.kind === "flow" ? "flow occurrence" : "connection";
+      const context =
+        r.kind === "endpoint"
+          ? r.part?.text ? `Part: ${r.part.text}` : r.parent?.text ? `Parent: ${r.parent.text}` : "Assembly boundary"
+          : "";
+      const detail = [
+        `**${selfLink}**`,
+        `*${kind}*`,
+        `Owner: [[${owner}]]`,
+        r.definition ? `Definition: ${r.definition.text}` : "",
+        context,
+        r.multiplicity ? `Multiplicity: ${r.multiplicity}` : "",
+        r.usage !== "standard" ? `Usage: ${r.usage}` : "",
+      ].filter(Boolean).join("\n");
+      nodes.push({ id, type: "text", text: detail, x, y, width: NODE_W, height: NODE_H });
+    } else if (isUndefinedId(p)) nodes.push({ id, type: "text", text: `**${undefinedName(p)}**\n*undefined*`, x, y, width: NODE_W, height: NODE_H, color: UNDEFINED_COLOR });
     else nodes.push({ id, type: "file", file: p, x, y, width: NODE_W, height: NODE_H, color: depth === 0 ? "4" : undefined });
     // Point this note's child edges at it.
     for (const m of mine) {
@@ -567,6 +887,24 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
   for (const r of roots) {
     place(r, 0);
     cursor += ROW_H; // gap between starting elements
+  }
+
+  // Local topology links between already placed occurrence cards.
+  for (const l of view.localEdges) {
+    const a = idOf.get(l.parent);
+    const b = idOf.get(l.child);
+    if (!a || !b) continue;
+    const reverse = l.direction === "in";
+    edges.push({
+      id: `e${edges.length}`,
+      fromNode: reverse ? b : a,
+      toNode: reverse ? a : b,
+      fromSide: reverse ? "left" : "right",
+      toSide: reverse ? "right" : "left",
+      label: edgeLabel(l.field, l.count),
+      color: colorOf.get(l.field) ?? "#9aa0a6",
+      ...(plainFields.has(l.field) || l.field === "equals" ? { toEnd: "none" as const } : {}),
+    });
   }
 
   // Links between notes already shown, other than the tree: unlabelled and uncoloured.

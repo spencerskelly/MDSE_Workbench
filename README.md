@@ -8,7 +8,7 @@ Design notes and decisions live in the vault, in the `MDSE Workbench` folder (de
 
 ## v0.8 implementation authority
 
-Start from the methodology vault's `99_System/10_Docs/00 - Current State.md`; it names the current authority through W-321. The v0.8 reconciliation remains the implementation contract, with W-321 governing the lean runtime-base/release chain.
+Start from the methodology vault's `00_Workspace/00 - Current State.md`; it names the current authority through W-321. The v0.8 reconciliation remains the implementation contract, with W-321 governing the lean runtime-base/release chain.
 
 Current schema target:
 - relationships 1.35;
@@ -18,9 +18,9 @@ Current schema target:
 
 See `WB106_IMPLEMENTATION_CONTRACT.md` for the exact next Workbench build boundary.
 
-Start from the methodology vault's `99_System/10_Docs/00 - Current State.md`: it lists the current rules, tool status and which files are historical. Release versions are recorded in `99_System/03_Schemas/mdse-release.yaml` there.
+Start from the methodology vault's `00_Workspace/00 - Current State.md`: it lists the current rules, tool status and which files are historical. Release versions are recorded in `Base Vault/Definition/mdse-release.yaml` there.
 
-**Fixtures are copies only where independent Workbench tests require them.** `test/fixtures/relationships.yaml`, `element-types.yaml`, and `local-model.yaml` must exactly equal the current authority schemas. `local-model-0.1.yaml` is a frozen historical compatibility fixture and must not be updated to current semantics. After any current-schema change, sync the current fixture and run `npm test`. The vault's `python3 99_System/09_Tools/check-release.py --workbench <this clone>` fails if they differ or if the version in `package.json`, `manifest.json` and the release manifest disagree (W-320, WB-108).
+**Fixtures are copies only where independent Workbench tests require them.** `test/fixtures/relationships.yaml`, `element-types.yaml`, and `local-model.yaml` must exactly equal the current authority schemas. `local-model-0.1.yaml` is a frozen historical compatibility fixture and must not be updated to current semantics. After any current-schema change, sync the current fixture and run `npm test`. The vault's `python3 Base Vault/Tools/v0.8.0/check-release.py --workbench <this clone>` fails if they differ or if the version in `package.json`, `manifest.json` and the release manifest disagree (W-320, WB-108).
 
 **CI note.** The CI and release workflows are kept in `ci-workflows/` and are not active (see the Workbench Decision Log). Until they are switched on, run `npm run build` and `npm test` before every push.
 
@@ -57,11 +57,11 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
 - **Rebuild index**
 - **Explore structure of current note**: follows `hasPart`, `hasChild`, `hasState`, `includes`, `hasPort`, `exposes`, `hasFlow` two levels down as a left-to-right tree. Each note shows up to 12 children; the 80-note limit is shared evenly across each level and wins over depth (WB-082); "+N more" shows what was left out. One label per relationship group, colored by relationship.
 - **Explore functional view of current note**: starts from an Object or a Function. From an Object it shows the functions it performs, their sub-functions, what precedes or follows them. From a Function it shows who performs it, its parent function and sub-functions, and what comes before and after it. Arrows follow the stored direction; the same limits apply (12 children per note, 80 notes, two levels). Missing functions show as undefined cards. The requirements a function satisfies are in the Requirements view.
-- **Explore requirements view of current note**: starts from a Requirement, or from an Object, Function, Design, State, Use Case or Verification. From a Requirement it shows where it sits (owner element and parent requirement), its sub-requirements, what it is derived from and what is derived from it, what it refines or is refined by, what it references, and what satisfies, verifies, applies to or drives it. From the other types it shows the requirements they hold, satisfy, verify or drive, or that apply to them, and each of those requirements opens one more level. Arrows follow the stored direction; the same limits apply. Missing requirements and sources show as undefined cards.
+- **Explore requirements view of current note**: starts from a Requirement, or from an Object, Function, Design, State, Use Case or Verification. From a Requirement it shows where it sits (owner element and parent requirement), its sub-requirements, what it is derived from and what is derived from it, what it refines or is refined by, what it references, and what satisfies, verifies, applies to or drives it. Function and Design may reach Requirements through `satisfies`; State and State Machine never satisfy Requirements and reach scoped Requirements through inverse `appliesTo`. Other start types use only the relationships valid for their class, and each reached Requirement opens one more level. Arrows follow the stored direction; the same limits apply. Missing requirements and sources show as undefined cards.
 - **Explore view of current note…** lists the views that can start from the note's type, with a line on each, and opens the one chosen. Each view also has its own command (**Explore where-used view…**, and so on). Every view uses the same limits (12 children per note, 80 notes), draws arrows in the stored direction, labels every link with its relationship, shows missing notes as undefined cards, and refreshes from **Check whether this view is current**:
   - **Where Used**: from any note, what contains or uses it, three levels up: parent assemblies (`hasPart`), notes that include it, owners, the Object that has a State, a Port or a Design, the Objects that perform a Function, Use Cases it realizes or takes part in, notes that depend on it.
   - **Interfaces**: from an Object, Port or Item Flow: ports, the port each faces (`interfaces`, drawn without an arrowhead) and that port's owner, outer and inner ports (`exposes`), and item flows (`transmits`, `receives`, `exchanges`, `hasFlow`). Three levels.
-  - **Verification**: from a Requirement, Verification, Function, Design or State: what verifies a requirement, what else a verification covers, and what satisfies those requirements.
+  - **Verification**: from a Requirement, Verification, Function, Design or State: what verifies a requirement, what else a verification covers, the valid Function/Design satisfiers, and—for a State—the Requirements that apply to that State.
   - **Design**: from an Object, Document or Design: its designs, sub-designs and the requirements each satisfies.
   - **Scenario**: from a Use Case: participants, realizing Functions and Designs, included and optional Use Cases, driven requirements, and the order of the realizing functions.
   - **Behavior**: from a State Machine, State or Object: who has the states, initial and final states, order (`precedes`), nested states, and what triggers a state.
@@ -72,7 +72,7 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
 - **Relate current note to another note**: pick the other note by name (type and id shown beside it), then pick from only the relationships the endpoint rules allow, in either direction. `tracesTo` is offered last, as the provisional relationship (W-288).
 - **Undo last relationship change**: reverses both notes of the last relate, and refuses if either note was edited since. Use this, not Cmd/Ctrl-Z, which only undoes one open note and can leave a pair half-written. Give it a hotkey under Settings → Hotkeys. History is kept in memory and clears when Obsidian restarts.
 - **Check Canvas support (Phase 0 probe)**
-- **Open Review** (also the checklist icon in the ribbon): the whole-vault Review screen. Categories with counts (Provisional Relationships, Missing Inverses, Inverses With No Forward Link, Off-Rule Links, Broken References), search plus note-type and relationship filters, and a finding window with Previous / Next. Two findings can be resolved from the window: **Replace relationship** (provisional `tracesTo` → an approved relationship the endpoint rules allow; adds the new link, then removes the old one, so Undo reverses the removal first) and **Write missing inverse**. Everything else offers **Open source** and **Open target** only. The screen follows changes after a one-second pause and lists the first 200 rows of a filter.
+- **Open Review** (also the checklist icon in the ribbon): the whole-vault Review screen. Categories with counts (Provisional Relationships, Missing Inverses, Inverses With No Forward Link, Off-Rule Links, Broken References, Local Model Findings), search plus note-type and relationship filters, and a finding window with Previous / Next. Local Model findings are read-only in 0.1.17. Two findings can be resolved from the window: **Replace relationship** (provisional `tracesTo` → an approved relationship the endpoint rules allow; adds the new link, then removes the old one, so Undo reverses the removal first) and **Write missing inverse**. Everything else offers **Open source** and **Open target** only. The screen follows changes after a one-second pause and lists the first 200 rows of a filter.
 
 Generated views go to `Workbench Views/` (configurable). Add that folder to the vault's `.gitignore` (WB-036).
 
@@ -80,7 +80,7 @@ Generated views go to `Workbench Views/` (configurable). Add that folder to the 
 
 Workspace decisions W-293/W-294/W-298 and Workbench decision WB-105 add addressable local part occurrences, endpoints, connections, connection-scoped flows and local applicability inside the owning note body.
 
-The next occurrence-aware Workbench build will treat that content as a separate **Local Model** surface:
+Workbench treats that content as a separate **Local Model** surface:
 
 - Local Model is distinct from ordinary narrative text, Properties and note-level Relationships.
 - W-302/W-319 bound it with managed START/END markers; Workbench must read schema `0.1` and `0.2`, while new writers use `0.2`; the ordinary text editor must exclude/protect that region.
@@ -92,14 +92,25 @@ The next occurrence-aware Workbench build will treat that content as a separate 
 - W-311 makes assembly boundaries authoritative for connection ownership: a parent connects to a child's boundary endpoint, while `exposes` relates that boundary endpoint to the child's internal endpoint. EA BindingConnector/temporary `equals` stays review evidence until confirmed.
 - W-312 requires persisted local references (`part`, `parent`, connection endpoints, exposure and temporary local `equals`) to use native Obsidian block links rather than bare IDs.
 - W-313/W-319 use vault-side `local-model.yaml`; `0.2` is the canonical writer schema and `0.1` remains readable for backward compatibility as the shared parser/validation contract for importer and Workbench.
-- WB-106 makes Local Model read/navigation support a keepability gate for v0.8: addressable ModelRef identity, block-fragment preservation, Local Model parsing, occurrence-aware core views, governed-region protection and local model-health findings are required before the first import is accepted. Structured Local Model editing may follow later.
+- The original WB-106 read/navigation gate is implemented in 0.1.17. WB-114 expands WB-106 into the structured editor gate: Local Model edits go through the semantic transaction/model-edit service, while definition editing remains a distinct canonical-note mode.
 - Repeated note-level relationship entries are not engineering quantity; true quantity comes from Local Model `multiplicity`.
 - Connection-owned flow records are stored once but indexed and shown from each participating endpoint/interface.
 - EA-only provenance is not required by Workbench and lives in the import-evidence `Local Model Source Map.csv` rather than engineering note records.
-- Read-only parsing/indexing comes before structured editing; high-value views navigate local records rather than flattening them into duplicate note-level links.
+- High-value views navigate local records rather than flattening them into duplicate note-level links. Structured editing must preserve the same occurrence/definition ownership boundary.
 
-**0.1.16 reads Local Model regions (schema 0.1 and 0.2), gives records `ModelRef` identity and reports findings** with **Check Local Model (write findings report)**. WB-106 is not complete: the Structure, Interfaces, Where Used and Requirements views do not yet show local occurrences, there is no Local Model popup, and Review does not list Local Model findings. Ordinary body editing is still refused on a note with a governed region. Links Workbench writes follow W-324: the file name when unique, else the shortest unique path.
+**0.1.17 completes the original WB-106 read/navigation keepability gate.** Workbench reads Local Model regions (schema 0.1 and 0.2), gives records `ModelRef` identity, keeps them in the incremental index, reports findings, and uses them in Structure, Interfaces, Where Used and Requirements. Generated Canvas views show local records as derived cards linked to their native block IDs; Review includes Local Model Findings; a block-targeted relationship stays targeted at the exact occurrence rather than also becoming a note-level edge. WB-114 then expands WB-106 into the structured editor gate. The transaction/edit foundation is now on `main`; it is not considered released merely because the source exists. Links Workbench writes follow W-324: the file name when unique, else the shortest unique path.
 
+
+
+## User guide
+
+Engineer-facing operating instructions are in [docs/User Guide/MDSE Workbench User Guide.md](docs/User%20Guide/MDSE%20Workbench%20User%20Guide.md). The controlled Base Vault carries an exact runtime copy for ordinary engineering users. The guide distinguishes pinned runtime behavior from candidate WB-106 capabilities.
+
+## Semantic guardrails
+
+- `relationships.yaml` is authoritative for endpoint validity. View Profiles may select a subset of valid relationships, but must never broaden their allowed endpoint semantics.
+- `satisfies` is Function/Design → Requirement only. State and State Machine use Requirement `appliesTo` for scope and are never treated as Requirement satisfiers.
+- Workbench model navigation is converging on one common `ModelRef` abstraction for notes and Local Model records; new occurrence-aware traversal, Details, Inherited and Review behavior should use that seam rather than adding path-only special cases.
 
 ## Design rules this code follows
 
