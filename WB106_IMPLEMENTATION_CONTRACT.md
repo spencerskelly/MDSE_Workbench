@@ -168,3 +168,9 @@ Add fixtures/tests for:
 - repeated note-level relationship target is duplicate evidence, not quantity.
 
 WB-106 is the Workbench keepability gate for the first accepted v0.8 whole-model import.
+
+## Implementation status (0.1.16, 2026-10-03)
+
+Done: schema loading for the three vault schemas as fixtures; `ModelRef`; the Local Model parser for 0.1 and 0.2 (0.1 normalized in memory, never rewritten); native block-link preservation; the finding list above except the Review-screen presentation (findings are written to `Local Model Findings.md` by **Check Local Model**); transitive specialization candidates with cycle protection; indexing of `abstract` and of relationship links that name a block; ordinary-body-edit refusal (0.1.15); tests for every item in "Test requirements".
+
+Not done, and the reason `wb106Version` stays unset: occurrence-aware Structure, Interfaces, Where Used and Requirements views (the core has `LocalModelIndex.occurrencesOf` and `recordsOf` for them); Canvas rendering of local records as derived nodes; the Local Model popup and structured edit surface (WB-105); Review-screen integration. WB-106 is the keepability gate: a whole v0.8 import is not kept until these are done.

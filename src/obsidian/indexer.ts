@@ -56,6 +56,7 @@ export class Indexer {
     let unresolved = 0;
     const broken: Array<{ field: string; link: string }> = [];
     const repeat = new Map<string, number>();
+    const localRefs: Array<{ field: string; path: string; localId: string }> = [];
     for (const fl of cache.frontmatterLinks ?? []) {
       const field = fl.key.split(".")[0];
       if (!this.schema.byField.has(field) && !this.schema.byInverse.has(field)) continue;
@@ -69,9 +70,16 @@ export class Indexer {
       if (!list) fields.set(field, (list = []));
       if (!list.includes(dest.path)) list.push(dest.path);
       else repeat.set(`${field}|${dest.path}`, (repeat.get(`${field}|${dest.path}`) ?? 1) + 1);
+      const hash = fl.link.indexOf("#^");
+      if (hash >= 0) localRefs.push({ field, path: dest.path, localId: fl.link.slice(hash + 2).split("|")[0].trim() });
     }
     const str = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : String(v));
-    return { path: file.path, name: file.basename, type: str(fm.type), id: str(fm.id), uid: str(fm.uid), fields, unresolved, broken, repeat: repeat.size ? repeat : undefined };
+    const abstract = fm.abstract === true ? true : fm.abstract === false ? false : undefined;
+    const abstractInvalid = fm.abstract !== undefined && fm.abstract !== null && fm.abstract !== "" && abstract === undefined;
+    return {
+      path: file.path, name: file.basename, type: str(fm.type), id: str(fm.id), uid: str(fm.uid), fields, unresolved, broken,
+      repeat: repeat.size ? repeat : undefined, abstract, abstractInvalid: abstractInvalid || undefined, localRefs: localRefs.length ? localRefs : undefined,
+    };
   }
 
   /** Builds the index; a second call while building returns the same promise. */
