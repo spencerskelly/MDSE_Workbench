@@ -506,6 +506,61 @@ export function withLocalStructure(index: ModelIndex, local: LocalModelIndex, ba
   return { ...base, depthOf, tree, omitted, capReached, localNodes };
 }
 
+
+export type ResolvePath = (target: string, fromPath: string) => string | undefined;
+
+interface MutableLocalView {
+  depthOf: Map<string, number>;
+  tree: TreeLink[];
+  omitted: Map<string, number>;
+  localNodes: Map<string, LocalViewNode>;
+  localEdges: TreeLink[];
+  capReached: boolean;
+}
+
+function mutableLocal(base: ViewResult): MutableLocalView {
+  return {
+    depthOf: new Map(base.depthOf),
+    tree: base.tree.slice(),
+    omitted: new Map(base.omitted),
+    localNodes: new Map(base.localNodes),
+    localEdges: base.localEdges.slice(),
+    capReached: base.capReached,
+  };
+}
+
+function localKeyFor(index: ModelIndex, local: LocalModelIndex, ownerPath: string, record: LocalRecord): string | null {
+  const uid = index.notes.get(ownerPath)?.uid;
+  const ref = uid ? local.refOf(uid, record) : null;
+  return ref ? refKey(ref) : null;
+}
+
+function addLocalNode(index: ModelIndex, local: LocalModelIndex, m: MutableLocalView, ownerPath: string, record: LocalRecord, depth: number, profile: ViewProfile): string | null {
+  const key = localKeyFor(index, local, ownerPath, record);
+  if (!key) return null;
+  if (m.depthOf.has(key)) return key;
+  if (m.depthOf.size >= profile.nodeCap) {
+    m.capReached = true;
+    return null;
+  }
+  const uid = index.notes.get(ownerPath)?.uid;
+  const ref = uid ? local.refOf(uid, record) : null;
+  if (!ref) return null;
+  m.localNodes.set(key, { ref, ownerPath, record });
+  m.depthOf.set(key, depth);
+  return key;
+}
+
+function linkedLocal(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, fromPath: string, link: LinkRef | null): { path: string; record: LocalRecord; key: string } | null {
+  if (!link?.blockId) return null;
+  const path = link.target ? resolve(link.target, fromPath) : fromPath;
+  if (!path) return null;
+  const record = local.recordsOf(path).find((r) => r.localId === link.blockId);
+  if (!record) return null;
+  const key = localKeyFor(index, local, path, record);
+  return key ? { path, record, key } : null;
+}
+
 /** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
 export function signature(view: ViewResult): string {
   const nodes = [...view.depthOf.keys()].sort().join("\n");
