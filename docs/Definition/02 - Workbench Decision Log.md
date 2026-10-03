@@ -1093,3 +1093,13 @@ Effect on prior status: Workbench 0.1.17 still completes the original WB-106 rea
 The first WB-114 implementation slice adds `src/core/transaction.ts`, a pure TypeScript semantic transaction coordinator with no Obsidian imports. It provides atomic/structural transaction scopes, continuous validator hooks, blocking-error gates, semantic change summaries, lightweight history, and unified undo/redo orchestration through a storage-neutral executor.
 
 This intentionally does not yet change the existing relationship writer or expose structured Local Model editing in the UI. The next slice is the Local Model 0.2 writer/planner, then existing note/relationship writers can migrate onto the shared transaction service instead of maintaining separate undo stacks.
+
+
+### WB-116 — 2026-10-03 Local Model 0.2 record mutation planner
+**Status:** Implemented in pure core; no user-facing version bump yet.
+
+Added src/core/localmodel-edit.ts as the first structured Local Model writer layer. It plans a minimal edit to one existing Local Model record, preserves the record's native block ID/identity, writes only schema 0.2, refuses 0.1 structured writes, canonicalizes standard usage by omission, preserves unrecognized existing fields instead of dropping them, and reparses the proposed result before it can be applied.
+
+The planner does not touch the vault. It returns before/after text and findings for the WB-115 transaction/executor layer. Views therefore remain unable to write Markdown directly.
+
+This slice intentionally edits existing records only. Record creation/deletion, UID/token allocation and cross-record structural operations follow through the same planner/transaction boundary after the governed identity allocator is wired in.
