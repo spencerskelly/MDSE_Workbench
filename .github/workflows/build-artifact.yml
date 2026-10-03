@@ -1,0 +1,40 @@
+name: Build Workbench artifact
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Sync checked-in plugin artifact
+        run: |
+          mkdir -p vault/.obsidian/plugins/mdse-workbench
+          cp main.js vault/.obsidian/plugins/mdse-workbench/main.js
+          cp manifest.json vault/.obsidian/plugins/mdse-workbench/manifest.json
+          cp styles.css vault/.obsidian/plugins/mdse-workbench/styles.css
+      - name: Commit built artifact
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f main.js vault/.obsidian/plugins/mdse-workbench/main.js vault/.obsidian/plugins/mdse-workbench/manifest.json vault/.obsidian/plugins/mdse-workbench/styles.css
+          if git diff --cached --quiet; then
+            echo "Artifact already current."
+            exit 0
+          fi
+          git commit -m "Build Workbench 0.1.17 artifact"
+          git push
