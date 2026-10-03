@@ -1,3 +1,19 @@
+# 0.1.17
+
+WB-106 keepability-gate build for MDSE v0.8. This completes the required read/navigation surface over the governed Local Model while keeping Markdown/YAML authoritative.
+
+- **Occurrence-aware Structure.** Local part occurrences are shown as contextual derived cards with their native block link, reusable definition, multiplicity and usage. The definition stays a link; Workbench does not flatten the definition's internal structure into the occurrence.
+- **Occurrence-aware Interfaces.** Object interface views show local endpoints, exposure/parent links, connections and connection-scoped flows. Port and Item Flow definitions can show the contextual occurrences that use them.
+- **Occurrence-aware Where Used.** Reusable definitions now include Local Model occurrences across owner notes.
+- **Occurrence-aware Requirements.** A Requirement that `appliesTo [[Owner#^local-id]]` resolves to that exact occurrence. The block-targeted relationship is no longer also treated as a note-to-note edge, so applicability to one part cannot silently become applicability to its whole owner note.
+- **Canvas local records.** Local records render as derived text cards that link to their native Obsidian block IDs; no duplicate notes are created. Local occurrence data participates in stale-view signatures.
+- **Read-only Local Model details.** Clicking a generated local-record card opens a Workbench details popup with owner, local ID, definition and contextual fields plus **Open owner** and **Open occurrence**. Structured Local Model editing remains deferred.
+- **Review integration.** Local Model validation findings now appear as a sixth Review category alongside note-level model findings. They are read-only in this release.
+- **Incremental Local Model index.** Workbench keeps parsed governed regions alongside the note index, reading bodies only for notes whose metadata indicates a Local Model region and updating changed notes without a whole-vault rescan.
+- **Compatibility.** Reads Local Model 0.1 and 0.2; writes no Local Model records. Current Workbench fixtures exactly match relationships 1.35, element-types 1.17 and local-model 0.2.
+
+**Still deferred:** structured Local Model editing, persisted named configurations, topology variation, model-number/product-code mapping, new local behavior occurrence kinds, and other W-314 configuration follow-on work.
+
 # 0.1.16
 
 Alignment build for importer v0.8.6 (W-324) and the first part of WB-106.
