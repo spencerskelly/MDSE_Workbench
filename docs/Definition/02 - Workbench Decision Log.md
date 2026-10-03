@@ -1103,3 +1103,11 @@ Added src/core/localmodel-edit.ts as the first structured Local Model writer lay
 The planner does not touch the vault. It returns before/after text and findings for the WB-115 transaction/executor layer. Views therefore remain unable to write Markdown directly.
 
 This slice intentionally edits existing records only. Record creation/deletion, UID/token allocation and cross-record structural operations follow through the same planner/transaction boundary after the governed identity allocator is wired in.
+
+
+### WB-117 — 2026-10-03 governed identity allocator
+**Status:** Implemented in pure core; no user-facing version bump yet.
+
+Workbench now has one pure identity allocator matching the current MDSE uid definition: 17 local-time digits plus the registered 13-character author code, with one-millisecond collision advancement in the global namespace shared by note UIDs and Local Model identity tokens. Local Model IDs add only the governed representation prefix (part-, ep-, conn-, flow-); the 30-character token remains the persistent identity.
+
+This is not a Workbench-private ID system. The Obsidian adapter will obtain the current person's registered author code and the used-token set from the vault, then call this allocator for note/Local Model creation.

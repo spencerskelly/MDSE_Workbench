@@ -3,16 +3,16 @@ import test from "node:test";
 import { planLocalRecordPatch } from "../src/core/localmodel-edit";
 import { parseLocalModel } from "../src/core/localmodel";
 
-const tokenA = "20261003133512742skellyspence";
-const tokenB = "20261003133512743skellyspence";
-const tokenC = "20261003133512744skellyspence";
-const tokenD = "20261003133512745skellyspence";
+const tokenA = "20261003133512742skellyspencer";
+const tokenB = "20261003133512743skellyspencer";
+const tokenC = "20261003133512744skellyspencer";
+const tokenD = "20261003133512745skellyspencer";
 
 function note(version = "0.2"): string {
   return [
     "---",
     "type: Object",
-    "uid: 20261003130000000skellyspence",
+    "uid: 20261003130000000skellyspencer",
     "---",
     "",
     "# Assembly",
