@@ -5,6 +5,7 @@
  */
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
+import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
 import { PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
@@ -145,6 +146,11 @@ export default class MdseWorkbench extends Plugin {
           index: () => (this.indexer as Indexer).index,
           schema: () => this.schema as Schema,
           writer: () => this.writer as RelationshipWriter,
+          localFindings: () => {
+            const indexer = this.indexer as Indexer;
+            const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+            return validateLocalModels({ index: indexer.index, local: indexer.local, resolve });
+          },
         }),
     );
     this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
