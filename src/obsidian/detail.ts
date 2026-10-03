@@ -210,7 +210,7 @@ export class NoteDetailPanel extends Component {
     const chips = root.createDiv({ cls: "mdse-detail-chips" });
     chips.createSpan({ cls: "mdse-detail-chip", text: record.kind });
     if (record.usage !== "standard") chips.createSpan({ cls: "mdse-detail-chip", text: record.usage });
-    if (record.kindText) chips.createSpan({ cls: "mdse-detail-chip", text: record.kindText });
+    if (record.endpointKind) chips.createSpan({ cls: "mdse-detail-chip", text: record.endpointKind });
 
     const table = root.createEl("table", { cls: "mdse-finding" });
     const row = (key: string, value: string, action?: () => void) => {
@@ -238,8 +238,8 @@ export class NoteDetailPanel extends Component {
     row("Endpoint B", linkText(record.endpointB));
     row("Connection", record.connectionId ?? "");
     if (record.kind === "flow") {
-      row("Endpoint A role", record.endpointARole);
-      row("Endpoint B role", record.endpointBRole);
+      row("Endpoint A role", record.roleA ?? "");
+      row("Endpoint B role", record.roleB ?? "");
     }
     root.createEl("p", { cls: "mdse-muted", text: "Local Model occurrences are contextual model records stored in the owner note. This popup is read-only." });
     root.scrollTop = 0;
