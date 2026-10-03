@@ -271,7 +271,7 @@ test("review: findings list, counts, filters and Previous / Next skipping", asyn
   assert.equal(new Set(list.map((x) => x.key)).size, list.length, "keys are unique");
   assert.deepEqual(list.map((x) => x.category), ["provisional", "missingInverse", "offRule", "broken", "localModel"], "category order");
   assert.equal(filterFindings(list, idx, { category: "offRule" }).length, 1);
-  assert.equal(filterFindings(list, idx, { type: "Function" }).length, 3);
+  assert.equal(filterFindings(list, idx, { type: "Function" }).length, 4);
   assert.equal(filterFindings(list, idx, { text: "ghost" }).length, 1);
   assert.equal(filterFindings(list, idx, { field: "tracesTo" })[0].to, "O.md");
   const skip = new Set([list[1].key]);
