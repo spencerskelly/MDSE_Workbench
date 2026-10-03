@@ -4,7 +4,9 @@
  * No UI here; commands and, later, Canvas call it.
  */
 import { App, getLinkpath, TFile } from "obsidian";
-import { bodyUnchanged, PROTECTED_PROPERTIES, replaceBody } from "../core/edit";\nimport { noteRef, type ModelRef } from "../core/localmodel";\nimport { TransactionManager, type AppliedEdit, type SemanticChange } from "../core/transaction";
+import { bodyUnchanged, PROTECTED_PROPERTIES, replaceBody } from "../core/edit";
+import { noteRef, type ModelRef } from "../core/localmodel";
+import { TransactionManager, type AppliedEdit, type SemanticChange } from "../core/transaction";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink, type SameNote } from "../core/frontmatter";
 import type { ModelIndex } from "../core/model";
 import { allows } from "../core/rules";
@@ -47,9 +49,14 @@ export function pointsAt(app: App, target: TFile, sourcePath: string): SameNote 
 }
 
 export class RelationshipWriter {
-  private undoStack: Transaction[] = [];
+  private sequence = 0;
 
-  constructor(private readonly app: App, private readonly getSchema: () => Schema, private readonly getIndex: () => ModelIndex) {}
+  constructor(
+    private readonly app: App,
+    private readonly getSchema: () => Schema,
+    private readonly getIndex: () => ModelIndex,
+    private readonly transactions: TransactionManager = new TransactionManager(),
+  ) {}
 
   private file(path: string): TFile {
     const f = this.app.vault.getAbstractFileByPath(path);
@@ -94,7 +101,7 @@ export class RelationshipWriter {
     const back = def.kind === "symmetric" ? def.field : def.inverse;
     if (back) await edit(target, back, owner);
 
-    if (tx.files.length) this.record(tx, "relationship.edit", this.refs(ownerPath, targetPath));
+    if (tx.files.length) this.record(tx, "relationship.add", this.refs(ownerPath, targetPath));
     return tx;
   }
 
@@ -114,7 +121,7 @@ export class RelationshipWriter {
     await edit(owner, def.field, target);
     const back = def.kind === "symmetric" ? def.field : def.inverse;
     if (back) await edit(target, back, owner);
-    if (tx.files.length) this.record(tx, "relationship.edit", this.refs(ownerPath, targetPath));
+    if (tx.files.length) this.record(tx, "relationship.remove", this.refs(ownerPath, targetPath));
     return tx;
   }
 
@@ -128,7 +135,7 @@ export class RelationshipWriter {
       changed = removeLink(fm, field, linkText);
     });
     if (changed) tx.files.push({ path: file.path, before, after: await this.app.vault.read(file) });
-    if (tx.files.length) this.record(tx, "relationship.edit", this.refs(ownerPath, targetPath));
+    if (tx.files.length) this.record(tx, "relationship.remove-missing", this.refs(path));
     return tx;
   }
 
@@ -157,7 +164,7 @@ export class RelationshipWriter {
     const after = await this.app.vault.read(file);
     if (after !== before) {
       tx.files.push({ path: file.path, before, after });
-      this.undoStack.push(tx);
+      this.record(tx, "property.set", this.refs(path));
     }
     return tx;
   }
@@ -175,7 +182,7 @@ export class RelationshipWriter {
     if (after !== before) {
       await this.app.vault.modify(file, after);
       tx.files.push({ path: file.path, before, after });
-      this.undoStack.push(tx);
+      this.record(tx, "body.edit", this.refs(path));
     }
     return tx;
   }

@@ -1145,3 +1145,11 @@ Immediate Local Model record patches now refuse a result that leaves the edited 
 The existing RelationshipWriter now registers relationship/property/body edits into the same TransactionManager used by structured Local Model editing. Its mature schema checks and Obsidian frontmatter writing remain in place for now; only history/undo ownership moves to the shared coordinator. The writer exposes the same canUndo/undo behavior to existing UI callers, so prior screens do not need a parallel history implementation.
 
 TransactionManager has a recordApplied migration seam for governed writers that already performed their validated write. New Local Model/structural planners continue to use begin/add/apply before storage. This is an incremental migration path, not a second transaction architecture.
+
+
+### WB-122 — 2026-10-03 correction to WB-121 writer migration
+**Status:** Corrected before Local Model editing UI exposure.
+
+A source sanity pass found the first WB-121 mechanical migration had left the old undoStack declaration/usages in RelationshipWriter and introduced invalid variable references in the remove-missing path. The writer has been rebuilt from the last known-good pre-WB-121 revision and migrated deliberately: add/remove/remove-missing/property/body edits now register into the shared TransactionManager, and the old private stack is gone.
+
+No Local Model editing UI had been exposed while the broken intermediate revision existed.
