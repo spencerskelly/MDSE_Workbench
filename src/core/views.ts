@@ -4,6 +4,7 @@
  */
 import type { Edge, ModelIndex } from "./model";
 import { refKey, type LinkRef, type LocalModelIndex, type LocalRecord, type ModelRef } from "./localmodel";
+import { buildInternalView } from "./internal-view";
 
 export type Direction = "out" | "in";
 
@@ -59,6 +60,15 @@ export const STRUCTURE_PROFILE: ViewProfile = {
   depth: 2,
   nodeCap: 80,
   perParent: 12,
+};
+
+export const INTERNAL_PROFILE: ViewProfile = {
+  name: "Internal",
+  description: "Inside this assembly: contextual part occurrences, boundary interfaces, exposure and local connections.",
+  startTypes: ["Object"],
+  steps: [],
+  depth: 0,
+  nodeCap: 200,
 };
 
 /**
@@ -276,6 +286,7 @@ export const EVIDENCE_PROFILE: ViewProfile = {
 };
 
 export const PROFILES: Record<string, ViewProfile> = {
+  [INTERNAL_PROFILE.name]: INTERNAL_PROFILE,
   [STRUCTURE_PROFILE.name]: STRUCTURE_PROFILE,
   [FUNCTIONAL_PROFILE.name]: FUNCTIONAL_PROFILE,
   [REQUIREMENTS_PROFILE.name]: REQUIREMENTS_PROFILE,
@@ -333,6 +344,8 @@ export interface ViewResult {
   localNodes: Map<string, LocalViewNode>;
   /** Non-tree links between local records, such as connection ends and exposure. */
   localEdges: TreeLink[];
+  /** Specialized Canvas layout, used by occurrence-native Internal Structure. */
+  specialCanvas?: CanvasData;
 }
 
 export function traverse(index: ModelIndex, starts: string[], profile: ViewProfile): ViewResult {
@@ -683,8 +696,23 @@ export function withLocalRequirements(index: ModelIndex, local: LocalModelIndex,
 }
 
 /** Adds Local Model occurrences only for the four WB-106 views that own them. */
+export function withLocalInternal(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile = INTERNAL_PROFILE): ViewResult {
+  if (profile.name !== INTERNAL_PROFILE.name) return base;
+  const ownerPath = base.starts[0];
+  if (!ownerPath || index.notes.get(ownerPath)?.type !== "Object") return base;
+  const records = local.recordsOf(ownerPath);
+  if (!records.length) return base;
+
+  const m = mutableLocal(base);
+  for (const record of records) addLocalNode(index, local, m, ownerPath, record, 1, profile);
+  const internal = buildInternalView(index, local, ownerPath, resolve);
+  return { ...base, ...m, specialCanvas: internal.canvas };
+}
+
+
 export function withLocalOccurrences(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile): ViewResult {
   switch (profile.name) {
+    case "Internal": return withLocalInternal(index, local, resolve, base, profile);
     case "Structure": return withLocalStructure(index, local, base, profile);
     case "Interfaces": return withLocalInterfaces(index, local, resolve, base, profile);
     case "Where Used": return withLocalWhereUsed(index, local, resolve, base, profile);
@@ -763,6 +791,7 @@ export interface CanvasData {
  * its children. One label per relationship group, colored by relationship. Deterministic.
  */
 export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfile = STRUCTURE_PROFILE): CanvasData {
+  if (profile.name === INTERNAL_PROFILE.name && view.specialCanvas) return view.specialCanvas;
   const nameOf = (p: string) => view.localNodes.get(p)?.record.identifier ?? (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
   const colorOf = new Map<string, string>();
   for (const s of profile.steps) if (!colorOf.has(s.field)) colorOf.set(s.field, PALETTE[colorOf.size % PALETTE.length]);
