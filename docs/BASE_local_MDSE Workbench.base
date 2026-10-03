@@ -1,0 +1,8 @@
+filters:
+  and:
+    - file.inFolder("MDSE Workbench")
+views:
+  - type: table
+    name: Workbench documents
+    order:
+      - file.name
