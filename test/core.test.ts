@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalStructure, type ViewProfile } from "../src/core/views";
+import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, WHERE_USED_PROFILE, withLocalInterfaces, withLocalRequirements, withLocalStructure, withLocalWhereUsed, type ViewProfile } from "../src/core/views";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
@@ -130,6 +130,88 @@ test("WB-106 Structure shows local part occurrences without flattening child int
   local.set("Assembly.md", region2);
   const changed = withLocalStructure(idx, local, traverse(idx, ["Assembly.md"], STRUCTURE_PROFILE), STRUCTURE_PROFILE);
   assert.notEqual(signature(view), signature(changed), "stale-view signature includes local occurrence data");
+});
+
+
+test("WB-106 Interfaces renders local endpoints, connections and connection-scoped flows", () => {
+  const idx = indexOf(schema, [
+    { ...note("Assembly.md", "Object"), uid: "20261003123456789assemblyowner" },
+    note("PortDef.md", "Port"),
+    note("FlowDef.md", "Item Flow"),
+  ]);
+  const ids = {
+    a: "20261003123456789aaaaaaaaaaaaa",
+    b: "20261003123456789bbbbbbbbbbbbb",
+    c: "20261003123456789ccccccccccccc",
+    f: "20261003123456789fffffffffffff",
+  };
+  const local = new LocalModelIndex();
+  local.set("Assembly.md", parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "## Local Model",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[PortDef]]",
+    `^ep-${ids.a}`,
+    "#### J2",
+    "- definition: [[PortDef]]",
+    `- exposes: [[#^ep-${ids.a}|J1]]`,
+    `^ep-${ids.b}`,
+    "### Connections",
+    "#### Harness",
+    `- endpointA: [[#^ep-${ids.a}|J1]]`,
+    `- endpointB: [[#^ep-${ids.b}|J2]]`,
+    `^conn-${ids.c}`,
+    "##### CAN Tx",
+    "- definition: [[FlowDef]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    `^flow-${ids.f}`,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+  const resolve = (target: string) => `${target}.md`;
+  const view = withLocalInterfaces(idx, local, resolve, traverse(idx, ["Assembly.md"], INTERFACES_PROFILE), INTERFACES_PROFILE);
+  assert.equal(view.localNodes.size, 4);
+  assert.ok(view.localEdges.some((e) => e.field === "endpointA"));
+  assert.ok(view.localEdges.some((e) => e.field === "endpointB"));
+  assert.ok(view.localEdges.some((e) => e.field === "exposes"));
+  const flowKey = [...view.localNodes].find(([, n]) => n.record.kind === "flow")?.[0];
+  const connKey = [...view.localNodes].find(([, n]) => n.record.kind === "connection")?.[0];
+  assert.ok(flowKey && connKey && view.tree.some((e) => e.parent === connKey && e.child === flowKey));
+  assert.equal(toCanvas(idx, view, INTERFACES_PROFILE).nodes.length, 5);
+});
+
+test("WB-106 Where Used includes each contextual occurrence of a definition", () => {
+  const idx = indexOf(schema, [
+    note("PortDef.md", "Port"),
+    { ...note("A.md", "Object"), uid: "20261003123456789aaaaaaaaaaaaa" },
+    { ...note("B.md", "Object"), uid: "20261003123456789bbbbbbbbbbbbb" },
+  ]);
+  const local = new LocalModelIndex();
+  const region = (token: string, name: string) => parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->", "## Local Model", "### Local Interfaces", `#### ${name}`,
+    "- definition: [[PortDef]]", `^ep-${token}`, "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+  local.set("A.md", region("20261003123456789ccccccccccccc", "J1"));
+  local.set("B.md", region("20261003123456789ddddddddddddd", "J2"));
+  const view = withLocalWhereUsed(idx, local, (t) => `${t}.md`, traverse(idx, ["PortDef.md"], WHERE_USED_PROFILE), WHERE_USED_PROFILE);
+  assert.equal(view.localNodes.size, 2);
+  assert.deepEqual(view.tree.filter((e) => e.field === "occurrence").map((e) => view.localNodes.get(e.child)?.record.identifier).sort(), ["J1", "J2"]);
+});
+
+test("WB-106 Requirements keeps appliesTo on the exact local occurrence", () => {
+  const partToken = "20261003123456789ppppppppppppp";
+  const req = { ...note("Req.md", "Requirement"), localRefs: [{ field: "appliesTo", path: "Assembly.md", localId: `part-${partToken}` }] };
+  const idx = indexOf(schema, [req, { ...note("Assembly.md", "Object"), uid: "20261003123456789assemblyowner" }, note("Pump.md", "Object")]);
+  const local = new LocalModelIndex();
+  local.set("Assembly.md", parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->", "## Local Model", "### Part Occurrences", "#### Pump A",
+    "- definition: [[Pump]]", `^part-${partToken}`, "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+  const view = withLocalRequirements(idx, local, traverse(idx, ["Req.md"], REQUIREMENTS_PROFILE), REQUIREMENTS_PROFILE);
+  assert.equal(view.localNodes.size, 1);
+  assert.ok(view.tree.some((e) => e.parent === "Req.md" && e.field === "appliesTo"));
+  assert.ok(!view.depthOf.has("Assembly.md"), "local appliesTo must not degrade into appliesTo the owning note");
 });
 
 test("frontmatter: add, dedupe, sort and order properties", () => {
