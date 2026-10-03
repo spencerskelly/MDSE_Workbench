@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, type ViewProfile } from "../src/core/views";
+import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalStructure, type ViewProfile } from "../src/core/views";
+import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
 const schema = fixtureSchema();
@@ -77,6 +78,58 @@ test("traversal: the node cap wins over depth and omissions are counted", () => 
   assert.ok(c.nodes.some((n) => n.type === "text" && n.text === "**+7 more**"));
   assert.ok(c.edges.every((e) => e.fromNode && e.toNode), "every edge has both ends");
   assert.equal(signature(v), signature(traverse(idx, ["Top.md"], profile)), "deterministic");
+});
+
+test("WB-106 Structure shows local part occurrences without flattening child internals", () => {
+  const ownerUid = "20261003123456789assemblyowner";
+  const token = "20261003123456789abcdefghijklm";
+  const idx = indexOf(schema, [
+    { ...note("Assembly.md", "Object"), uid: ownerUid },
+    note("Pump.md", "Object", { hasPart: ["Impeller.md"] }),
+    note("Impeller.md", "Object"),
+  ]);
+  const local = new LocalModelIndex();
+  const region = parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "## Local Model",
+    "### Part Occurrences",
+    "#### Pump A",
+    "- definition: [[Pump]]",
+    "- multiplicity: 2",
+    `^part-${token}`,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+  assert.ok(region?.structured);
+  local.set("Assembly.md", region);
+
+  const view = withLocalStructure(idx, local, traverse(idx, ["Assembly.md"], STRUCTURE_PROFILE), STRUCTURE_PROFILE);
+  assert.equal(view.localNodes.size, 1);
+  assert.equal(view.depthOf.size, 2, "assembly + local occurrence only");
+  assert.ok(!view.depthOf.has("Pump.md"), "definition is linked from the occurrence, not flattened into the parent structure");
+  const localId = [...view.localNodes.keys()][0];
+  assert.match(localId, /^local:/);
+  const link = view.tree.find((x) => x.child === localId)!;
+  assert.equal(link.field, "part occurrence");
+
+  const canvas = toCanvas(idx, view, STRUCTURE_PROFILE);
+  const node = canvas.nodes.find((n) => n.type === "text" && n.text?.includes("Pump A"))!;
+  assert.ok(node.text?.includes(`Assembly#^part-${token}`), "occurrence card keeps the native block link");
+  assert.ok(node.text?.includes("[[Pump]]"));
+  assert.ok(node.text?.includes("Multiplicity: 2"));
+
+  const region2 = parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "## Local Model",
+    "### Part Occurrences",
+    "#### Pump A",
+    "- definition: [[Pump]]",
+    "- multiplicity: 3",
+    `^part-${token}`,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+  local.set("Assembly.md", region2);
+  const changed = withLocalStructure(idx, local, traverse(idx, ["Assembly.md"], STRUCTURE_PROFILE), STRUCTURE_PROFILE);
+  assert.notEqual(signature(view), signature(changed), "stale-view signature includes local occurrence data");
 });
 
 test("frontmatter: add, dedupe, sort and order properties", () => {
