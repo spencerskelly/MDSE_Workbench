@@ -169,8 +169,24 @@ Add fixtures/tests for:
 
 WB-106 is the Workbench keepability gate for the first accepted v0.8 whole-model import.
 
-## Implementation status (0.1.16, 2026-10-03)
+## Implementation status (0.1.17, 2026-10-03)
 
-Done: schema loading for the three vault schemas as fixtures; `ModelRef`; the Local Model parser for 0.1 and 0.2 (0.1 normalized in memory, never rewritten); native block-link preservation; the finding list above except the Review-screen presentation (findings are written to `Local Model Findings.md` by **Check Local Model**); transitive specialization candidates with cycle protection; indexing of `abstract` and of relationship links that name a block; ordinary-body-edit refusal (0.1.15); tests for every item in "Test requirements".
+**WB-106 implementation is complete in the standalone Workbench candidate.** The required keepability-gate behavior is now present:
 
-Not done, and the reason `wb106Version` stays unset: occurrence-aware Structure, Interfaces, Where Used and Requirements views (the core has `LocalModelIndex.occurrencesOf` and `recordsOf` for them); Canvas rendering of local records as derived nodes; the Local Model popup and structured edit surface (WB-105); Review-screen integration. WB-106 is the keepability gate: a whole v0.8 import is not kept until these are done.
+- three-schema compatibility remains in place: relationships 1.35, element-types 1.17, Local Model read 0.1 + 0.2;
+- durable `ModelRef` identity and native block-fragment preservation;
+- Local Model parser, validation, identity-collision checks, abstract/usage checks and specialization candidates;
+- ordinary body-edit refusal around governed Local Model content;
+- incrementally maintained Local Model index alongside the note index;
+- Structure shows local part occurrences without parent reach-through;
+- Interfaces shows local endpoints, exposure/parent topology, connections and connection-scoped flows;
+- Where Used includes contextual occurrences of reusable definitions;
+- Requirements preserves local `appliesTo` targets as exact occurrences rather than degrading them to the owner note;
+- generated Canvas views render local records as derived/text cards linked to their native Obsidian block IDs;
+- local occurrence data participates in generated-view stale signatures;
+- clicking a generated local record opens a read-only Local Model details popup with native navigation;
+- Review includes Local Model findings as a read-only category.
+
+The implementation deliberately does **not** add structured Local Model editing, persisted named configuration state, topology variation, model-number rules or other deferred W-314 work.
+
+The standalone candidate must still pass the normal release/integration chain before the methodology workspace sets `wb106Version` or an issued v0.8 base is kept.
