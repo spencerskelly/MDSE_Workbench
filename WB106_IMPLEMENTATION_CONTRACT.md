@@ -283,7 +283,7 @@ WB-106 is the Workbench keepability gate for the first accepted v0.8 whole-model
 
 ## Implementation status (0.1.17, 2026-10-03)
 
-**WB-106 implementation is complete in the standalone Workbench candidate.** The required keepability-gate behavior is now present:
+**The original WB-106 read/navigation baseline is complete in the standalone 0.1.17 candidate.** The former keepability-gate behavior is present:
 
 - three-schema compatibility remains in place: relationships 1.35, element-types 1.17, Local Model read 0.1 + 0.2;
 - durable `ModelRef` identity and native block-fragment preservation;
