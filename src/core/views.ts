@@ -636,12 +636,11 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
       const selfLink = `[[${owner}#^${r.localId}|${r.identifier}]]`;
       const detail = [
         `**${selfLink}**`,
-        "*part occurrence*",
         r.definition ? `Definition: ${r.definition.text}` : "",
         r.multiplicity ? `Multiplicity: ${r.multiplicity}` : "",
         r.usage !== "standard" ? `Usage: ${r.usage}` : "",
       ].filter(Boolean).join("\n");
-      nodes.push({ id, type: "text", text: detail, x, y, width: NODE_W, height: Math.max(NODE_H, 100) });
+      nodes.push({ id, type: "text", text: detail, x, y, width: NODE_W, height: NODE_H });
     } else if (isUndefinedId(p)) nodes.push({ id, type: "text", text: `**${undefinedName(p)}**\n*undefined*`, x, y, width: NODE_W, height: NODE_H, color: UNDEFINED_COLOR });
     else nodes.push({ id, type: "file", file: p, x, y, width: NODE_W, height: NODE_H, color: depth === 0 ? "4" : undefined });
     // Point this note's child edges at it.
