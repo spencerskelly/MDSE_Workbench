@@ -88,7 +88,8 @@ const REQ_HOLDERS = ["Object", "Function", "Design", "State", "Use Case", "Verif
  * Requirements view (WB-098): from a Requirement, where it sits (owner element, parent requirement), its
  * sub-requirements, what it is derived from or refined by, what it references, what satisfies, verifies,
  * applies to or drives it. From an Object, Function, Design, State, Use Case or Verification, the
- * requirements it holds, satisfies, verifies, drives or that apply to it, each then opened as a Requirement.
+ * requirements reached through relationships valid for that class are shown; only Function and Design
+ * satisfy Requirements, while State/State Machine reach scoped Requirements through inverse appliesTo.
  */
 export const REQUIREMENTS_PROFILE: ViewProfile = {
   name: "Requirements",
@@ -103,8 +104,8 @@ export const REQUIREMENTS_PROFILE: ViewProfile = {
     { field: "refines", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "refines", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "references", direction: "out", from: ["Requirement"], to: ["Requirement", "Document"] },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design", "State"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
+    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "appliesTo", direction: "out", from: ["Requirement"] },
@@ -171,8 +172,9 @@ export const VERIFICATION_PROFILE: ViewProfile = {
   steps: [
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], undefinedOk: true },
-    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design", "State"] },
+    { field: "appliesTo", direction: "in", from: ["State"], to: ["Requirement"], atStartOnly: true },
+    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -248,7 +250,7 @@ export const FAILURE_PROFILE: ViewProfile = {
     { field: "affects", direction: "in", to: ["Issue", "Failure Mode", "Use Case"] },
     { field: "drives", direction: "out", from: ["Issue", "Failure Mode"] },
     { field: "drives", direction: "in", from: ["Issue", "Failure Mode"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design", "State"], to: ["Requirement"], undefinedOk: true },
+    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], undefinedOk: true },
     { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
   ],
   depth: 2,

@@ -50,7 +50,7 @@ test("findings: missing inverse, orphan inverse, off-rule, provisional", () => {
   ]);
   const f = idx.findings();
   assert.deepEqual(f.missingInverse.map((e) => `${e.from}>${e.to}`), ["F.md>R.md"]);
-  assert.equal(f.orphanInverse.length, 0, "S.md does satisfy R.md");
+  assert.equal(f.orphanInverse.length, 0, "the stored inverse pair is present even though State -> Requirement is off-rule");
   assert.deepEqual(f.offRule.map((e) => e.from), ["S.md"]);
   assert.equal(f.provisional.length, 1);
 });
@@ -320,20 +320,23 @@ test("requirements view from a Requirement: owner, parent, children, derivation,
   assert.ok(c.edges.every((e) => e.fromNode && e.toNode));
 });
 
-test("requirements view from a Function, Object and Verification: the requirements they hold, satisfy, are applied to, or verify (WB-098)", () => {
+test("requirements view from a Function, Object, State and Verification: valid satisfaction, applicability and verification only (WB-098, W-327)", () => {
   const idx = indexOf(schema, [
     note("Fn.md", "Function", { satisfies: ["R1.md"], hasChild: ["R2.md"] }),
     note("Obj.md", "Object"),
+    note("State.md", "State"),
     note("R1.md", "Requirement", { hasChild: ["R1a.md"] }),
     note("R1a.md", "Requirement"),
     note("R2.md", "Requirement"),
     note("R3.md", "Requirement", { appliesTo: ["Obj.md"] }),
+    note("R4.md", "Requirement", { appliesTo: ["State.md"] }),
     note("Ver.md", "Verification", { verifies: ["R2.md"] }),
     note("Fn2.md", "Function", { satisfies: ["R1.md"] }),
   ]);
   const fn = traverse(idx, ["Fn.md"], REQUIREMENTS_PROFILE);
   assert.deepEqual([...fn.depthOf.keys()].sort(), ["Fn.md", "Fn2.md", "R1.md", "R1a.md", "R2.md", "Ver.md"], "co-satisfier and verifier come in at the second level");
   assert.deepEqual([...traverse(idx, ["Obj.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["Obj.md", "R3.md"]);
+  assert.deepEqual([...traverse(idx, ["State.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["R4.md", "State.md"], "State reaches scoped requirements only through appliesTo");
   assert.deepEqual([...traverse(idx, ["Ver.md"], REQUIREMENTS_PROFILE).depthOf.keys()].sort(), ["R2.md", "Ver.md"], "the owner of a requirement is shown only when the requirement is the start");
 });
 
@@ -491,7 +494,7 @@ test("verification, design, scenario (WB-102)", () => {
     note("Des.md", "Design", { satisfies: ["R2.md"] }),
   ]);
   assert.deepEqual(keysOf(v, "R.md", "Verification"), ["Fn.md", "R.md", "R2.md", "V.md"], "verifier, its other requirement, satisfier");
-  assert.deepEqual(keysOf(v, "V.md", "Verification"), ["Des.md", "Fn.md", "R.md", "R2.md", "V.md"], "requirements verified, then who satisfies them");
+  assert.deepEqual(keysOf(v, "V.md", "Verification"), ["Des.md", "Fn.md", "R.md", "R2.md", "V.md"], "requirements verified, then valid Function/Design satisfiers");
   assert.deepEqual(keysOf(v, "Fn.md", "Verification"), ["Fn.md", "R.md", "V.md"]);
   assert.equal(arrow(v, "R.md", "Verification")("V.md", "R.md")?.label, "verifies");
 
