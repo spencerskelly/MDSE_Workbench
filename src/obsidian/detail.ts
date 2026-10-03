@@ -9,6 +9,7 @@ import { App, Component, MarkdownRenderer, Notice, TFile } from "obsidian";
 import { bodyOf, propertyRows, relationshipRows, type PropertyRow } from "../core/detail";
 import { coerceValue, parseListInput, propertyEditor } from "../core/edit";
 import type { NoteRecord } from "../core/model";
+import type { LinkRef, LocalRecord } from "../core/localmodel";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
 import { ConfirmModal, ElementPicker } from "./ui";
@@ -33,6 +34,7 @@ export class NoteDetailPanel extends Component {
   private renderer: Component | null = null;
   private history: string[] = [];
   private current: TFile | null = null;
+  private currentLocal: LocalRecord | null = null;
   private generation = 0;
   /** Edit mode is explicit and temporary (WB-039, WB-040): off for every note the popup opens. */
   private editing = false;
@@ -52,7 +54,7 @@ export class NoteDetailPanel extends Component {
     // picker, an undo, or a change made elsewhere.
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
-        if (!this.el || !this.current || file.path !== this.current.path || this.isDirty()) return;
+        if (!this.el || !this.current || this.currentLocal || file.path !== this.current.path || this.isDirty()) return;
         if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
         this.refreshTimer = window.setTimeout(() => {
           this.refreshTimer = null;
@@ -94,6 +96,7 @@ export class NoteDetailPanel extends Component {
       if (remember && this.current) this.history.push(this.current.path);
     }
     this.current = file;
+    this.currentLocal = null;
     const root = this.ensure();
     const gen = ++this.generation;
     const cache = this.app.metadataCache.getFileCache(file);
@@ -176,10 +179,77 @@ export class NoteDetailPanel extends Component {
     root.scrollTop = 0;
   }
 
+  /** WB-105/WB-106: read-only details for one contextual Local Model occurrence. */
+  showLocal(file: TFile, record: LocalRecord): void {
+    if (this.isDirty()) {
+      new ConfirmModal(this.app, `Discard the unsaved text changes to ${this.current?.basename ?? "this note"}?`, "Discard", () => {
+        this.bodyArea = null;
+        this.showLocal(file, record);
+      }).open();
+      return;
+    }
+    this.generation++;
+    this.current = file;
+    this.currentLocal = record;
+    this.editing = false;
+    this.bodyArea = null;
+    this.renderer?.unload();
+    this.renderer = null;
+    const root = this.ensure();
+    root.empty();
+    root.removeClass("mdse-detail-editing");
+
+    const head = root.createDiv({ cls: "mdse-detail-head" });
+    head.createDiv({ cls: "mdse-detail-title", text: record.identifier }).setAttr("title", `${file.path}#^${record.localId}`);
+    const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
+    owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
+    const occurrence = head.createEl("button", { text: "Open occurrence", cls: "mdse-detail-btn" });
+    occurrence.onclick = () => void this.app.workspace.openLinkText(`${file.path.replace(/\.md$/i, "")}#^${record.localId}`, file.path, true);
+    head.createEl("button", { text: "×", cls: "mdse-detail-btn", attr: { "aria-label": "Close" } }).onclick = () => this.close();
+
+    const chips = root.createDiv({ cls: "mdse-detail-chips" });
+    chips.createSpan({ cls: "mdse-detail-chip", text: record.kind });
+    if (record.usage !== "standard") chips.createSpan({ cls: "mdse-detail-chip", text: record.usage });
+    if (record.endpointKind) chips.createSpan({ cls: "mdse-detail-chip", text: record.endpointKind });
+
+    const table = root.createEl("table", { cls: "mdse-finding" });
+    const row = (key: string, value: string, action?: () => void) => {
+      if (!value) return;
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      const td = tr.createEl("td");
+      if (action) {
+        const a = td.createEl("a", { text: value, href: "#" });
+        a.onclick = (e) => { e.preventDefault(); action(); };
+      } else td.setText(value);
+    };
+    const linkText = (r: LinkRef | null) => r?.text ?? "";
+    const open = (r: LinkRef | null) => r?.target ? () => void this.app.workspace.openLinkText(r.target, file.path, true) : undefined;
+    row("Owner", file.basename, () => void this.app.workspace.getLeaf(true).openFile(file));
+    row("Local ID", record.localId);
+    row("Definition", linkText(record.definition), open(record.definition));
+    row("Usage", record.usage !== "standard" ? record.usage : "");
+    row("Multiplicity", record.multiplicity ?? "");
+    row("Part", linkText(record.part));
+    row("Parent endpoint", linkText(record.parent));
+    if (record.exposes.length) row("Exposes", record.exposes.map((r) => r.text).join(", "));
+    if (record.equals.length) row("Equals (temporary)", record.equals.map((r) => r.text).join(", "));
+    row("Endpoint A", linkText(record.endpointA));
+    row("Endpoint B", linkText(record.endpointB));
+    row("Connection", record.connectionId ?? "");
+    if (record.kind === "flow") {
+      row("Endpoint A role", record.roleA ?? "");
+      row("Endpoint B role", record.roleB ?? "");
+    }
+    root.createEl("p", { cls: "mdse-muted", text: "Local Model occurrences are contextual model records stored in the owner note. This popup is read-only." });
+    root.scrollTop = 0;
+  }
+
   /** A card for a note that does not exist yet (WB-092). */
   showUndefined(name: string): void {
     this.generation++;
     this.current = null;
+    this.currentLocal = null;
     this.history = [];
     this.editing = false;
     this.bodyArea = null;
@@ -204,6 +274,7 @@ export class NoteDetailPanel extends Component {
     this.el?.remove();
     this.el = null;
     this.current = null;
+    this.currentLocal = null;
     this.history = [];
     this.editing = false;
     this.bodyArea = null;
