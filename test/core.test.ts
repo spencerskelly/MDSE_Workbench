@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, WHERE_USED_PROFILE, withLocalInterfaces, withLocalRequirements, withLocalStructure, withLocalWhereUsed, type ViewProfile } from "../src/core/views";
+import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, INTERNAL_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, WHERE_USED_PROFILE, withLocalInterfaces, withLocalRequirements, withLocalStructure, withLocalWhereUsed, type ViewProfile } from "../src/core/views";\nimport { buildInternalView, preserveInternalLayout } from "../src/core/internal-view";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
@@ -681,4 +681,53 @@ test("behavior, failure and risk, evidence (WB-102)", () => {
   assert.deepEqual(keysOf(e, "Req.md", "Evidence"), ["Art.md", "Art2.md", "Req.md", "Req2.md"]);
   assert.deepEqual(keysOf(e, "Art.md", "Evidence"), ["Art.md", "Req.md", "Req2.md", "Art2.md"].sort());
   assert.equal(arrow(e, "Req.md", "Evidence")("Art.md", "Req.md")?.label, "describes");
+});
+
+
+test("Internal view uses the owner as a group boundary and keeps interfaces simple", () => {
+  const idx=indexOf(schema,[
+    {...note("Assembly.md","Object"),uid:"20261003123456789assemblyowner"},
+    note("Pump.md","Object"),note("PortDef.md","Port"),note("FlowDef.md","Item Flow"),
+  ]);
+  const local=new LocalModelIndex();
+  const p="20261003123456789ppppppppppppp";
+  const inner="20261003123456789iiiiiiiiiiiii";
+  const outer="20261003123456789ooooooooooooo";
+  const conn="20261003123456789ccccccccccccc";
+  const flow="20261003123456789fffffffffffff";
+  local.set("Assembly.md",parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->","## Local Model",
+    "### Part Occurrences","#### Pump A","- definition: [[Pump]]","^part-"+p,
+    "### Local Interfaces","#### P1","- definition: [[PortDef]]","- part: [[#^part-"+p+"|Pump A]]","^ep-"+inner,
+    "#### J1","- definition: [[PortDef]]","- exposes: [[#^ep-"+inner+"|P1]]","^ep-"+outer,
+    "### Connections","#### Harness","- endpointA: [[#^ep-"+outer+"|J1]]","- endpointB: [[#^ep-"+inner+"|P1]]","^conn-"+conn,
+    "##### Power","- definition: [[FlowDef]]","- endpointA: transmit","- endpointB: receive","^flow-"+flow,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+  const result=buildInternalView(idx,local,"Assembly.md",(target)=>target+".md");
+  const group=result.canvas.nodes.find((n)=>n.type==="group");
+  assert.equal(group?.label,"Assembly");
+  assert.ok(result.canvas.nodes.some((n)=>n.id==="local:part-"+p));
+  const boundary=result.canvas.nodes.find((n)=>n.id==="local:ep-"+outer)!;
+  assert.ok(boundary.x<0 || boundary.x+boundary.width>group!.width,"boundary interface straddles the owner boundary");
+  assert.ok(result.canvas.edges.some((e)=>e.id==="expose:ep-"+outer+":ep-"+inner && e.label==="exposes"));
+  assert.ok(result.canvas.edges.some((e)=>e.id==="connection:conn-"+conn && e.label?.includes("Harness") && e.label?.includes("Power")));
+  assert.equal(PROFILES.Internal,INTERNAL_PROFILE);
+});
+
+test("Internal curated refresh preserves stable node placement",()=>{
+  const generated={nodes:[
+    {id:"internal:boundary",type:"group" as const,label:"A",x:0,y:0,width:1000,height:700},
+    {id:"local:part-x",type:"text" as const,text:"x",x:100,y:100,width:200,height:100},
+    {id:"local:part-new",type:"text" as const,text:"new",x:400,y:100,width:200,height:100},
+  ],edges:[]};
+  const existing={nodes:[
+    {id:"internal:boundary",type:"group" as const,label:"A",x:20,y:30,width:1200,height:800},
+    {id:"local:part-x",type:"text" as const,text:"old",x:777,y:333,width:240,height:130},
+  ],edges:[]};
+  const merged=preserveInternalLayout(generated,existing);
+  const kept=merged.nodes.find((n)=>n.id==="local:part-x")!;
+  assert.deepEqual([kept.x,kept.y,kept.width,kept.height],[777,333,240,130]);
+  const added=merged.nodes.find((n)=>n.id==="local:part-new")!;
+  assert.deepEqual([added.x,added.y],[400,100]);
 });

@@ -732,7 +732,7 @@ const PALETTE = ["4", "5", "6", "2", "3", "#9aa0a6", "#b5835a", "#7f9cf5", "#c9b
 
 export interface CanvasNode {
   id: string;
-  type: "file" | "text";
+  type: "file" | "text" | "group";
   file?: string;
   text?: string;
   x: number;
