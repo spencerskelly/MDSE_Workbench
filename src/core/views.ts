@@ -606,8 +606,11 @@ export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, r
         for (const link of links) {
           const t = linkedLocal(index, local, resolve, ownerPath, link);
           if (!t) continue;
+          const alreadyPlaced = m.depthOf.has(t.key);
           addLocalNode(index, local, m, t.path, t.record, ownerDepth + 1, profile);
-          if (m.depthOf.has(t.key)) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+          if (!m.depthOf.has(t.key)) continue;
+          if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+          else m.tree.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
         }
       }
     }
@@ -619,8 +622,11 @@ export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, r
       for (const [field, link] of ends) {
         const t = linkedLocal(index, local, resolve, ownerPath, link);
         if (!t) continue;
+        const alreadyPlaced = m.depthOf.has(t.key);
         addLocalNode(index, local, m, t.path, t.record, ownerDepth + 1, profile);
-        if (m.depthOf.has(t.key)) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+        if (!m.depthOf.has(t.key)) continue;
+        if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
+        else m.tree.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
       }
     }
   }
@@ -760,7 +766,8 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
   const nameOf = (p: string) => view.localNodes.get(p)?.record.identifier ?? (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
   const colorOf = new Map<string, string>();
   for (const s of profile.steps) if (!colorOf.has(s.field)) colorOf.set(s.field, PALETTE[colorOf.size % PALETTE.length]);
-  if (view.localNodes.size && !colorOf.has("part occurrence")) colorOf.set("part occurrence", colorOf.get("hasPart") ?? PALETTE[0]);
+  const localFields = [...view.tree, ...view.localEdges].map((l) => l.field);
+  for (const field of localFields) if (!colorOf.has(field)) colorOf.set(field, PALETTE[colorOf.size % PALETTE.length]);
   const plainFields = new Set(profile.steps.filter((s) => s.noArrow).map((s) => s.field));
   const kids = new Map<string, TreeLink[]>();
   for (const l of view.tree) {
@@ -827,6 +834,7 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
       const detail = [
         `**${selfLink}**`,
         `*${kind}*`,
+        `Owner: [[${owner}]]`,
         r.definition ? `Definition: ${r.definition.text}` : "",
         context,
         r.multiplicity ? `Multiplicity: ${r.multiplicity}` : "",
