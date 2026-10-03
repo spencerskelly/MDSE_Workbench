@@ -120,6 +120,21 @@ Before a whole v0.8 import is accepted/kept:
 
 Canvas may render local records as derived/text nodes if native Canvas cannot address them as file cards. This does not create notes for the local records.
 
+## Internal Structure view
+
+WB-106 includes an occurrence-native Internal view for an Object that owns Local Model content.
+
+- the selected note is the visual boundary;
+- local part occurrences are inside it;
+- assembly-boundary endpoint occurrences are compact boundary boxes;
+- part-owned endpoints stay near their owning occurrence where practical;
+- local connection records provide endpoint-to-endpoint semantic edges;
+- connection-owned flows may be summarized on that connection;
+- `exposes` is shown from the boundary endpoint to the internal endpoint it exposes;
+- reusable-definition internals are not flattened into the owner's context.
+
+Internal Canvas node IDs must be stable with respect to the addressed ModelRef/local ID. Canvas geometry is presentation-only. A semantic refresh of a curated Internal view preserves surviving node position/size where possible and must never treat manually drawn/moved Canvas geometry as new MDSE semantics.
+
 ## Duplicate relationship rule
 
 Repeated identical note-level relationship entries are duplicate-source/model evidence, never engineering quantity.
