@@ -640,6 +640,53 @@ export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, r
   return { ...base, ...m };
 }
 
+
+/** WB-106 Where Used: show contextual occurrences of a reusable definition. */
+export function withLocalWhereUsed(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile = WHERE_USED_PROFILE): ViewResult {
+  if (profile.name !== WHERE_USED_PROFILE.name) return base;
+  const m = mutableLocal(base);
+  for (const definitionPath of base.starts.filter((p) => index.notes.has(p))) {
+    const d = m.depthOf.get(definitionPath) ?? 0;
+    const occurrences = local.occurrencesOf(definitionPath, resolve)
+      .sort((a, b) => a.path.localeCompare(b.path) || a.record.kind.localeCompare(b.record.kind) || a.record.identifier.localeCompare(b.record.identifier));
+    for (const { path, record } of occurrences) {
+      const k = addLocalNode(index, local, m, path, record, d + 1, profile);
+      if (k) m.tree.push({ parent: definitionPath, child: k, field: "occurrence", direction: "out", count: 1 });
+    }
+  }
+  return { ...base, ...m };
+}
+
+/** WB-106 Requirements: block-targeted appliesTo remains attached to the exact local occurrence. */
+export function withLocalRequirements(index: ModelIndex, local: LocalModelIndex, base: ViewResult, profile: ViewProfile = REQUIREMENTS_PROFILE): ViewResult {
+  if (profile.name !== REQUIREMENTS_PROFILE.name) return base;
+  const m = mutableLocal(base);
+  for (const requirementPath of base.starts.filter((p) => index.notes.get(p)?.type === "Requirement")) {
+    const d = m.depthOf.get(requirementPath) ?? 0;
+    const refs = (index.notes.get(requirementPath)?.localRefs ?? [])
+      .filter((r) => r.field === "appliesTo")
+      .sort((a, b) => a.path.localeCompare(b.path) || a.localId.localeCompare(b.localId));
+    for (const ref of refs) {
+      const record = local.recordsOf(ref.path).find((r) => r.localId === ref.localId);
+      if (!record) continue;
+      const k = addLocalNode(index, local, m, ref.path, record, d + 1, profile);
+      if (k) m.tree.push({ parent: requirementPath, child: k, field: "appliesTo", direction: "out", count: 1 });
+    }
+  }
+  return { ...base, ...m };
+}
+
+/** Adds Local Model occurrences only for the four WB-106 views that own them. */
+export function withLocalOccurrences(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile): ViewResult {
+  switch (profile.name) {
+    case "Structure": return withLocalStructure(index, local, base, profile);
+    case "Interfaces": return withLocalInterfaces(index, local, resolve, base, profile);
+    case "Where Used": return withLocalWhereUsed(index, local, resolve, base, profile);
+    case "Requirements": return withLocalRequirements(index, local, base, profile);
+    default: return base;
+  }
+}
+
 /** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
 export function signature(view: ViewResult): string {
   const nodes = [...view.depthOf.keys()].sort().join("\n");
