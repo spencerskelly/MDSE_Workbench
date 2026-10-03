@@ -56,7 +56,7 @@ export function editableLocalRegion(text: string): EditableLocalRegion {
   };
 }
 
-export function planLocalRecordPatch(text: string, localId: string, patch: LocalRecordPatch): PlannedLocalEdit {
+export interface LocalPlanOptions {\n  /** Staged structural transactions may temporarily hold an invalid target record. Atomic edits leave this false. */\n  allowInvalidTarget?: boolean;\n}\n\nexport function planLocalRecordPatch(text: string, localId: string, patch: LocalRecordPatch, options: LocalPlanOptions = {}): PlannedLocalEdit {
   const editable = editableLocalRegion(text);
   const record = editable.region.records.find((r) => r.localId === localId);
   if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
@@ -288,4 +288,11 @@ function endOfConnection(lines: readonly string[], region: LocalRegion, connecti
   }
   while (insert > start + 1 && lines[insert - 1].trim() === "") insert--;
   return insert;
+}
+
+
+function assertTargetValid(region: LocalRegion, localId: string): void {
+  const errors=region.findings.filter((finding)=>finding.severity==="error" && finding.localId===localId);
+  if (!errors.length) return;
+  throw new Error("Local Model record ^"+localId+" is invalid: "+errors.map((x)=>x.message).join(" "));
 }

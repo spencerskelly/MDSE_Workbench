@@ -1131,3 +1131,9 @@ Added WorkbenchEditService between UI and vault storage. Existing Local Model pa
 For creation, Workbench reads the author code registered by MDSE Bootstrap in .obsidian/author-code.txt and allocates through WB-117 against the shared note-UID/Local-Model-token namespace in the current indexes. Workbench does not add a second author-registration workflow.
 
 This adapter currently handles atomic single-file Local Model patch/create operations. Structural multi-file planners will use the same TransactionManager/Executor boundary rather than bypassing it.
+
+
+### WB-120 — 2026-10-03 atomic Local Model validity gate
+**Status:** Implemented.
+
+Immediate Local Model record patches now refuse a result that leaves the edited record with a required local validation error. The planner has an explicit allowInvalidTarget option reserved for staged structural transactions, where WB-114 permits temporary invalidity before final Apply validation. This keeps the immediate-edit path safe without forcing the future structural transaction editor to maintain validity after every intermediate gesture.

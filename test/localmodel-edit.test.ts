@@ -174,3 +174,21 @@ test("does not commandeer an ambiguous ungoverned Local Model heading", () => {
     /ungoverned Local Model heading/,
   );
 });
+
+
+test("an atomic patch cannot remove a required definition", () => {
+  assert.throws(
+    () => planLocalRecordPatch(note(), "part-" + tokenA, { fields: { definition: null } }),
+    /is invalid:.*no definition/i,
+  );
+});
+
+test("a staged planner may represent temporary invalidity when explicitly requested", () => {
+  const result=planLocalRecordPatch(
+    note(),
+    "part-" + tokenA,
+    { fields: { definition: null } },
+    { allowInvalidTarget: true },
+  );
+  assert.ok(result.findings.some((x)=>x.localId==="part-"+tokenA && x.code==="record.missing-definition"));
+});
