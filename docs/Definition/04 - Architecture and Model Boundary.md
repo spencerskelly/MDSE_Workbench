@@ -338,3 +338,24 @@ Schema-specific behavior belongs in declarative schema/rule adapters where pract
 - lifecycle behavior.
 
 Workbench may supply safe defaults only where the MDSE authority permits them; it must not create private model semantics.
+
+
+## Internal Structure and curated Canvas boundary — WB-123
+
+Internal Structure is a projection of one Object's owned Local Model context.
+
+The Object/note is rendered as the visual boundary. Its part occurrences, endpoint occurrences, local connections and connection-scoped flows are the semantic inputs. Boundary endpoint placement and node geometry are view presentation.
+
+Rules:
+
+1. Internal never invents model content from Canvas geometry.
+2. Drawing, moving or resizing Canvas items does not author a semantic relationship.
+3. A connection shown in Internal comes from the context-owned Local Model connection record.
+4. An exposed boundary interface comes from the governed `exposes` relationship between endpoint occurrences.
+5. Reusable definition internals are not flattened through a part occurrence. Opening the definition's Internal view changes context instead.
+6. Stable ModelRef/local identity is the key used to reconcile a regenerated semantic projection with a curated Canvas layout.
+7. Refresh preserves engineer-curated position and size for surviving stable nodes where practical. New semantic nodes may use generated placement; deleted semantic nodes disappear.
+8. Workbench must not silently replace a curated layout with a fresh automatic layout.
+9. The Canvas remains a presentation artifact. Notes and Local Model records remain the semantic authority.
+
+This extends the existing generated-versus-curated view boundary; it does not introduce a new model element, relationship or Local Model field.
