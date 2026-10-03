@@ -1,0 +1,27 @@
+name: WB-106 runtime build artifact
+on:
+  push:
+    branches: ["wb106-runtime-build"]
+permissions:
+  contents: write
+jobs:
+  build:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: sha256sum main.js manifest.json styles.css > WB106_BUILD_SHA256.txt
+      - name: Commit runtime artifact on disposable branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f main.js WB106_BUILD_SHA256.txt
+          git commit -m "Build Workbench 0.1.17 runtime artifact [skip ci]"
+          git push
