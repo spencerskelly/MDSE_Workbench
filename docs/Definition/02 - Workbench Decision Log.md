@@ -1153,3 +1153,22 @@ TransactionManager has a recordApplied migration seam for governed writers that 
 A source sanity pass found the first WB-121 mechanical migration had left the old undoStack declaration/usages in RelationshipWriter and introduced invalid variable references in the remove-missing path. The writer has been rebuilt from the last known-good pre-WB-121 revision and migrated deliberately: add/remove/remove-missing/property/body edits now register into the shared TransactionManager, and the old private stack is gone.
 
 No Local Model editing UI had been exposed while the broken intermediate revision existed.
+
+
+### WB-123 — 2026-10-03 Internal Structure view for occurrence-owning Objects
+**Status:** Approved by Spencer; core implementation present on main, visual/runtime validation still required before release.
+
+Internal is a first-class occurrence-native view. The selected Object/note is the visual boundary. Workbench places its local part occurrences inside that boundary, shows assembly-boundary endpoints as compact text boxes on the outer edge, keeps part-owned endpoints near their owning part, draws context-owned connections between endpoint occurrences, summarizes connection-owned flows on those connections, and shows `exposes` from the boundary endpoint to the internal endpoint it exposes.
+
+Internal is intentionally a context view: it shows topology owned by the current Local Model context and does not flatten reusable-definition internals into the same diagram. Deeper inspection is semantic navigation to the reusable definition's own Internal view, not graphical scaling of one giant graph.
+
+Canvas placement and sizing are presentation only. They do not create, remove or alter MDSE semantic relationships. Stable Local Model IDs are used as Canvas node identity so a later semantic refresh can preserve engineer-curated placement of nodes that still exist. A refresh may add newly created semantic nodes and remove semantic nodes that no longer exist, but must not silently discard curated placement.
+
+The existing note-details **View…** entry point is the normal way to reach applicable views; Internal should only be offered when the selected Object actually owns Local Model content.
+
+### WB-124 — 2026-10-03 engineer-facing Workbench guide
+**Status:** Approved documentation boundary.
+
+The Workbench repository now carries `docs/User Guide/MDSE Workbench User Guide.md`. The controlled Base Vault carries an exact release-managed copy so ordinary engineers receive the guide inside the engineering vault.
+
+The guide distinguishes the pinned runtime from candidate capabilities. Documentation must not imply an editor/view is released merely because source exists on Workbench main. Cross-repository release validation should compare the Workbench source guide with the Base Vault copy so they cannot drift silently.
