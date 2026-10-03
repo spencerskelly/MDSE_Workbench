@@ -80,7 +80,7 @@ Generated views go to `Workbench Views/` (configurable). Add that folder to the 
 
 Workspace decisions W-293/W-294/W-298 and Workbench decision WB-105 add addressable local part occurrences, endpoints, connections, connection-scoped flows and local applicability inside the owning note body.
 
-The next occurrence-aware Workbench build will treat that content as a separate **Local Model** surface:
+Workbench treats that content as a separate **Local Model** surface:
 
 - Local Model is distinct from ordinary narrative text, Properties and note-level Relationships.
 - W-302/W-319 bound it with managed START/END markers; Workbench must read schema `0.1` and `0.2`, while new writers use `0.2`; the ordinary text editor must exclude/protect that region.
@@ -92,14 +92,19 @@ The next occurrence-aware Workbench build will treat that content as a separate 
 - W-311 makes assembly boundaries authoritative for connection ownership: a parent connects to a child's boundary endpoint, while `exposes` relates that boundary endpoint to the child's internal endpoint. EA BindingConnector/temporary `equals` stays review evidence until confirmed.
 - W-312 requires persisted local references (`part`, `parent`, connection endpoints, exposure and temporary local `equals`) to use native Obsidian block links rather than bare IDs.
 - W-313/W-319 use vault-side `local-model.yaml`; `0.2` is the canonical writer schema and `0.1` remains readable for backward compatibility as the shared parser/validation contract for importer and Workbench.
-- WB-106 makes Local Model read/navigation support a keepability gate for v0.8: addressable ModelRef identity, block-fragment preservation, Local Model parsing, occurrence-aware core views, governed-region protection and local model-health findings are required before the first import is accepted. Structured Local Model editing may follow later.
+- The original WB-106 read/navigation gate is implemented in 0.1.17. WB-114 expands WB-106 into the structured editor gate: Local Model edits go through the semantic transaction/model-edit service, while definition editing remains a distinct canonical-note mode.
 - Repeated note-level relationship entries are not engineering quantity; true quantity comes from Local Model `multiplicity`.
 - Connection-owned flow records are stored once but indexed and shown from each participating endpoint/interface.
 - EA-only provenance is not required by Workbench and lives in the import-evidence `Local Model Source Map.csv` rather than engineering note records.
-- Read-only parsing/indexing comes before structured editing; high-value views navigate local records rather than flattening them into duplicate note-level links.
+- High-value views navigate local records rather than flattening them into duplicate note-level links. Structured editing must preserve the same occurrence/definition ownership boundary.
 
-**0.1.17 completes the WB-106 read/navigation keepability gate.** Workbench reads Local Model regions (schema 0.1 and 0.2), gives records `ModelRef` identity, keeps them in the incremental index, reports findings, and uses them in Structure, Interfaces, Where Used and Requirements. Generated Canvas views show local records as derived cards linked to their native block IDs; clicking one opens a read-only Local Model details popup. Review includes Local Model Findings. A block-targeted relationship stays targeted at the exact occurrence rather than also becoming a note-level edge. Ordinary body editing is still refused on a note with a governed region, and structured Local Model editing remains deferred. Links Workbench writes follow W-324: the file name when unique, else the shortest unique path.
+**0.1.17 completes the original WB-106 read/navigation keepability gate.** Workbench reads Local Model regions (schema 0.1 and 0.2), gives records `ModelRef` identity, keeps them in the incremental index, reports findings, and uses them in Structure, Interfaces, Where Used and Requirements. Generated Canvas views show local records as derived cards linked to their native block IDs; Review includes Local Model Findings; a block-targeted relationship stays targeted at the exact occurrence rather than also becoming a note-level edge. WB-114 then expands WB-106 into the structured editor gate. The transaction/edit foundation is now on `main`; it is not considered released merely because the source exists. Links Workbench writes follow W-324: the file name when unique, else the shortest unique path.
 
+
+
+## User guide
+
+Engineer-facing operating instructions are in [docs/User Guide/MDSE Workbench User Guide.md](docs/User%20Guide/MDSE%20Workbench%20User%20Guide.md). The controlled Base Vault carries an exact runtime copy for ordinary engineering users. The guide distinguishes pinned runtime behavior from candidate WB-106 capabilities.
 
 ## Semantic guardrails
 
