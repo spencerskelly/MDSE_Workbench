@@ -763,6 +763,8 @@ export interface CanvasNode {
   type: "file" | "text" | "group";
   file?: string;
   text?: string;
+  /** JSON Canvas group label; used by Internal Structure boundaries. */
+  label?: string;
   x: number;
   y: number;
   width: number;
