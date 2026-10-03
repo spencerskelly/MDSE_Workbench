@@ -3,7 +3,7 @@
  * and native JSON Canvas output (WB-034). Pure TypeScript.
  */
 import type { Edge, ModelIndex } from "./model";
-import { refKey, type LocalModelIndex, type LocalRecord, type ModelRef } from "./localmodel";
+import { refKey, type LinkRef, type LocalModelIndex, type LocalRecord, type ModelRef } from "./localmodel";
 
 export type Direction = "out" | "in";
 
@@ -331,6 +331,8 @@ export interface ViewResult {
   undefinedCount: number;
   /** Local occurrences shown as derived/text nodes; keyed by refKey(ModelRef). */
   localNodes: Map<string, LocalViewNode>;
+  /** Non-tree links between local records, such as connection ends and exposure. */
+  localEdges: TreeLink[];
 }
 
 export function traverse(index: ModelIndex, starts: string[], profile: ViewProfile): ViewResult {
@@ -451,6 +453,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
     capReached,
     undefinedCount: [...depthOf.keys()].filter(isUndefinedId).length,
     localNodes: new Map(),
+    localEdges: [],
   };
 }
 
@@ -513,8 +516,9 @@ export function signature(view: ViewResult): string {
     const r = n.record;
     return `${id}|${r.identifier}|${r.definition?.text ?? ""}|${r.multiplicity ?? ""}|${r.usage}`;
   }).sort().join("\n");
+  const localEdges = view.localEdges.map((e) => `${e.parent}|${e.field}|${e.child}|${e.direction}`).sort().join("\n");
   let h = 2166136261;
-  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${dupes}\n${local}`) {
+  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${dupes}\n${local}\n${localEdges}`) {
     h ^= ch.charCodeAt(0);
     h = Math.imul(h, 16777619);
   }
@@ -634,9 +638,16 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
       const r = localNode.record;
       const owner = localNode.ownerPath.replace(/\.md$/i, "");
       const selfLink = `[[${owner}#^${r.localId}|${r.identifier}]]`;
+      const kind = r.kind === "part" ? "part occurrence" : r.kind === "endpoint" ? "interface occurrence" : r.kind === "flow" ? "flow occurrence" : "connection";
+      const context =
+        r.kind === "endpoint"
+          ? r.part?.text ? `Part: ${r.part.text}` : r.parent?.text ? `Parent: ${r.parent.text}` : "Assembly boundary"
+          : "";
       const detail = [
         `**${selfLink}**`,
+        `*${kind}*`,
         r.definition ? `Definition: ${r.definition.text}` : "",
+        context,
         r.multiplicity ? `Multiplicity: ${r.multiplicity}` : "",
         r.usage !== "standard" ? `Usage: ${r.usage}` : "",
       ].filter(Boolean).join("\n");
@@ -656,6 +667,24 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
   for (const r of roots) {
     place(r, 0);
     cursor += ROW_H; // gap between starting elements
+  }
+
+  // Local topology links between already placed occurrence cards.
+  for (const l of view.localEdges) {
+    const a = idOf.get(l.parent);
+    const b = idOf.get(l.child);
+    if (!a || !b) continue;
+    const reverse = l.direction === "in";
+    edges.push({
+      id: `e${edges.length}`,
+      fromNode: reverse ? b : a,
+      toNode: reverse ? a : b,
+      fromSide: reverse ? "left" : "right",
+      toSide: reverse ? "right" : "left",
+      label: edgeLabel(l.field, l.count),
+      color: colorOf.get(l.field) ?? "#9aa0a6",
+      ...(plainFields.has(l.field) || l.field === "equals" ? { toEnd: "none" as const } : {}),
+    });
   }
 
   // Links between notes already shown, other than the tree: unlabelled and uncoloured.
