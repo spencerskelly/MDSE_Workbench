@@ -98,7 +98,7 @@ The next occurrence-aware Workbench build will treat that content as a separate 
 - EA-only provenance is not required by Workbench and lives in the import-evidence `Local Model Source Map.csv` rather than engineering note records.
 - Read-only parsing/indexing comes before structured editing; high-value views navigate local records rather than flattening them into duplicate note-level links.
 
-**0.1.15 still predates WB-106 parsing/indexing, but it now refuses ordinary body editing on a note containing a governed Local Model marker. It does not yet provide occurrence-aware views or Local Model structured editing.** The synchronized importer/base release after the current v0.7 merge candidate will start at v0.8.0; Workbench remains independently versioned.
+**0.1.16 reads Local Model regions (schema 0.1 and 0.2), gives records `ModelRef` identity and reports findings** with **Check Local Model (write findings report)**. WB-106 is not complete: the Structure, Interfaces, Where Used and Requirements views do not yet show local occurrences, there is no Local Model popup, and Review does not list Local Model findings. Ordinary body editing is still refused on a note with a governed region. Links Workbench writes follow W-324: the file name when unique, else the shortest unique path.
 
 
 ## Design rules this code follows
@@ -120,7 +120,7 @@ npm run build       # typecheck and bundle main.js
 npm run bench:generate -- 60000 && npm run bench
 ```
 
-`test/fixtures/` holds copies of the vault's relationship and element schemas. The next WB-106 implementation must also add historical Local Model 0.1 and current 0.2 fixtures and test both readers.
+`test/fixtures/` holds copies of the vault's relationship, element and Local Model schemas (the current 0.2 authority copy and the frozen 0.1 compatibility copy); `test/localmodel.test.ts` tests the reader against both.
 
 The CI and release workflows are in `ci-workflows/` because the access token used so far cannot write workflow files (it lacks the Workflows permission; GitHub refuses the push). With a token that has it, move both files to `.github/workflows/`. CI then runs the tests and the build on every push to `main` and on pull requests; the release workflow runs when a tag `v<version>` is pushed, checks the tag against `manifest.json`, builds, and publishes `main.js`, `manifest.json`, `styles.css` and the 60,000-note synthetic vault as a GitHub release. Both files parse, and the commands they run (`npm ci`, `npm test`, `npm run build`, `npm run bench:generate`) work here; neither workflow has run on GitHub yet.
 

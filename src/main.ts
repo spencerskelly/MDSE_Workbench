@@ -15,6 +15,7 @@ import { NoteDetailPanel } from "./obsidian/detail";
 import { nodeAt, parseTranslate, undefinedName, type CanvasNodeJson } from "./core/detail";
 import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
+import { scanLocalModel, writeFindingsReport } from "./obsidian/localmodel";
 
 /** Quiet time with no cache activity before the first index build starts. */
 const QUIET_START_MS = 8000;
@@ -142,6 +143,7 @@ export default class MdseWorkbench extends Plugin {
         }),
     );
     this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
+    this.addCommand({ id: "local-model-findings", name: "Check Local Model (write findings report)", callback: () => void this.checkLocalModel() });
     this.addRibbonIcon("list-checks", "Workbench Review", () => void this.openReview());
     this.registerEvent(this.app.metadataCache.on("changed", () => (this.lastChange = Date.now())));
     this.register(() => (this.unloaded = true));
@@ -221,6 +223,23 @@ export default class MdseWorkbench extends Plugin {
   /** Quiet version of ready(): no notice. Used by Review, which waits and retries. */
   private isReady(): boolean {
     return !!(this.schema && this.indexer && this.writer && !this.indexer.building && this.indexer.stats);
+  }
+
+  /** WB-111: read every Local Model region, run the WB-106 checks, write the report and open it. */
+  async checkLocalModel(): Promise<void> {
+    if (!this.ready()) return;
+    const notice = new Notice("MDSE Workbench: reading Local Model regions…", 0);
+    try {
+      const scan = await scanLocalModel(this.app, (this.indexer as Indexer).index);
+      const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
+      const errors = scan.findings.filter((f) => f.severity === "error").length;
+      new Notice(`Local Model: ${scan.notesWithRegion} notes, ${scan.records} records, ${errors} errors, ${scan.findings.length - errors} warnings (${(scan.ms / 1000).toFixed(1)} s).`, 10000);
+      await this.app.workspace.getLeaf(false).openFile(file);
+    } catch (e) {
+      new Notice(`Local Model check failed: ${(e as Error).message}`, 15000);
+    } finally {
+      notice.hide();
+    }
   }
 
   async openReview(): Promise<void> {

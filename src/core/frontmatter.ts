@@ -28,19 +28,29 @@ function sortLinks(list: unknown[]): unknown[] {
   );
 }
 
-/** Adds `[[target]]` to a list field. Returns false when it was already there. */
-export function addLink(fm: Frontmatter, field: string, target: string): boolean {
+/**
+ * Decides whether an existing list entry points at the same note as the link being added or removed.
+ * The Obsidian layer passes a resolver-based check (W-324: a link is a file name or, where the name is
+ * not unique, the shortest unique path, so two different texts can mean one note and one text can mean
+ * two). Without it the comparison falls back to the link text.
+ */
+export type SameNote = (value: unknown) => boolean;
+
+/** Adds `[[linkText]]` to a list field. Returns false when the note was already linked. */
+export function addLink(fm: Frontmatter, field: string, linkText: string, same?: SameNote): boolean {
   const list = asList(fm[field]);
-  if (list.some((v) => linkTarget(v)?.toLowerCase() === target.toLowerCase())) return false;
-  list.push(`[[${target}]]`);
+  const already = same ?? ((v: unknown) => linkTarget(v)?.toLowerCase() === linkText.toLowerCase());
+  if (list.some(already)) return false;
+  list.push(`[[${linkText}]]`);
   fm[field] = sortLinks(list);
   return true;
 }
 
-/** Removes `target` from a list field. Returns false when it was not there. */
-export function removeLink(fm: Frontmatter, field: string, target: string): boolean {
+/** Removes the entries that point at the note. Returns false when it was not linked. */
+export function removeLink(fm: Frontmatter, field: string, linkText: string, same?: SameNote): boolean {
   const list = asList(fm[field]);
-  const kept = list.filter((v) => linkTarget(v)?.toLowerCase() !== target.toLowerCase());
+  const match = same ?? ((v: unknown) => linkTarget(v)?.toLowerCase() === linkText.toLowerCase());
+  const kept = list.filter((v) => !match(v));
   if (kept.length === list.length) return false;
   fm[field] = kept;
   return true;

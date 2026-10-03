@@ -1,3 +1,15 @@
+# 0.1.16
+
+Alignment build for importer v0.8.6 (W-324) and the first part of WB-106.
+
+- **Links are written the way Obsidian writes them.** Relate, Replace and Write missing inverse used to write `[[File name]]` always. Where two notes share a name that link points at the wrong one. A link is now the file name when it is unique, otherwise the shortest unique path, and an existing link is matched by the note it resolves to, so a repeat or a removal no longer misses a note linked in the other form.
+- **Local Model reader (WB-106, part 1).** Reads the governed `## Local Model` region of a note, schema 0.1 and 0.2: records (part, endpoint, connection, flow), native block IDs, same-note and cross-note block links, usage, `ModelRef` identity (note UID plus local block ID). 0.1 is read as standard usage and never rewritten; an unknown future schema leaves the text readable and structured use off.
+- **Local Model findings.** New command **Check Local Model (write findings report)** reads every note that has a region, runs the WB-106 checks across the vault and writes `Local Model Findings.md` in the (git-ignored) views folder, grouped by finding code with links to the record. Checks: marker errors, unsupported schema, duplicate or malformed block IDs, identity-token collisions across note UIDs and records, broken same-note and cross-note block links, wrong link kinds, part and parent together, parent cycles, connection ends, flow roles, orphan flows, missing or incompatible definitions, usage values, usage on a connection or flow, a standard occurrence on an abstract definition, variant or option with no concrete candidate, specialization cycles, invalid `abstract`, and relationship fields that point at a block that has no record.
+- **Candidates.** `subtypeOf` specialization candidates are derived transitively through abstract and concrete notes, concrete only, with cycle protection. Never stored.
+- **Indexing.** `abstract` and block-link targets in relationship fields (`[[Note#^id]]`) are indexed.
+
+**Not in 0.1.16 (WB-106 is not complete):** the Structure, Interfaces, Where Used and Requirements views do not yet show local occurrences; there is no Local Model popup (WB-105); the Review screen does not list Local Model findings (the report does). The release manifest keeps `wb106Version` empty until the views are done. Ordinary body editing stays refused on a note that has a governed region.
+
 # 0.1.15
 
 Safety/alignment build for the MDSE v0.8 contract. Repeated note-level relationship targets are no longer presented as engineering quantity, governed Local Model regions are protected from the ordinary body editor, and schema-defined sparse optional properties are ordered before relationship fields.

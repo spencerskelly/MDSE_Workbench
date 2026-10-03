@@ -3,9 +3,9 @@
  * inverse on the target in one step (WB-085, W-275), keep a safe undo (WB-086).
  * No UI here; commands and, later, Canvas call it.
  */
-import { App, TFile } from "obsidian";
+import { App, getLinkpath, TFile } from "obsidian";
 import { bodyUnchanged, PROTECTED_PROPERTIES, replaceBody } from "../core/edit";
-import { addLink, canonicalOrder, orderProperties, removeLink } from "../core/frontmatter";
+import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink, type SameNote } from "../core/frontmatter";
 import type { ModelIndex } from "../core/model";
 import { allows } from "../core/rules";
 import { editingBlocked, type RelationshipDef, type Schema } from "../core/schema";
@@ -19,6 +19,31 @@ interface FileState {
 export interface Transaction {
   label: string;
   files: FileState[];
+}
+
+/**
+ * The link text Obsidian itself would write for `target` from `source` (W-324): the file name when it is
+ * unique, the shortest unique path otherwise, following the vault's link-format setting. A bare file name is
+ * not enough: where two notes share a name it would point at the wrong one.
+ */
+export function linkTextFor(app: App, target: TFile, sourcePath: string): string {
+  try {
+    const md = app.fileManager.generateMarkdownLink(target, sourcePath);
+    const m = /^\[\[([^\]|#]+)/.exec(md);
+    if (m) return m[1].trim();
+  } catch {
+    // fall through to the metadata cache
+  }
+  return app.metadataCache.fileToLinktext(target, sourcePath, true);
+}
+
+/** True when an existing list entry resolves, from `sourcePath`, to `target`. */
+export function pointsAt(app: App, target: TFile, sourcePath: string): SameNote {
+  return (value: unknown) => {
+    const text = linkTarget(value);
+    if (!text) return false;
+    return app.metadataCache.getFirstLinkpathDest(getLinkpath(text), sourcePath)?.path === target.path;
+  };
 }
 
 export class RelationshipWriter {
@@ -58,7 +83,7 @@ export class RelationshipWriter {
       const before = await this.app.vault.read(file);
       let changed = false;
       await this.app.fileManager.processFrontMatter(file, (fm) => {
-        changed = addLink(fm, field, linkTo.basename);
+        changed = addLink(fm, field, linkTextFor(this.app, linkTo, file.path), pointsAt(this.app, linkTo, file.path));
         if (changed) orderProperties(fm, order);
       });
       if (changed) tx.files.push({ path: file.path, before, after: await this.app.vault.read(file) });
@@ -82,7 +107,7 @@ export class RelationshipWriter {
       const before = await this.app.vault.read(file);
       let changed = false;
       await this.app.fileManager.processFrontMatter(file, (fm) => {
-        changed = removeLink(fm, field, linkTo.basename);
+        changed = removeLink(fm, field, linkTextFor(this.app, linkTo, file.path), pointsAt(this.app, linkTo, file.path));
       });
       if (changed) tx.files.push({ path: file.path, before, after: await this.app.vault.read(file) });
     };

@@ -20,6 +20,12 @@ export interface NoteRecord {
   broken?: Array<{ field: string; link: string }>;
   /** Duplicate-source evidence: how often a relationship field repeats the same target. This is never engineering quantity; true quantity comes from Local Model multiplicity. Key `field|targetPath`. */
   repeat?: Map<string, number>;
+  /** Sparse `abstract` property (W-314): true marks a definition that cannot be used as a standard occurrence. */
+  abstract?: boolean;
+  /** `abstract` was written with a value other than true or false. */
+  abstractInvalid?: boolean;
+  /** Relationship-field links that name a block, `[[Note#^local-id]]`: the target is a Local Model record, not just the note (WB-106). */
+  localRefs?: Array<{ field: string; path: string; localId: string }>;
 }
 
 export interface Edge {
