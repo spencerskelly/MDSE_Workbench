@@ -265,11 +265,11 @@ test("review: findings list, counts, filters and Previous / Next skipping", asyn
     note("S.md", "State", { satisfies: ["R.md"] }),
     note("O.md", "Object", { tracesFrom: ["F.md"] }),
   ]);
-  const list = toFindings(idx.findings());
+  const list = toFindings(idx.findings(), [{ code: "ref.local-kind", severity: "error", message: "Endpoint points at the wrong local kind.", path: "F.md", localId: "ep-test" }]);
   const n = countByCategory(list);
-  assert.deepEqual([n.provisional, n.missingInverse, n.orphanInverse, n.offRule, n.broken], [1, 1, 0, 1, 1]);
+  assert.deepEqual([n.provisional, n.missingInverse, n.orphanInverse, n.offRule, n.broken, n.localModel], [1, 1, 0, 1, 1, 1]);
   assert.equal(new Set(list.map((x) => x.key)).size, list.length, "keys are unique");
-  assert.deepEqual(list.map((x) => x.category), ["provisional", "missingInverse", "offRule", "broken"], "category order");
+  assert.deepEqual(list.map((x) => x.category), ["provisional", "missingInverse", "offRule", "broken", "localModel"], "category order");
   assert.equal(filterFindings(list, idx, { category: "offRule" }).length, 1);
   assert.equal(filterFindings(list, idx, { type: "Function" }).length, 3);
   assert.equal(filterFindings(list, idx, { text: "ghost" }).length, 1);
@@ -277,7 +277,7 @@ test("review: findings list, counts, filters and Previous / Next skipping", asyn
   const skip = new Set([list[1].key]);
   assert.equal(neighbour(list, 0, 1, skip), 2, "next skips a resolved finding");
   assert.equal(neighbour(list, 2, -1, skip), 0, "previous skips it too");
-  assert.equal(neighbour(list, 3, 1, skip), -1, "no finding after the last");
+  assert.equal(neighbour(list, 4, 1, skip), -1, "no finding after the last");
 });
 
 test("duplicate relationship entries are visible but never treated as engineering quantity (W-310)", () => {
