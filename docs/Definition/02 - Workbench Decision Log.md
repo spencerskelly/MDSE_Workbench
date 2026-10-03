@@ -1085,3 +1085,11 @@ General rules approved in this decision:
 14. **Architecture.** UI surfaces submit semantic operations to a pure model-edit/transaction service; they do not manipulate Markdown/YAML directly. This service boundary is required so future schema/storage/UI changes remain tractable.
 
 Effect on prior status: Workbench 0.1.17 still completes the original WB-106 read/navigation keepability baseline, but WB-106 is no longer considered product-complete under the expanded editor goal. The next implementation begins with the pure transaction/edit service and Local Model 0.2 writer.
+
+
+### WB-115 — 2026-10-03 transaction core foundation
+**Status:** Implemented; no user-facing version bump yet.
+
+The first WB-114 implementation slice adds `src/core/transaction.ts`, a pure TypeScript semantic transaction coordinator with no Obsidian imports. It provides atomic/structural transaction scopes, continuous validator hooks, blocking-error gates, semantic change summaries, lightweight history, and unified undo/redo orchestration through a storage-neutral executor.
+
+This intentionally does not yet change the existing relationship writer or expose structured Local Model editing in the UI. The next slice is the Local Model 0.2 writer/planner, then existing note/relationship writers can migrate onto the shared transaction service instead of maintaining separate undo stacks.
