@@ -596,14 +596,17 @@ For a normal model note the popup separates:
 
 **Local Model** is not another frontmatter relationship group. It is the structured view of addressable local part occurrences, endpoints/interfaces, connections, connection-scoped flows and local relationship/applicability targets owned inside the note.
 
-In View mode these sections are inspectable and Local Model records are read-only. In Edit mode:
+In View mode these sections are inspectable. In Edit mode:
 
-- ordinary narrative text may be edited without exposing or replacing the governed Local Model region;
+- ordinary narrative text may be edited only through a region-aware writer that cannot replace the governed Local Model region;
 - ordinary properties use their governed editors;
 - note-level relationships use the relationship service;
-- Local Model editing uses structured controls inside the Local Model section only after the canonical body schema/marker contract is frozen.
+- Local Model content uses structured occurrence/context controls through the Workbench model-edit service;
+- reusable-definition editing is a separate mode/surface that writes the canonical note, even when launched from an occurrence.
 
-W-319 advances the canonical v0.8.0 Local Model writer boundary to `<!-- MDSE:LOCAL-MODEL START schema=0.2 -->` through `<!-- MDSE:LOCAL-MODEL END -->`. Workbench must read both 0.1 and 0.2. The comments are parser/editor boundaries, not engineering semantics. Raw text editing must never rewrite the governed region. The record/local-ID contract is now governed by `local-model.yaml`; structured authoring remains later than WB-106.
+W-319 advances the canonical v0.8.0 Local Model writer boundary to `<!-- MDSE:LOCAL-MODEL START schema=0.2 -->` through `<!-- MDSE:LOCAL-MODEL END -->`. Workbench must read both 0.1 and 0.2; structured writes use 0.2 only. The comments are parser/editor boundaries, not engineering semantics. Raw text editing must never rewrite the governed region. The record/local-ID contract is governed by `local-model.yaml`.
+
+WB-114 expands WB-106 from its completed read/navigation baseline into a structured editor. Occurrence-local data remains visually and semantically separate from reusable-definition data.
 
 The same separation applies when the popup is launched from Canvas: graphical presentation may change, but storage authority and edit services do not.
 

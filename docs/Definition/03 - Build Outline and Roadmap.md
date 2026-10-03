@@ -267,3 +267,48 @@ This follow-on does not require new relationship types or a second persistence d
 ### 2026-10-02 continuation boundary
 
 For the next standalone plugin implementation, use `WB106_IMPLEMENTATION_CONTRACT.md` in `spencerskelly/MDSE_Workbench`. The schema advance is complete; WB-106 remains first. Do not combine persisted configuration editing with the parser/index rewrite.
+
+
+## WB-106 editor expansion — 2026-10-03 (WB-114)
+
+Workbench 0.1.17 completed the original occurrence-aware read/navigation gate. WB-114 expands WB-106 into the everyday structured editor.
+
+Implementation order:
+
+1. **Core transaction service**
+   - semantic operations over ModelRef targets;
+   - atomic vs staged transaction scope;
+   - continuous validation and blocking errors;
+   - semantic before/after summaries;
+   - unified undo/redo contract.
+2. **Local Model 0.2 writer**
+   - record-aware mutation without view-specific text editing;
+   - 0.1 remains read-only unless explicitly migrated;
+   - preserve stable native block IDs/identity;
+   - deterministic formatting and region preservation.
+3. **Occurrence editor**
+   - occurrence-local fields first;
+   - Definition dropdown with full canonical rendering;
+   - override source inspection;
+   - relationship groups and relationship-owned metadata.
+4. **Definition edit mode**
+   - canonical note/property/relationship writer;
+   - schema-driven impact review before high-impact changes;
+   - contextual create-definition workflow.
+5. **Structural transaction UX**
+   - Review / Apply / Cancel;
+   - temporary invalidity allowed while staged;
+   - Apply blocked on required integrity errors.
+6. **Lifecycle and repair**
+   - referenced delete blocked;
+   - retirement/supersession handling;
+   - deterministic mechanical repairs vs reviewed semantic repairs.
+7. **Release tests**
+   - no direct view-to-storage writes;
+   - transaction validation/rollback/undo;
+   - 0.1 read-only;
+   - 0.2 structured writes;
+   - occurrence/definition ownership separation;
+   - impact-review gates.
+
+The architecture must keep UI, semantic operations and storage adapters separable so future Local Model/schema changes do not require rewriting every view.

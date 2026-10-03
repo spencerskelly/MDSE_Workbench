@@ -280,3 +280,61 @@ Workbench 0.1.15 resolves two immediate contradictions only:
 - ordinary body editing is refused when a governed Local Model marker is present.
 
 The remaining Local Model architecture above is not yet implemented in the index. `WB106_IMPLEMENTATION_CONTRACT.md` in the standalone Workbench repository is the coding contract for that next step.
+
+
+## Structured editing architecture — WB-114 (2026-10-03)
+
+Workbench is a full model editor, but the editor is layered.
+
+```text
+UI / Canvas / Details
+        |
+        v
+Semantic Edit Commands
+        |
+        v
+Model Edit / Transaction Service   <-- pure core
+        |
+        +--> validation / impact rules
+        +--> semantic history / undo-redo
+        +--> planned note + Local Model mutations
+        |
+        v
+Obsidian Storage Adapter
+        |
+        v
+Markdown/YAML + governed Local Model region
+```
+
+### Boundary rules
+
+1. A view never writes vault text directly.
+2. Semantic operations address notes/local records by ModelRef and governed identity, not display path/name.
+3. The core transaction layer has no Obsidian imports.
+4. Storage adapters may change without changing view semantics.
+5. Local Model 0.1 is read-compatible/read-only; structured writes target 0.2.
+6. Immediate atomic edits and staged structural transactions use the same operation model.
+7. Temporary invalid state may exist only inside an unapplied staged transaction.
+8. Required integrity errors block Apply.
+9. Git is durable history; Workbench semantic history explains engineering intent and supports in-session undo/redo.
+10. Definition and occurrence ownership remain separate even when shown in one Workbench experience.
+
+### Presentation boundary
+
+Presentation is context-sensitive without changing semantic identity:
+- Structure/Interfaces emphasize the occurrence and show its reusable definition secondarily.
+- Requirements/Where Used may emphasize the reusable definition while retaining occurrence context.
+- Occurrence details show local data first.
+- The full canonical definition is available under a collapsed Definition section.
+- Definition relationship backreferences/derived content are nested separately.
+- Local relationships show relationship-owned metadata only.
+
+### Extensibility rule
+
+Schema-specific behavior belongs in declarative schema/rule adapters where practical:
+- replacement vs additive override semantics;
+- impact-review requirement;
+- blocking vs advisory validation;
+- lifecycle behavior.
+
+Workbench may supply safe defaults only where the MDSE authority permits them; it must not create private model semantics.

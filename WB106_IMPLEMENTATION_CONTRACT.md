@@ -21,7 +21,7 @@ Workbench must load three vault schemas:
 - `element-types.yaml` 1.17;
 - `local-model.yaml`, reading 0.1 and 0.2.
 
-New structured Local Model writes, when later enabled, write 0.2 only.
+Structured Local Model editing is now an approved WB-106 direction. Workbench may write only schema 0.2 records through the governed model-edit service. Schema 0.1 remains read-compatible and read-only unless an explicit migration operation converts the governed region to 0.2.
 
 Unknown future Local Model versions remain readable as Markdown but structured Local Model actions are disabled.
 
@@ -69,15 +69,24 @@ Never mutate a 0.1 file simply because it was read.
 
 Connection and flow records reject `usage`.
 
-## Ordinary body editing
+## Editing boundary
 
 The ordinary body editor must never rewrite the governed Local Model region.
 
-Until region-aware editing exists:
-- if a governed START marker is present, ordinary body text editing is disabled for that note;
-- properties/relationships may still use their governed frontmatter writers where safe.
+Workbench has two explicit edit surfaces:
+- **Context / Local Model edit** — edits occurrence-local data and contextual relationships through structured Local Model operations;
+- **Definition edit** — edits the canonical reusable MDSE note through the normal note/property/relationship services.
 
-Later region-aware text editing may edit narrative before/after the governed region while preserving the region byte-for-byte.
+These surfaces may be launched from the same details experience, but ownership must stay visible and they must not silently write into each other's storage.
+
+For body text:
+- narrative text before/after the governed region may be edited only by a region-aware writer that preserves the governed region byte-for-byte;
+- until that writer is active, ordinary body text editing remains disabled for notes containing a governed region.
+
+Structured Local Model editing:
+- writes schema 0.2 only;
+- never rewrites a 0.1 region merely because it was read;
+- goes through the model-edit service rather than view-specific Markdown manipulation.
 
 ## Local Model findings
 
@@ -138,6 +147,94 @@ Candidate resolution:
 
 A selection outside the family or selecting an abstract definition is invalid. If a previously valid stored/session selection becomes invalid after hierarchy change, report a finding; never silently substitute another definition.
 
+
+## WB-106 editor architecture
+
+WB-106 is now the Workbench model-editor boundary, not only a read/navigation gate.
+
+### Service boundary
+
+Views, popups and Canvas gestures do not write Markdown/YAML directly. They submit semantic model operations to a pure model-edit service. The service owns:
+- validation;
+- transaction scope;
+- storage planning;
+- before/after semantic change description;
+- undo/redo records;
+- impact-review requirements;
+- deterministic repair rules.
+
+The Obsidian adapter is responsible only for reading/writing the affected vault files and refreshing indexes/views.
+
+This boundary is deliberate so Local Model syntax, schema versions, storage layout and UI can evolve independently.
+
+### Transaction behavior
+
+- Small atomic edits may apply immediately after validation.
+- Multi-object or structural edits use a staged transaction with explicit Review / Apply / Cancel.
+- A staged transaction may be temporarily invalid while being assembled.
+- Validation runs continuously.
+- Apply is blocked while required-integrity errors remain.
+- Advisory warnings do not block Apply unless the schema/rule marks them blocking.
+- Cancel discards the staged transaction without changing the model.
+
+### Semantic history and undo/redo
+
+Git remains authoritative durable file history.
+
+Workbench also maintains a lightweight semantic edit history for the current session/workflow:
+- affected ModelRefs;
+- operation kind;
+- before/after semantic summary;
+- author identity available from the MDSE author/UID mechanism;
+- timestamp;
+- optional reason/comment for meaningful transactions.
+
+Immediate edits and applied staged transactions enter one semantic undo/redo stack. An operation may be marked non-reversible when safe reversal cannot be guaranteed; that limitation must be shown before Apply.
+
+### Identity
+
+Workbench does not invent a second global identity system.
+
+The existing MDSE UID/identity contract remains authoritative across notes and independently referenceable Local Model objects. Display names, hierarchy and Local Model position are not identity. Local Model block IDs remain native navigation addresses under the governed schema.
+
+A nested metadata item that cannot be referenced independently does not gain a new UID merely because Workbench edits it.
+
+### Presentation and ownership
+
+Occurrence/context views use contextual identity first where context matters, and reusable definition identity first where definition traceability matters.
+
+Occurrence details:
+- show occurrence-local data first;
+- place the reusable definition under a collapsed **Definition** section;
+- expanding Definition renders the full authored definition;
+- derived/incoming definition relationships appear under a nested **Relationships** expansion;
+- unchanged inherited values are not copied into the occurrence-local section;
+- local overrides appear in the occurrence section and expose their definition/base source on demand.
+
+Override semantics are schema/property-specific: some are replacement-style, others additive/constraining. Workbench never guesses.
+
+Contextual relationships are grouped by relationship type while preserving authored/local order inside each group. Relationship metadata is expandable only when it exists, and relationship detail contains relationship-owned metadata only; endpoint data remains on the endpoint occurrence.
+
+Structure represents the contextual/local assembly hierarchy only. It does not merge definition structure into the same tree.
+
+### Definition editing from context
+
+Workbench may edit reusable definitions from the same overall interface, but definition editing is a distinct mode/surface writing the canonical note.
+
+A Local Model context may launch the canonical definition-creation workflow. On successful creation, Workbench returns to the context and binds the occurrence. Cancel leaves the Local Model unchanged.
+
+Definition edits use schema-driven impact rules. A change type may require a Where Used / occurrence impact review before Apply.
+
+### Lifecycle and repair
+
+- Deletion of a definition with active references is blocked.
+- Retirement keeps the definition resolvable and makes affected usages visible.
+- Supersession may offer a guided occurrence migration but never silently reassigns references.
+- Mechanical/schema-safe repairs may be automatic and logged.
+- Semantic repairs require explicit engineer review.
+- Ambiguous cases are never automatically resolved.
+
+
 ## Deferred
 
 Do not fold these into WB-106:
@@ -187,6 +284,8 @@ WB-106 is the Workbench keepability gate for the first accepted v0.8 whole-model
 - clicking a generated local record opens a read-only Local Model details popup with native navigation;
 - Review includes Local Model findings as a read-only category.
 
-The implementation deliberately does **not** add structured Local Model editing, persisted named configuration state, topology variation, model-number rules or other deferred W-314 work.
+Workbench 0.1.17 completes the original read/navigation keepability baseline. The 2026-10-03 WB-114 decision expands WB-106 into the structured editor architecture above. Therefore 0.1.17 remains the validated read/navigation candidate, but WB-106 is not considered product-complete until the editor service and structured edit surfaces meet this contract.
+
+Persisted named configuration state, topology variation, model-number rules and the other deferred W-314 items remain outside this editor expansion unless separately approved.
 
 The standalone candidate must still pass the normal release/integration chain before the methodology workspace sets `wb106Version` or an issued v0.8 base is kept.

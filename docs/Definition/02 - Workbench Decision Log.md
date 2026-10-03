@@ -1060,3 +1060,28 @@ The remaining WB-106 work after 0.1.16 is implemented without changing the gover
 
 Guardrail retained: structured Local Model editing, persisted configurations, topology variation and other W-314 follow-on work remain deferred. The Workbench schema fixtures were rechecked against the live authority and are byte-identical for relationships 1.35, element-types 1.17 and Local Model 0.2.
 
+
+
+### WB-114 — 2026-10-03 WB-106 becomes a structured model editor
+**Status:** Approved by Spencer 2026-10-03; supersedes the WB-113 guardrail that kept structured Local Model editing deferred.
+
+Spencer asked to continue WB-106, approved the occurrence-detail/UI pattern, then made the high-impact choice that Workbench should be a **full editor**, not a read-only Workbench with later editing.
+
+General rules approved in this decision:
+
+1. **Context-sensitive presentation.** Structure/Interfaces emphasize occurrence identity; Requirements/Where Used may emphasize reusable definition identity. This is presentation only; semantic identity does not change.
+2. **Occurrence details.** Occurrence-local information is primary. The reusable definition is under a collapsed Definition section. Expanding it renders the full canonical definition; derived/incoming definition relationships are nested under a Relationships expansion.
+3. **Inheritance/overrides.** Unchanged inherited values stay with the definition, not copied into the occurrence section. Local overrides appear locally and expose their base/source on demand. Replacement vs additive/constraining behavior is schema/property-specific.
+4. **Relationship presentation.** Group local relationships by relationship type, preserve local/source order within a group, and make a relationship expandable only when it has relationship-owned metadata. Endpoint metadata stays with the endpoint.
+5. **Structure scope.** The Structure tree represents local/contextual assembly hierarchy only; definition structure is not merged into it.
+6. **Editing scope.** Workbench edits both Local Model context and reusable definitions, but through visibly separate edit modes/surfaces. Definition edits always write the canonical definition note.
+7. **Transactions.** Atomic edits may apply immediately. Structural/multi-object edits are staged with Review / Apply / Cancel. Temporary invalidity is allowed inside a staged transaction; continuous validation runs and blocking integrity errors prevent Apply.
+8. **History.** Git remains authoritative file history. Workbench adds lightweight semantic edit history and one semantic undo/redo stack spanning atomic edits and applied transactions. Non-reversible operations must declare that before Apply.
+9. **Identity.** Do not invent a second global identity system. Use the governed MDSE UID/Local Model identity contract for independently referenceable objects. Names and hierarchy are not identity. Embedded metadata that cannot be referenced independently does not receive a new UID merely because it is editable.
+10. **Create definition from context.** A Local Model editor may launch the canonical reusable-definition creation workflow and bind the new definition only after successful creation.
+11. **Impact review.** Reusable-definition edits use schema-driven impact rules. High-impact changes may require a Where Used/occurrence impact review before Apply.
+12. **Lifecycle.** Referenced definitions cannot be normally deleted. Retirement preserves resolvability. Supersession may offer guided migration but never silent reassignment.
+13. **Repair.** Mechanical/schema-safe repairs may be automatic and logged. Semantic repairs require engineer review. Ambiguous cases are never silently resolved.
+14. **Architecture.** UI surfaces submit semantic operations to a pure model-edit/transaction service; they do not manipulate Markdown/YAML directly. This service boundary is required so future schema/storage/UI changes remain tractable.
+
+Effect on prior status: Workbench 0.1.17 still completes the original WB-106 read/navigation keepability baseline, but WB-106 is no longer considered product-complete under the expanded editor goal. The next implementation begins with the pure transaction/edit service and Local Model 0.2 writer.
