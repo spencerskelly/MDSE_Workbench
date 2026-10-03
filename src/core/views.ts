@@ -506,7 +506,88 @@ export function withLocalStructure(index: ModelIndex, local: LocalModelIndex, ba
   return { ...base, depthOf, tree, omitted, capReached, localNodes };
 }
 
-/** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
+
+export type ResolvePath = (target: string, fromPath: string) => string | undefined;
+
+interface MutableLocalView {
+  depthOf: Map<string, number>;
+  tree: TreeLink[];
+  omitted: Map<string, number>;
+  localNodes: Map<string, LocalViewNode>;
+  localEdges: TreeLink[];
+  capReached: boolean;
+}
+
+function mutableLocal(base: ViewResult): MutableLocalView {
+  return {
+    depthOf: new Map(base.depthOf),
+    tree: base.tree.slice(),
+    omitted: new Map(base.omitted),
+    localNodes: new Map(base.localNodes),
+    localEdges: base.localEdges.slice(),
+    capReached: base.capReached,
+  };
+}
+
+function localKeyFor(index: ModelIndex, local: LocalModelIndex, ownerPath: string, record: LocalRecord): string | null {
+  const uid = index.notes.get(ownerPath)?.uid;
+  const ref = uid ? local.refOf(uid, record) : null;
+  return ref ? refKey(ref) : null;
+}
+
+function addLocalNode(index: ModelIndex, local: LocalModelIndex, m: MutableLocalView, ownerPath: string, record: LocalRecord, depth: number, profile: ViewProfile): string | null {
+  const key = localKeyFor(index, local, ownerPath, record);
+  if (!key) return null;
+  if (m.depthOf.has(key)) return key;
+  if (m.depthOf.size >= profile.nodeCap) {
+    m.capReached = true;
+    return null;
+  }
+  const ref = local.refOf(index.notes.get(ownerPath)!.uid!, record);
+  if (!ref) return null;
+  m.localNodes.set(key, { ref, ownerPath, record });
+  m.depthOf.set(key, depth);
+  return key;
+}
+
+function linkedLocal(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, fromPath: string, link: LinkRef | null): { path: string; record: LocalRecord; key: string } | null {
+  if (!link?.blockId) return null;
+  const path = link.target ? resolve(link.target, fromPath) : fromPath;
+  if (!path) return null;
+  const record = local.recordsOf(path).find((r) => r.localId === link.blockId);
+  if (!record) return null;
+  const key = localKeyFor(index, local, path, record);
+  return key ? { path, record, key } : null;
+}
+
+/** WB-106 Interfaces: materialize the local boundary/topology graph without inventing notes. */
+export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile = INTERFACES_PROFILE): ViewResult {
+  if (profile.name !== INTERFACES_PROFILE.name) return base;
+  const m = mutableLocal(base);
+  const starts = base.starts.filter((p) => index.notes.has(p));
+
+  // Object starts expose their owned local endpoints/connections/flows.
+  for (const ownerPath of starts.filter((p) => index.notes.get(p)?.type === "Object")) {
+    const ownerDepth = m.depthOf.get(ownerPath) ?? 0;
+    const records = local.recordsOf(ownerPath);
+    const endpoints = records.filter((r) => r.kind === "endpoint" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    const connections = records.filter((r) => r.kind === "connection" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    const flows = records.filter((r) => r.kind === "flow" && r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+
+    for (const r of endpoints) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 1, profile);
+      if (k) m.tree.push({ parent: ownerPath, child: k, field: "interface occurrence", direction: "out", count: 1 });
+    }
+    for (const r of connections) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 1, profile);
+      if (k) m.tree.push({ parent: ownerPath, child: k, field: "connection", direction: "out", count: 1 });
+    }
+    for (const r of flows) {
+      const k = addLocalNode(index, local, m, ownerPath, r, ownerDepth + 2, profile);
+      if ÿÿÿ¬¤½¹Ñ¥¹Õì(½¹ÍÐÁÉ¹ÐôÈ¹½¹¹Ñ¥½¹%üÉ½ÉÌ¹¥¹ ¡à¤ôøà¹­¥¹ôôô½¹¹Ñ¥½¸à¹±½±%ôôôÈ¹½¹¹Ñ¥½¹%¤èÕ¹¥¹ì(½¹ÍÐÁ¬ôÁÉ¹Ðü±½±-å½È¡¥¹à°±½°°½Ý¹ÉAÑ °ÁÉ¹Ð¤è¹Õ±°ì(´¹ÑÉ¹ÁÕÍ ¡ìÁÉ¹ÐèÁ¬´¹ÁÑ¡=¹¡Ì¡Á¬¤üÁ¬è½Ý¹ÉAÑ °¡¥±è¬°¥±è±½Ü½ÕÉÉ¹°¥ÉÑ¥½¸è½ÕÐ°½Õ¹ÐèÄô¤ì(ô((¼¼Q½Á½±½ä¥ÌÉÉ¥ä±½°±¥¹­Ì°¹½Ð¹½Ñµ±Ù°É±Ñ¥½¹Í¡¥À¥±Ì¸(½È¡½¹ÍÐÈ½¹Á½¥¹ÑÌ¤ì(½¹ÍÐô±½±-å½È¡¥¹à°±½°°½Ý¹ÉAÑ °ÿ÷"°¢bÇÂÒæFWFöbæ26öçFçVS°¢f÷"6öç7B¶fVÆBÂÆæ·2ÂF&V7FöåÒöb°¢²&W÷6W2"Â"æW÷6W2Â&÷WB%ÒÀ¢²&WVÇ2"Â"æWVÇ2Â&÷WB%ÒÀ¢²'&VçB"Â"ç&VçBò·"ç&VçEÒ¢µÒÂ&÷WB%ÒÀ¢Ò2'&Å·7G&ærÂÆæµ&VeµÒÂF&V7FöåÓâ°¢f÷"6öç7BÆæ²öbÆæ·2°¢6öç7BBÒÆæ¶VDÆö6ÂæFWÂÆö6ÂÂ&W6öÇfRÂ÷væW%FÂÆæ²°¢bB6öçFçVS°¢FDÆö6ÄæöFRæFWÂÆö6ÂÂÒÂBçFÂBç&V6÷&BÂ÷væW$FWF²Â&öfÆR°¢bÒæFWFöbæ2Bæ¶WÒæÆö6ÄVFvW2çW6²&VçC¢Â6ÆC¢Bæ¶WÂfVÆBÂF&V7FöâÂ6÷VçC¢Ò°¢Ð¢Ð¢Ð¢f÷"6öç7B"öb6öææV7Föç2°¢6öç7BÒÆö6Ä¶Wf÷"æFWÂÆö6ÂÂ÷væW%FÂ"°¢bÇÂÒæFWFöbæ26öçFçVS°¢f÷"6öç7B¶fVÆBÂÆæµÒöbµ²&VæGöçD"Â"æVæGöçDÒÂ²&VæGöçD""Â"æVæGöçD%ÕÒ2'&Å·7G&ærÂÆæµ&VbÂçVÆÅÓâ°¢6öç7BBÒÆæ¶VDÆö6ÂæFWÂÆö6ÂÂ&W6öÇfRÂ÷væW%FÂÆæ²°¢bB6öçFçVS°¢FDÆö6ÄæöFRæFWÂÆö6ÂÂÒÂBçFÂBç&V6÷&BÂ÷væW$FWF²Â&öfÆR°¢bÒæFWFöbæ2Bæ¶WÒæÆö6ÄVFvW2çW6²&VçC¢Â6ÆC¢Bæ¶WÂfVÆBÂF&V7Föã¢&÷WB"Â6÷VçC¢Ò°¢Ð¢Ð¢Ð ¢òòFVfæFöâ7F'G2÷'BòFVÒfÆ÷r6÷rWfW'6öçFWGVÂö67W'&Væ6RFBW6W2FRFVfæFöâà¢f÷"6öç7BFVfæFöåFöb7F'G2æfÇFW"Óâ²%÷'B"Â$FVÒfÆ÷r%Òææ6ÇVFW2æFWææ÷FW2ævWBòçGRóò""°¢6öç7BBÒÒæFWFöbævWBFVfæFöåFóò°¢6öç7BWV7FVBÒæFWææ÷FW2ævWBFVfæFöåFòçGRÓÓÒ%÷'B"ò&VæGöçB"¢&fÆ÷r#°¢6öç7Bö67W'&Væ6W2ÒÆö6Âæö67W'&Væ6W4öbFVfæFöåFÂ&W6öÇfR¢æfÇFW"²&V6÷&BÒÓâ&V6÷&Bæ¶æBÓÓÒWV7FVB¢ç6÷'BÂ"ÓâçFæÆö6ÆT6ö×&R"çFÇÂç&V6÷&BæFVçFfW"æÆö6ÆT6ö×&R"ç&V6÷&BæFVçFfW"°¢f÷"6öç7B²FÂ&V6÷&BÒöbö67W'&Væ6W2°¢6öç7B²ÒFDÆö6ÄæöFRæFWÂÆö6ÂÂÒÂFÂ&V6÷&BÂB²Â&öfÆR°¢b²ÒçG&VRçW6²&VçC¢FVfæFöåFÂ6ÆC¢²ÂfVÆC¢&ö67W'&Væ6R"ÂF&V7Föã¢&÷WB"Â6÷VçC¢Ò°¢Ð¢Ð ¢&WGW&â²ââæ&6RÂââæÒÓ°§Ð ¢ò¢¢t"ÓbvW&RW6VC¢6÷r6öçFWVÂö67W'&Væ6W2öb&WW6&ÆRFVfæFöââ¢ð¦W÷'BgVæ7FöâvFÆö6ÅvW&UW6VBæFW¢ÖöFVÄæFWÂÆö6Ã¢Æö6ÄÖöFVÄæFWÂ&W6öÇfS¢&W6öÇfUFÂ&6S¢fWu&W7VÇBÂ&öfÆS¢fWu&öfÆRÒtU$UõU4TEõ$ôdÄR¢fWu&W7VÇB°¢b&öfÆRææÖRÓÒtU$UõU4TEõ$ôdÄRææÖR&WGW&â&6S°¢6öç7BÒÒ×WF&ÆTÆö6Â&6R°¢f÷"6öç7BFVfæFöåFöb&6Rç7F'G2æfÇFW"ÓâæFWææ÷FW2æ2°¢6öç7BBÒÒæFWFöbævWBFVfæFöåFóò°¢6öç7Bö67W'&Væ6W2ÒÆö6Âæö667W'&Væ6W4öbFVfæFöåFÂ&W6öÇfR¢ç6÷'BÂ"ÓâçFæÆö6ÆT6ö×&R"çFÇÂç&V6÷&Bæ¶æBæÆö6ÆT6ö×&R"ç&V6÷&Bæ¶æBÇÂç&V6÷&BæFVçFfW"æÆö6ÆT6ö×&R"ç&V6÷&BæFVçFfW"°¢f÷"6öç7B²FÂ&V6÷&BÒöbö67W'&Væ6W2°¢6öç7B²ÒFDÆö6ÄæöFRæFWÂÆö6ÂÂÒÂFÂ&V6÷&BÂB²Â&öfÆR°¢b²ÒçG&VRçW6²&VçC¢FVfæFöåFÂ6ÆC¢²ÂfVÆC¢&ö67W'&Væ6R"ÂF&V7Föã¢&÷WB"Â6÷VçC¢Ò°¢Ð¢Ð¢&WGW&â²ââæ&6RÂââæÒÓ°§Ð ¢ò¢¢t"Ób&WV&VÖVçG3¢&Æö6²×F&vWFVBÆW5Fò&VÖç2GF6VBFòFRW7BÆö6Âö67W'&Væ6Râ¢ð¦W÷'BgVæ7FöâvFÆö6Å&WV&VÖVçG2æFW¢ÖöFVÄæFWÂÆö6Ã¢Æö6ÄÖöFVÄæFWÂ&6S¢fWu&W7VÇBÂ&öfÆS¢fWu&öfÆRÒ$UT$TÔTåE5õ$ôdÄR¢fWu&W7VÇB°¢b&öfÆRææÖRÓÒ$UT$TÔTåE5õ$ôdÄRææÖR&WGW&â&6S°¢6öç7BÒÒ×WF&ÆTÆö6Â&6R°¢f÷"6öç7B&WV&VÖVçEFöb&6Rç7F'G2æfÇFW"ÓâæFWææ÷FW2ævWBòçGRÓÓÒ%&WV&VÖVçB"°¢6öç7BBÒÒæFWFöbævWB&WV&VÖVçEFóò°¢6öç7B&Vg2ÒæFWææ÷FW2ævWB&WV&VÖVçEFòæÆö6Å&Vg2óòµÒ¢æfÇFW""Óâ"æfVÆBÓÓÒ&ÆW5Fò"¢ç6÷'BÂ"ÓâçFæÆö6ÆT6ö×&R"çFÇÂæÆö6ÄBæÆö6ÆT6ö×&R"æÆö6ÄB°¢f÷"6öç7B&Vböb&Vg2°¢6öç7B&V6÷&BÒÆö6Âç&V6÷&G4öb&VbçFæfæB"Óâ"æÆö6ÄBÓÓÒ&VbæÆö6ÄB°¢b&V6÷&B6öçFçVS²òòfÆFFöâ&W÷'G2FRVç&W6öÇfVBÆö6ÂF&vW@¢6öç7B²ÒFDÆö6ÄæöFRæFWÂÆö6ÂÂÒÂ&VbçFÂ&V6÷&BÂB²Â&öfÆR°¢b²ÒçG&VRçW6²&VçC¢&WV&VÖVçEFÂ6ÆC¢²ÂfVÆC¢&ÆW5Fò"ÂF&V7Föã¢&÷WB"Â6÷VçC¢Ò°¢Ð¢Ð¢&WGW&â²ââæ&6RÂââæÒÓ°§Ð ¢ò¢¢öæRF7F6W"¶VW2ö'6Fâ×7V6f2Ææ²&W6öÇWFöâ÷WG6FRFRW&RfWr6÷&Râ¢ð¦W÷'BgVæ7FöâvFÆö6Äö67W'&Væ6W2æFW¢ÖöFVÄæFWÂÆö6Ã¢Æö6ÄÖöFVÄæFWÂ&W6öÇfS¢&W6öÇfUFÂ&6S¢fWu&W7VÇBÂ&öfÆS¢fWu&öfÆR¢fWu&W7VÇB°¢7vF6&öfÆRææÖR°¢66R%7G'V7GW&R#¢&WGW&âvFÆö6Å7G'V7GW&RæFWÂÆö6ÂÂ&6RÂ&öfÆR°¢66R$çFW&f6W2#¢&WGW&âvFÆö6ÄçFW&f6W2æFWÂÆö6ÂÂ&W6öÇfRÂ&6RÂ&öfÆR°¢66R%vW&RW6VB#¢&WGW&âvFÆö6ÅvW&UW6VBæFWÂÆö6ÂÂ&W6öÇfRÂ&6RÂ&öfÆR°¢66R%&WV&VÖVçG2#¢&WGW&âvFÆö6Å&WV&VÖVçG2æFWÂÆö6ÂÂ&6RÂ&öfÆR°¢FVfVÇC¢&WGW&â&6S°¢Ð§Ðÿÿÿ/** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
 export function signature(view: ViewResult): string {
   const nodes = [...view.depthOf.keys()].sort().join("\n");
   const edges = view.edges.map((e) => `${e.from}|${e.field}|${e.to}`).sort().join("\n");
