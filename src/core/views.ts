@@ -3,6 +3,7 @@
  * and native JSON Canvas output (WB-034). Pure TypeScript.
  */
 import type { Edge, ModelIndex } from "./model";
+import { refKey, type LocalModelIndex, type LocalRecord, type ModelRef } from "./localmodel";
 
 export type Direction = "out" | "in";
 
@@ -305,6 +306,13 @@ export interface TreeLink {
   count: number;
 }
 
+export interface LocalViewNode {
+  /** Durable semantic identity of the occurrence. */
+  ref: ModelRef;
+  ownerPath: string;
+  record: LocalRecord;
+}
+
 export interface ViewResult {
   profile: string;
   starts: string[];
@@ -321,6 +329,8 @@ export interface ViewResult {
   capReached: boolean;
   /** Undefined cards in the view (links to notes that do not exist, WB-092). */
   undefinedCount: number;
+  /** Local occurrences shown as derived/text nodes; keyed by refKey(ModelRef). */
+  localNodes: Map<string, LocalViewNode>;
 }
 
 export function traverse(index: ModelIndex, starts: string[], profile: ViewProfile): ViewResult {
@@ -430,7 +440,67 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
       if (!treeKey.has(`${e.from}|${e.field}|${e.to}`)) cross.push(e);
     }
   }
-  return { profile: profile.name, starts: [...depthOf.keys()].filter((p) => depthOf.get(p) === 0), depthOf, tree, edges, cross, omitted, capReached, undefinedCount: [...depthOf.keys()].filter(isUndefinedId).length };
+  return {
+    profile: profile.name,
+    starts: [...depthOf.keys()].filter((p) => depthOf.get(p) === 0),
+    depthOf,
+    tree,
+    edges,
+    cross,
+    omitted,
+    capReached,
+    undefinedCount: [...depthOf.keys()].filter(isUndefinedId).length,
+    localNodes: new Map(),
+  };
+}
+
+/**
+ * WB-106 Structure seam: show part occurrences owned by every note already visible in the bounded Structure view.
+ * The occurrence is the structural fact. Its reusable definition stays a link on the text card; we deliberately do
+ * not flatten the definition's internals into the parent's structure (no parent reach-through).
+ */
+export function withLocalStructure(index: ModelIndex, local: LocalModelIndex, base: ViewResult, profile: ViewProfile = STRUCTURE_PROFILE): ViewResult {
+  if (profile.name !== STRUCTURE_PROFILE.name) return base;
+  const depthOf = new Map(base.depthOf);
+  const tree = base.tree.slice();
+  const omitted = new Map(base.omitted);
+  const localNodes = new Map(base.localNodes);
+  let capReached = base.capReached;
+  const perParent = profile.perParent ?? Infinity;
+
+  const owners = [...depthOf.entries()]
+    .filter(([path, depth]) => depth < profile.depth && index.notes.has(path))
+    .sort((a, b) => a[1] - b[1] || (index.notes.get(a[0])?.name ?? a[0]).localeCompare(index.notes.get(b[0])?.name ?? b[0]));
+
+  for (const [ownerPath, ownerDepth] of owners) {
+    const owner = index.notes.get(ownerPath);
+    if (!owner?.uid) continue; // a local ModelRef is not valid without the owner's durable uid
+    const records = local.recordsOf(ownerPath, "part")
+      .filter((r) => !!r.localId)
+      .sort((a, b) => a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId));
+    if (!records.length) continue;
+
+    const existingChildren = tree.filter((l) => l.parent === ownerPath).length;
+    const roomForParent = Math.max(0, perParent - existingChildren);
+    const roomForView = Math.max(0, profile.nodeCap - depthOf.size);
+    const show = records.slice(0, Math.min(roomForParent, roomForView));
+    for (const record of show) {
+      const ref = local.refOf(owner.uid, record);
+      if (!ref) continue;
+      const id = refKey(ref);
+      if (depthOf.has(id)) continue;
+      localNodes.set(id, { ref, ownerPath, record });
+      depthOf.set(id, ownerDepth + 1);
+      tree.push({ parent: ownerPath, child: id, field: "part occurrence", direction: "out", count: 1 });
+    }
+    const hidden = records.length - show.length;
+    if (hidden > 0) {
+      omitted.set(ownerPath, (omitted.get(ownerPath) ?? 0) + hidden);
+      if (roomForView < records.length) capReached = true;
+    }
+  }
+
+  return { ...base, depthOf, tree, omitted, capReached, localNodes };
 }
 
 /** Stable fingerprint of a view's content, for stale-view detection (WB-035). */
@@ -439,8 +509,12 @@ export function signature(view: ViewResult): string {
   const edges = view.edges.map((e) => `${e.from}|${e.field}|${e.to}`).sort().join("\n");
   const dupes = view.tree.filter((l) => l.count > 1).map((l) => `${l.parent}|${l.field}|${l.child}x${l.count}`).sort().join("\n");
   const more = [...view.omitted].map(([p, n]) => `${p}:${n}`).sort().join("\n");
+  const local = [...view.localNodes.entries()].map(([id, n]) => {
+    const r = n.record;
+    return `${id}|${r.identifier}|${r.definition?.text ?? ""}|${r.multiplicity ?? ""}|${r.usage}`;
+  }).sort().join("\n");
   let h = 2166136261;
-  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${dupes}`) {
+  for (const ch of `${view.profile}\n${nodes}\n${edges}\n${more}\n${dupes}\n${local}`) {
     h ^= ch.charCodeAt(0);
     h = Math.imul(h, 16777619);
   }
@@ -498,9 +572,10 @@ export interface CanvasData {
  * its children. One label per relationship group, colored by relationship. Deterministic.
  */
 export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfile = STRUCTURE_PROFILE): CanvasData {
-  const nameOf = (p: string) => (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
+  const nameOf = (p: string) => view.localNodes.get(p)?.record.identifier ?? (isUndefinedId(p) ? undefinedName(p) : index.notes.get(p)?.name ?? p);
   const colorOf = new Map<string, string>();
   for (const s of profile.steps) if (!colorOf.has(s.field)) colorOf.set(s.field, PALETTE[colorOf.size % PALETTE.length]);
+  if (view.localNodes.size && !colorOf.has("part occurrence")) colorOf.set("part occurrence", colorOf.get("hasPart") ?? PALETTE[0]);
   const plainFields = new Set(profile.steps.filter((s) => s.noArrow).map((s) => s.field));
   const kids = new Map<string, TreeLink[]>();
   for (const l of view.tree) {
@@ -554,7 +629,20 @@ export function toCanvas(index: ModelIndex, view: ViewResult, profile: ViewProfi
     const id = `n${nodes.length}`;
     idOf.set(p, id);
     const y = Math.round(centre - NODE_H / 2);
-    if (isUndefinedId(p)) nodes.push({ id, type: "text", text: `**${undefinedName(p)}**\n*undefined*`, x, y, width: NODE_W, height: NODE_H, color: UNDEFINED_COLOR });
+    const localNode = view.localNodes.get(p);
+    if (localNode) {
+      const r = localNode.record;
+      const owner = localNode.ownerPath.replace(/\.md$/i, "");
+      const selfLink = `[[${owner}#^${r.localId}|${r.identifier}]]`;
+      const detail = [
+        `**${selfLink}**`,
+        "*part occurrence*",
+        r.definition ? `Definition: ${r.definition.text}` : "",
+        r.multiplicity ? `Multiplicity: ${r.multiplicity}` : "",
+        r.usage !== "standard" ? `Usage: ${r.usage}` : "",
+      ].filter(Boolean).join("\n");
+      nodes.push({ id, type: "text", text: detail, x, y, width: NODE_W, height: Math.max(NODE_H, 100) });
+    } else if (isUndefinedId(p)) nodes.push({ id, type: "text", text: `**${undefinedName(p)}**\n*undefined*`, x, y, width: NODE_W, height: NODE_H, color: UNDEFINED_COLOR });
     else nodes.push({ id, type: "file", file: p, x, y, width: NODE_W, height: NODE_H, color: depth === 0 ? "4" : undefined });
     // Point this note's child edges at it.
     for (const m of mine) {
