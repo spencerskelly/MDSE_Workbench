@@ -1121,3 +1121,13 @@ Structured creation now uses the same Local Model 0.2 planner boundary as record
 When a note has no Local Model, Workbench may create the canonical governed 0.2 region. If an ungoverned section already uses the exact Local Model heading, creation refuses instead of silently taking ownership of ambiguous narrative. Standard usage is omitted canonically.
 
 Creation still does not write the vault directly. UID/token allocation is supplied by WB-117, and actual storage remains behind the WB-115 transaction executor.
+
+
+### WB-119 — 2026-10-03 Obsidian semantic edit service
+**Status:** Implemented as an adapter foundation; not yet exposed in the Local Model popup.
+
+Added WorkbenchEditService between UI and vault storage. Existing Local Model patch/create planners remain pure; the service reads the current file, submits one semantic operation to the WB-115 transaction manager, verifies the file is unchanged before writing, and returns guarded undo/redo actions that refuse to overwrite intervening changes.
+
+For creation, Workbench reads the author code registered by MDSE Bootstrap in .obsidian/author-code.txt and allocates through WB-117 against the shared note-UID/Local-Model-token namespace in the current indexes. Workbench does not add a second author-registration workflow.
+
+This adapter currently handles atomic single-file Local Model patch/create operations. Structural multi-file planners will use the same TransactionManager/Executor boundary rather than bypassing it.
