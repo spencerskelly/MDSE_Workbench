@@ -44,6 +44,20 @@ class MemoryStorage implements CacheStorage {
   }
 }
 
+
+function committedSlots(storage: MemoryStorage, root = "runtime/cache") {
+  const manifests = cacheManifestPaths(root).map((path, slot) => {
+    const raw = storage.files.get(path);
+    return raw ? { slot, path, manifest: JSON.parse(raw) } : null;
+  }).filter(Boolean) as Array<{ slot: number; path: string; manifest: any }>;
+  manifests.sort((a, b) =>
+    b.manifest.sequence - a.manifest.sequence ||
+    b.manifest.header.createdAt - a.manifest.header.createdAt ||
+    b.manifest.generation.localeCompare(a.manifest.generation)
+  );
+  return manifests;
+}
+
 function sampleCache(createdAt = 123) {
   const schema = fixtureSchema();
   const scope = { vaultUid: "20261003190000001skellyspencer" };
@@ -209,4 +223,66 @@ test("core and Local Model cache components can be read independently", async ()
   assert.deepEqual(local.localRegions, cache.localRegions);
   assert.equal(storage.operations.some((x) => x.includes("/notes-")), false, "Local Model restore must not read note shards");
   assert.equal(storage.operations.some((x) => x.includes("/fingerprints-")), false, "Local Model restore must not read fingerprint shards");
+});
+
+
+test("A/B fallback deterministically prefers committed sequence, independent of physical slot", async () => {
+  const oldCache = sampleCache(100).cache;
+  oldCache.header.producerVersion = "old";
+  const newCache = sampleCache(200).cache;
+  newCache.header.producerVersion = "new";
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", oldCache, "generation-z", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", newCache, "generation-a", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+
+  const slots = committedSlots(storage);
+  assert.deepEqual(slots.map((x) => x.manifest.sequence), [2, 1]);
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "new");
+
+  const newestRoot = cacheSlotPaths("runtime/cache")[slots[0].slot];
+  storage.files.delete(newestRoot + "/notes-00000.json");
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "old");
+});
+
+test("core-only and Local-Model-only readers independently fall back from a corrupt newest generation", async () => {
+  const oldCache = sampleCache(100).cache;
+  oldCache.header.producerVersion = "old-component";
+  const newCache = sampleCache(200).cache;
+  newCache.header.producerVersion = "new-component";
+
+  {
+    const storage = new MemoryStorage();
+    await writeSemanticCacheGeneration(storage, "runtime/cache", oldCache, "old-core", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+    await writeSemanticCacheGeneration(storage, "runtime/cache", newCache, "new-core", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+    const newest = committedSlots(storage)[0];
+    const newestRoot = cacheSlotPaths("runtime/cache")[newest.slot];
+    storage.files.set(newestRoot + "/fingerprints-00000.json", "{broken");
+    assert.equal((await readCoreCacheGeneration(storage, "runtime/cache")).header.producerVersion, "old-component");
+  }
+
+  {
+    const storage = new MemoryStorage();
+    await writeSemanticCacheGeneration(storage, "runtime/cache", oldCache, "old-local", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+    await writeSemanticCacheGeneration(storage, "runtime/cache", newCache, "new-local", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+    const newest = committedSlots(storage)[0];
+    const newestRoot = cacheSlotPaths("runtime/cache")[newest.slot];
+    storage.files.delete(newestRoot + "/local-00000.json");
+    assert.equal((await readLocalCacheGeneration(storage, "runtime/cache")).header.producerVersion, "old-component");
+  }
+});
+
+test("corrupt newest manifest is ignored deterministically without touching the older committed slot", async () => {
+  const oldCache = sampleCache(100).cache;
+  oldCache.header.producerVersion = "manifest-old";
+  const newCache = sampleCache(200).cache;
+  newCache.header.producerVersion = "manifest-new";
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", oldCache, "manifest-old", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", newCache, "manifest-new", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+
+  const newest = committedSlots(storage)[0];
+  storage.files.set(newest.path, "{broken");
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "manifest-old");
 });
