@@ -458,8 +458,33 @@ export class Indexer {
    * restored graph, reverse dependency evidence, fingerprints, Local Model state, or readiness
    * statistics may remain observable while authoritative Markdown is rebuilt cooperatively.
    */
-  discardProvisionalSemanticState(): void {
+  async discardProvisionalSemanticState(): Promise<void> {
+    // Freeze new live work first, then let any already-active source task finish against the
+    // provisional graph. The graph is discarded only after those tasks can no longer mutate it.
+    this.liveChanges = false;
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.liveApplyTimer !== null) {
+      window.clearTimeout(this.liveApplyTimer);
+      this.liveApplyTimer = null;
+    }
+    if (this.relationshipResolveTimer !== null) {
+      window.clearTimeout(this.relationshipResolveTimer);
+      this.relationshipResolveTimer = null;
+    }
+    this.relationshipResolvePending = false;
+    this.relationshipPathChanges.clear();
+
+    const active: Promise<unknown>[] = [];
+    if (this.liveApplyTask) active.push(this.liveApplyTask);
+    if (this.relationshipResolveTask) active.push(this.relationshipResolveTask);
+    if (active.length) await Promise.allSettled(active);
+
     this.cancelOccurrenceHydration();
+    this.hydrationEpoch++;
+    this.localRevision.clear();
     this.index = new ModelIndex(this.schema);
     this.relationshipDependencies.clear();
     this.relationshipReresolutionHistoryValue = [];
@@ -469,6 +494,7 @@ export class Indexer {
     this.localRetentionOrder.clear();
     this.localRetentionClock = 0;
     this.deferredHydrationPaths = [];
+    this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
     this.lastHydrationMsValue = null;
     this.lastHydrationCandidatesValue = 0;
@@ -476,7 +502,6 @@ export class Indexer {
     this.fingerprints.clear();
     this.dirty.clear();
     this.livePending.clear();
-    this.relationshipPathChanges.clear();
     this.cacheDirtyPaths.clear();
     this.stats = null;
     this.metadataBurst.reset();
