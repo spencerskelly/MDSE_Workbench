@@ -90,6 +90,7 @@ export function planLocalRecordPatch(text: string, localId: string, patch: Local
   const reparsed = parsed.records.find((r) => r.localId === localId);
   if (!reparsed) throw new Error("Planned edit lost Local Model record ^" + localId + ".");
   if (reparsed.kind !== record.kind) throw new Error("Planned edit changed ^" + localId + " from " + record.kind + " to " + reparsed.kind + ".");
+  if (!options.allowInvalidTarget) assertTargetValid(parsed, localId);
 
   return {
     before: text,
