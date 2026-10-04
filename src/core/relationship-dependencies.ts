@@ -56,6 +56,16 @@ export class ReversePathDependencyIndex {
     return [...out].sort();
   }
 
+  /**
+   * Per-path candidate fan-out used for runtime measurement. This is deliberately diagnostic:
+   * it does not choose targeted vs full reconciliation and does not alter dependency semantics.
+   */
+  candidateFanOutForPathChanges(paths: Iterable<string>): Array<{ path: string; candidates: number }> {
+    return [...new Set(paths)]
+      .sort()
+      .map((path) => ({ path, candidates: this.candidatesForPathChanges([path]).length }));
+  }
+
   targetsOf(sourcePath: string): string[] {
     return [...(this.bySource.get(sourcePath) ?? [])].sort();
   }
