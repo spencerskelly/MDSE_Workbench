@@ -222,18 +222,20 @@ test("warm-start reconciliation identifies unchanged, changed, added and deleted
     ["A.md", { ctime: 1, mtime: 1, size: 10 }],
     ["B.md", { ctime: 2, mtime: 2, size: 20, hash: "same" }],
     ["C.md", { ctime: 3, mtime: 3, size: 30 }],
-    ["Gone.md", { ctime: 4, mtime: 4, size: 40 }],
+    ["D.md", { ctime: 4, mtime: 4, size: 40 }],
+    ["Gone.md", { ctime: 5, mtime: 5, size: 50 }],
   ]);
   const current = new Map([
     ["A.md", { ctime: 1, mtime: 1, size: 10 }],
     ["B.md", { ctime: 2, mtime: 2, size: 20, hash: "different" }],
     ["C.md", { ctime: 99, mtime: 99, size: 30 }],
-    ["New.md", { ctime: 5, mtime: 5, size: 50 }],
+    ["D.md", { ctime: 44, mtime: 4, size: 40 }],
+    ["New.md", { ctime: 6, mtime: 6, size: 60 }],
   ]);
 
   assert.deepEqual(planReconciliation(cached, current), {
     unchanged: ["A.md"],
-    changed: ["B.md", "C.md"],
+    changed: ["B.md", "C.md", "D.md"],
     added: ["New.md"],
     deleted: ["Gone.md"],
   });
