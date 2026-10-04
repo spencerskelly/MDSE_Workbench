@@ -158,7 +158,7 @@ jobs:
       - name: Write acceptance summary
         if: always()
         run: |
-          if [ -f live-edit-acceptance.json ]; then
+          if [ -s live-edit-acceptance.json ]; then
             node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
           const r=require("./live-edit-acceptance.json");
           console.log("## Integrated live-edit acceptance");
@@ -180,6 +180,8 @@ jobs:
           name: live-edit-evidence
           path: |
             live-edit-acceptance.json
+            ${{ env.VAULT }}/.mdse_live_edit_progress.json
+            ${{ env.VAULT }}/.mdse_integration_result.json
             ${{ runner.temp }}/live-edit-obsidian.log
             ${{ runner.temp }}/live-edit-activate.log
           if-no-files-found: warn
