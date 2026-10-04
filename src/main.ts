@@ -454,8 +454,19 @@ export default class MdseWorkbench extends Plugin {
       stats = await indexer.build();
     }
 
-    this.setRuntimeStatus("ready", `${stats.elements} elements · ${stats.mode}`);
-    this.scheduleSemanticCacheWrite();
+    const localPending = indexer.localHydrationPending;
+    this.setRuntimeStatus(
+      "ready",
+      `${stats.elements} elements · ${stats.mode}${localPending ? ` · ${localPending} Local Model pending` : ""}`,
+    );
+    if (localPending) {
+      void indexer.whenLocalSettled().then(() => {
+        if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
+        const current = indexer.stats;
+        if (current) this.setRuntimeStatus("ready", `${current.elements} elements · ${current.mode}`);
+        this.scheduleSemanticCacheWrite();
+      });
+    } else this.scheduleSemanticCacheWrite();
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
     }
@@ -585,6 +596,7 @@ export default class MdseWorkbench extends Plugin {
       ["Notes with properties", String(s.notes)],
       ["Model notes", String(s.elements)],
       ["Authored links", String(s.links)],
+      ["Local Model hydration", this.indexer!.localHydrationPending ? `${this.indexer!.localHydrationPending} note(s) pending` : "settled"],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
       ["Assurance snapshot", `${assurance.ms} ms · revision ${assurance.revision}${assurance.stale ? " · stale/retrying" : ""}`],
