@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Record artifact hashes
+        run: sha256sum main.js manifest.json styles.css > artifact-sha256.txt
       - name: Sync checked-in plugin artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -35,7 +37,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f main.js vault/.obsidian/plugins/mdse-workbench/main.js vault/.obsidian/plugins/mdse-workbench/manifest.json vault/.obsidian/plugins/mdse-workbench/styles.css
+          git add -f main.js artifact-sha256.txt vault/.obsidian/plugins/mdse-workbench/main.js vault/.obsidian/plugins/mdse-workbench/manifest.json vault/.obsidian/plugins/mdse-workbench/styles.css
           if git diff --cached --quiet; then
             echo "Artifact already current."
             exit 0
