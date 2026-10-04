@@ -890,6 +890,16 @@ function renderRecord(kind, heading, localId, fields) {
   out.push("^" + localId);
   return out;
 }
+function nextLocalId(kind, ownerUid, now = /* @__PURE__ */ new Date()) {
+  if (!/^\d{17}[a-z-]{13}$/.test(ownerUid)) {
+    throw new Error("Cannot create a Local Model identity because the owner note UID is not a governed 30-character identity.");
+  }
+  const suffix = ownerUid.slice(-13);
+  const pad2 = (value, width) => String(value).padStart(width, "0");
+  const stamp = pad2(now.getUTCFullYear(), 4) + pad2(now.getUTCMonth() + 1, 2) + pad2(now.getUTCDate(), 2) + pad2(now.getUTCHours(), 2) + pad2(now.getUTCMinutes(), 2) + pad2(now.getUTCSeconds(), 2) + pad2(now.getUTCMilliseconds(), 3);
+  const prefix = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
+  return prefix[kind] + stamp + suffix;
+}
 var SECTION_TITLE = {
   part: "Part Occurrences",
   endpoint: "Local Interfaces",
@@ -1107,6 +1117,12 @@ var ModelEditService = class {
   }
   async applyLocalCreate(transactionId) {
     const pending = this.requirePendingCreate(transactionId);
+    const blocking = pending.plan.findings.filter((finding) => finding.severity === "error");
+    if (blocking.length) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blocking.length} blocking Local Model finding${blocking.length === 1 ? "" : "s"} \u2014 ${blocking.map((finding) => finding.message).join(" ")}`
+      );
+    }
     try {
       await this.transactions.apply(transactionId, {
         apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label)
@@ -4571,6 +4587,145 @@ var ConfirmModal = class extends import_obsidian3.Modal {
     this.contentEl.empty();
   }
 };
+var LocalPartCreateModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, localId, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.localId = localId;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.renderCompose();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try {
+        this.cancel(staged.transaction.id);
+      } catch {
+      }
+    }
+  }
+  renderCompose() {
+    this.titleEl.setText("Add part occurrence");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Create a contextual part occurrence inside ${this.ownerName}. Nothing is written until Review \u2192 Apply.`
+    });
+    const field = (label, value = "", placeholder = "") => {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: label });
+      const input = row.createEl("input", { type: "text", cls: "mdse-detail-input", value });
+      if (placeholder) input.setAttr("placeholder", placeholder);
+      input.onkeydown = (e) => e.stopPropagation();
+      return input;
+    };
+    const heading = field("Occurrence name", "", "K1");
+    const definition = field("Reusable definition", "", "[[Main Contactor]]");
+    const usage = field("Usage", "standard", "standard");
+    const multiplicity = field("Multiplicity", "", "optional");
+    const id = this.contentEl.createEl("p", { cls: "mdse-muted", text: `Local ID: ${this.localId}` });
+    id.setAttr("title", "Generated from the governed timestamp + author-suffix identity format.");
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => {
+      void (async () => {
+        review.disabled = true;
+        try {
+          const fields = {
+            definition: definition.value.trim()
+          };
+          if (usage.value.trim() && usage.value.trim() !== "standard") fields.usage = usage.value.trim();
+          if (multiplicity.value.trim()) fields.multiplicity = multiplicity.value.trim();
+          const staged = await this.stage({
+            kind: "part",
+            localId: this.localId,
+            heading: heading.value.trim(),
+            fields
+          });
+          this.staged = staged;
+          this.renderReview(staged, {
+            heading: heading.value.trim(),
+            definition: definition.value.trim(),
+            usage: usage.value.trim() || "standard",
+            multiplicity: multiplicity.value.trim()
+          });
+        } catch (e) {
+          new import_obsidian3.Notice(`Cannot stage occurrence: ${e.message}`, 12e3);
+          review.disabled = false;
+        }
+      })();
+    };
+  }
+  renderReview(staged, values) {
+    this.titleEl.setText("Review new part occurrence");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const row = (key2, value) => {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: value || "\u2014" });
+    };
+    row("Owner", this.ownerName);
+    row("Transaction", staged.transaction.label);
+    row("Scope", staged.transaction.scope);
+    row("Occurrence", values.heading);
+    row("Reusable definition", values.definition);
+    row("Usage", values.usage);
+    row("Multiplicity", values.multiplicity);
+    row("Local ID", staged.plan.localId);
+    const findings = staged.plan.findings;
+    const blocking = findings.filter((finding) => finding.severity === "error");
+    if (findings.length) {
+      const box = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      box.createEl("strong", { text: blocking.length ? "Validation findings" : "Validation warnings" });
+      for (const finding of findings) {
+        box.createEl("p", {
+          text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+          cls: finding.severity === "error" ? "mdse-warn" : void 0
+        });
+      }
+    } else {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will write one structural Local Model change." });
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.setAttr("title", blocking.length ? "Resolve blocking validation findings before Apply." : "Apply this staged structural change.");
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied(staged.plan.localId);
+          new import_obsidian3.Notice(`Created part occurrence ${values.heading}.`, 5e3);
+        } catch (e) {
+          new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+          apply.disabled = false;
+        }
+      })();
+    };
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -4849,6 +5004,10 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         await this.refreshLocal(file, record.localId, true);
       };
     }
+    if (this.editing) {
+      const addPart = head.createEl("button", { text: "Add part occurrence\u2026", cls: "mdse-detail-btn" });
+      addPart.onclick = () => this.createPartOccurrence(file);
+    }
     const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
     owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
     const occurrence = head.createEl("button", { text: "Open occurrence", cls: "mdse-detail-btn" });
@@ -4934,6 +5093,30 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       text: this.editing ? "Editing context only. Definition identity and structural/topology links remain separate and read-only here." : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data."
     });
     root.scrollTop = 0;
+  }
+  createPartOccurrence(file) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
+      const localId = nextLocalId("part", ownerUid);
+      new LocalPartCreateModal(
+        this.app,
+        file.basename,
+        localId,
+        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (transactionId) => editor.applyLocalCreate(transactionId),
+        (transactionId) => {
+          editor.cancelLocalCreate(transactionId);
+        },
+        (createdId) => {
+          void this.refreshLocal(file, createdId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot create occurrence: ${e.message}`, 12e3);
+    }
   }
   async saveLocalPatch(file, record, patch) {
     try {
