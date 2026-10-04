@@ -1,6 +1,7 @@
 import CDP from "chrome-remote-interface";
 
 const expectedVaultPath = process.argv[2];
+const extraPlugin = process.argv[3] ?? "";
 if (!expectedVaultPath) throw new Error("vault path required");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -31,9 +32,14 @@ for (let attempt = 0; attempt < 180; attempt++) {
           expression: `(async () => {
             await app.plugins.setEnable(true);
             await app.plugins.enablePlugin("mdse-workbench");
+            if ("${extraPlugin}") {}
+            const extraPlugin = ${JSON.stringify(extraPlugin)};
+            if (extraPlugin) await app.plugins.enablePlugin(extraPlugin);
             return {
               restrictedModeOff: app.plugins.isEnabled(),
               enabled: app.plugins.enabledPlugins.has("mdse-workbench"),
+              extraPlugin,
+              extraEnabled: extraPlugin ? app.plugins.enabledPlugins.has(extraPlugin) : true,
               vault: app.vault.adapter.getBasePath?.() ?? ""
             };
           })()`,
@@ -42,8 +48,8 @@ for (let attempt = 0; attempt < 180; attempt++) {
         });
         await client.close();
         const result = enabled.result.value;
-        if (!result?.restrictedModeOff || !result?.enabled) {
-          throw new Error("Obsidian did not enable community plugins/mdse-workbench");
+        if (!result?.restrictedModeOff || !result?.enabled || !result?.extraEnabled) {
+          throw new Error("Obsidian did not enable required community plugins");
         }
         console.log("Disposable vault opened and mdse-workbench enabled:", result);
         process.exit(0);
