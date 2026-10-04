@@ -114,6 +114,8 @@ jobs:
             echo "semantic cache was not committed" >&2
             exit 1
           '
+          pkill -9 -x obsidian 2>/dev/null || true
+          sleep 2
 
       - name: Corrupt both cache manifests
         run: |
@@ -129,6 +131,8 @@ jobs:
           node -e 'const fs=require("fs"),p=require("path");fs.writeFileSync(p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json"),JSON.stringify({vaults:{recovery:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
           rm -f "$VAULT/.mdse_integration_result.json"
           node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"bad-cache-recovery"},null,2))'
+          pkill -9 -x obsidian 2>/dev/null || true
+          sleep 2
           xvfb-run -a bash -euo pipefail -c '
             /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9243 >"$RUNNER_TEMP/recovery-bad-cache.log" 2>&1 &
             PID=$!
@@ -136,6 +140,8 @@ jobs:
             node bench/obsidian-e2e-activate.mjs "$VAULT" 9243 >"$RUNNER_TEMP/recovery-bad-cache-activate.log" 2>&1
             node bench/obsidian-recovery-probe.mjs "$VAULT" 9243 | tee recovery-probe.json
           '
+          pkill -9 -x obsidian 2>/dev/null || true
+          sleep 2
 
       - name: Prove clean Obsidian restart after recovery
         env:
@@ -146,6 +152,8 @@ jobs:
           node -e 'const fs=require("fs"),p=require("path");fs.writeFileSync(p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json"),JSON.stringify({vaults:{recovery:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
           rm -f "$VAULT/.mdse_integration_result.json"
           node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"post-recovery-restart"},null,2))'
+          pkill -9 -x obsidian 2>/dev/null || true
+          sleep 2
           xvfb-run -a bash -euo pipefail -c '
             /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9243 >"$RUNNER_TEMP/recovery-restart.log" 2>&1 &
             PID=$!
