@@ -140,6 +140,31 @@ function cachePersistenceDelayMs(nowMs, lastWriteAt, quietMs = CACHE_PERSIST_QUI
   return Math.max(quietMs, minimumIntervalMs - sinceLast, 0);
 }
 
+// src/core/cache-mutation.ts
+var CacheMutationGate = class {
+  constructor() {
+    this.clearTask = null;
+  }
+  get clearing() {
+    return this.clearTask !== null;
+  }
+  writesAllowed() {
+    return this.clearTask === null;
+  }
+  clear(activeWrite, remove) {
+    if (this.clearTask) return this.clearTask;
+    let task;
+    task = (async () => {
+      if (activeWrite) await activeWrite;
+      await remove();
+    })().finally(() => {
+      if (this.clearTask === task) this.clearTask = null;
+    });
+    this.clearTask = task;
+    return task;
+  }
+};
+
 // src/core/cache-size.ts
 async function cacheTreeSizeBytes(storage, root) {
   let total = 0;
@@ -5122,6 +5147,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.localBackgroundTimer = null;
     this.cacheWriteTimer = null;
     this.cacheWriteTask = null;
+    this.cacheMutationGate = new CacheMutationGate();
     this.lastCacheWriteAt = null;
     this.lastCacheWriteMs = null;
     this.lastCacheWriteError = null;
@@ -5461,6 +5487,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
    * so cache persistence cannot block startup usability.
    */
   scheduleSemanticCacheWrite() {
+    if (!this.cacheMutationGate.writesAllowed()) return;
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
     const indexer = this.indexer;
     if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
@@ -5738,12 +5765,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       window.clearTimeout(this.cacheWriteTimer);
       this.cacheWriteTimer = null;
     }
-    if (this.cacheWriteTask) {
-      new import_obsidian8.Notice("MDSE Workbench: cache persistence is finishing. Try Clear semantic cache again in a moment.");
-      return;
-    }
     try {
-      await clearWorkbenchCache(this.app);
+      await this.cacheMutationGate.clear(this.cacheWriteTask, () => clearWorkbenchCache(this.app));
       this.lastCacheWriteAt = null;
       this.lastCacheWriteMs = null;
       this.lastCacheWriteError = null;
