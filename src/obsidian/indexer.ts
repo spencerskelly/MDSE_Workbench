@@ -202,6 +202,10 @@ export class Indexer {
       : null;
   }
 
+  get relationshipDependencySize(): ReturnType<ReversePathDependencyIndex["size"]> {
+    return this.relationshipDependencies.size();
+  }
+
   private recordRelationshipReresolution(sample: RelationshipReresolutionSample): void {
     this.relationshipReresolutionHistoryValue.push(sample);
     if (this.relationshipReresolutionHistoryValue.length > RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT) {
