@@ -105,3 +105,55 @@ test("assurance failure is contained and cached for the current semantic revisio
   assert.match(retried.error ?? "", /validator boom/);
   assert.equal(calls, 2, "a semantic revision change retries assurance");
 });
+
+
+test("automatic assurance waits for shared background permission before scanning", async () => {
+  const index = new ModelIndex(fixtureSchema());
+  index.upsert(note("A.md", "Object"));
+  const events: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const manager = new AssuranceManager({
+    revision: () => 1,
+    settle: async () => { events.push("settle"); },
+    index: () => index,
+    localFindings: () => { events.push("scan"); return []; },
+    waitForBackgroundPermission: async () => {
+      events.push("wait");
+      await gate;
+      events.push("allowed");
+    },
+  });
+
+  const task = manager.get();
+  await Promise.resolve();
+  assert.deepEqual(events, ["wait"]);
+  release();
+  await task;
+  assert.deepEqual(events, ["wait", "allowed", "settle", "scan"]);
+});
+
+test("forced assurance may start immediately but stale retry yields to shared activity policy", async () => {
+  const index = new ModelIndex(fixtureSchema());
+  index.upsert(note("A.md", "Object"));
+  let revision = 1;
+  let scans = 0;
+  let waits = 0;
+  const manager = new AssuranceManager({
+    revision: () => revision,
+    settle: async () => {},
+    index: () => index,
+    localFindings: () => {
+      scans++;
+      if (scans === 1) revision = 2;
+      return [];
+    },
+    waitForBackgroundPermission: async () => { waits++; },
+  });
+
+  const snapshot = await manager.get(true);
+  assert.equal(scans, 2);
+  assert.equal(waits, 1, "only the stale retry should yield after foreground activity races the scan");
+  assert.equal(snapshot.revision, 2);
+  assert.equal(snapshot.stale, false);
+});
