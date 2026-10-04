@@ -2486,6 +2486,11 @@ var MetadataChangeBurst = class {
   }
 };
 
+// src/core/hydration-cancel.ts
+function requeueHydrationPaths(deferred, active) {
+  return [.../* @__PURE__ */ new Set([...deferred, ...active])].sort();
+}
+
 // src/core/source-reconciliation.ts
 function hasPendingSourceReconciliation(state) {
   return state.building || state.rebuildPending || state.livePending > 0 || state.liveApplyTimerPending || state.liveApplyActive || state.relationshipResolvePending || state.relationshipResolveTimerPending || state.relationshipResolveActive;
@@ -2520,6 +2525,7 @@ var Indexer = class {
     /** Body reads started by incremental Local Model updates; consumers can wait for semantic consistency. */
     this.pendingLocalReads = /* @__PURE__ */ new Set();
     this.requestedLocalReads = /* @__PURE__ */ new Set();
+    this.requestedHydrationPaths = /* @__PURE__ */ new Set();
     /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
     this.semanticRevision = 0;
     /** Paths whose derived cache buckets no longer match the last committed cache generation. */
@@ -2527,6 +2533,8 @@ var Indexer = class {
     /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
     this.hydrationEpoch = 0;
     this.hydrationTask = null;
+    /** Remaining owners in the active bulk hydration; retained so cancellation can requeue them. */
+    this.activeHydrationPaths = [];
     this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = 0;
     /** Background occurrence hydration pauses while foreground activity resumes; explicit consumers promote it. */
@@ -2633,6 +2641,22 @@ var Indexer = class {
     this.backgroundIdle = check;
   }
   /**
+   * Invalidate in-flight occurrence hydration immediately when source semantics change.
+   * Unfinished bulk owners return to the deferred queue. Epoch/revision guards prevent reads
+   * already in flight from publishing stale occurrence data.
+   */
+  cancelOccurrenceHydration() {
+    if (!this.hydrationTask && !this.requestedLocalReads.size) return;
+    this.hydrationEpoch++;
+    this.deferredHydrationPaths = requeueHydrationPaths(
+      this.deferredHydrationPaths,
+      [...this.activeHydrationPaths, ...this.requestedHydrationPaths]
+    );
+    this.deferredHydrationEpoch = this.hydrationEpoch;
+    this.hydrationDemanded = false;
+    this.hydrationRemaining = 0;
+  }
+  /**
    * Start deferred occurrence parsing. Background starts may pause again if foreground activity
    * resumes; an explicit occurrence-aware consumer promotes the same task to demanded work.
    */
@@ -2674,30 +2698,38 @@ var Indexer = class {
   async hydrateLocalOwners(paths) {
     const unique = [...new Set(paths)].sort();
     if (!unique.length) return;
-    const wanted = new Set(unique);
-    this.deferredHydrationPaths = this.deferredHydrationPaths.filter((path) => !wanted.has(path));
-    const epoch = this.deferredHydrationEpoch;
-    const budget = new CooperativeBudget(WORK_SLICE_MS);
-    for (const path of unique) {
-      if (epoch !== this.hydrationEpoch) return;
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (!(file instanceof import_obsidian.TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
-      const revision = (this.localRevision.get(path) ?? 0) + 1;
-      this.localRevision.set(path, revision);
-      let task;
-      task = this.app.vault.cachedRead(file).then((text) => {
-        if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-        this.local.set(path, parseLocalModel(text));
-        this.localReadErrors.delete(path);
-        this.bumpRevision(path);
-      }).catch((e) => {
-        if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-        this.localReadErrors.set(path, e.message);
-        this.bumpRevision(path);
-      }).finally(() => this.requestedLocalReads.delete(task));
-      this.requestedLocalReads.add(task);
-      await task;
-      await budget.checkpoint(yieldToUi);
+    while (true) {
+      const wanted = new Set(unique);
+      this.deferredHydrationPaths = this.deferredHydrationPaths.filter((path) => !wanted.has(path));
+      const epoch = this.hydrationEpoch;
+      const budget = new CooperativeBudget(WORK_SLICE_MS);
+      for (const path of unique) {
+        if (epoch !== this.hydrationEpoch) break;
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof import_obsidian.TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
+        const revision = (this.localRevision.get(path) ?? 0) + 1;
+        this.localRevision.set(path, revision);
+        this.requestedHydrationPaths.add(path);
+        let task;
+        task = this.app.vault.cachedRead(file).then((text) => {
+          if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+          this.local.set(path, parseLocalModel(text));
+          this.localReadErrors.delete(path);
+          this.bumpRevision(path);
+        }).catch((e) => {
+          if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+          this.localReadErrors.set(path, e.message);
+          this.bumpRevision(path);
+        }).finally(() => {
+          this.requestedLocalReads.delete(task);
+          this.requestedHydrationPaths.delete(path);
+        });
+        this.requestedLocalReads.add(task);
+        await task;
+        await budget.checkpoint(yieldToUi);
+      }
+      if (epoch === this.hydrationEpoch) return;
+      await this.whenSourceSettled();
     }
   }
   /** Current Markdown path/mtime/size evidence without parsing note bodies. */
@@ -2999,6 +3031,7 @@ var Indexer = class {
    * the core note graph is already usable. Occurrence-aware consumers call whenLocalSettled().
    */
   startLocalHydration(files, epoch) {
+    this.activeHydrationPaths = files.map((file) => file.path);
     this.hydrationRemaining = files.length;
     this.lastHydrationCandidatesValue = files.length;
     this.hydrationStartedAt = performance.now();
@@ -3020,6 +3053,7 @@ var Indexer = class {
         }
         const file = files[i];
         const path = file.path;
+        this.activeHydrationPaths = files.slice(i).map((candidate) => candidate.path);
         const revision = (this.localRevision.get(path) ?? 0) + 1;
         this.localRevision.set(path, revision);
         try {
@@ -3045,6 +3079,7 @@ var Indexer = class {
     })().finally(() => {
       if (this.hydrationTask === task) {
         this.hydrationTask = null;
+        this.activeHydrationPaths = [];
         this.hydrationDemanded = false;
         this.hydrationRemaining = 0;
         if (this.hydrationStartedAt !== null) {
@@ -3148,6 +3183,7 @@ var Indexer = class {
   /** One file changed or was created. Rapid events are coalesced by path. */
   changed(path) {
     if (!this.liveChanges) return;
+    this.cancelOccurrenceHydration();
     if (!this.stats || this.running) {
       this.dirty.add(path);
       return;
