@@ -3900,6 +3900,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.pendingRebuild = false;
     /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
     this.lastChange = Date.now();
+    /** Latched once Obsidian says its metadata/link-resolution pass is complete. */
+    this.metadataResolved = false;
     this.unloaded = false;
   }
   async onload() {
@@ -4002,6 +4004,9 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.addCommand({ id: "local-model-findings", name: "Check Local Model (write findings report)", callback: () => void this.checkLocalModel() });
     this.addRibbonIcon("list-checks", "Workbench Review", () => void this.openReview());
     this.registerEvent(this.app.metadataCache.on("changed", () => this.lastChange = Date.now()));
+    this.registerEvent(this.app.metadataCache.on("resolved", () => {
+      this.metadataResolved = true;
+    }));
     this.register(() => {
       this.unloaded = true;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
@@ -4014,10 +4019,16 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.statusEl.setText(detail ? `${label} \xB7 ${detail}` : label);
     this.statusEl.setAttr("aria-label", "MDSE Workbench runtime status");
   }
-  /** Resolves once the layout is ready and no note has changed for QUIET_START_MS. */
+  /**
+   * Prefer Obsidian's own metadata/link-resolution completion signal over a fixed startup delay.
+   * The quiet timer remains a conservative fallback for versions/environments that do not emit it
+   * after Workbench loads.
+   */
   async whenVaultQuiet() {
-    while (!this.unloaded && Date.now() - this.lastChange < QUIET_START_MS) {
-      await new Promise((r) => window.setTimeout(r, 1e3));
+    while (!this.unloaded) {
+      if (this.metadataResolved) return;
+      if (Date.now() - this.lastChange >= QUIET_START_MS) return;
+      await new Promise((r) => window.setTimeout(r, 250));
     }
   }
   async saveAll() {
