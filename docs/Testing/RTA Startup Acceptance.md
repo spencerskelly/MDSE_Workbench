@@ -124,13 +124,45 @@ After the cache tests, open the WB-106 fixture and verify:
 - connection and flow labeling remains correct;
 - curated Internal Canvas placement survives semantic refresh for stable local IDs.
 
+## J. Stability-first staged readiness
+
+1. Clear the semantic cache and leave **Warm cache preview** OFF.
+2. Restart Obsidian and interact with ordinary notes as soon as the vault UI appears.
+3. Observe Workbench status through core indexing and deferred occurrence loading.
+4. As soon as Workbench shows core readiness, open a Functional or Design view.
+5. While occurrence data is still queued/loading, perform a small ordinary note edit.
+6. Then open an Internal view.
+
+Pass:
+- Obsidian remains usable before Workbench core is ready;
+- Workbench reports core readiness separately from occurrence readiness;
+- Functional/Design does not wait for Local Model hydration;
+- queued occurrence work does not prevent ordinary note editing;
+- background occurrence hydration yields/pauses when foreground activity resumes;
+- opening Internal promotes the occurrence task and waits for complete occurrence semantics;
+- runtime health observation does not itself start occurrence hydration or assurance;
+- no unhandled error is shown if a derived subsystem is unavailable.
+
+## K. Runtime fault containment
+
+Use only a disposable test setup and reversible faults.
+
+Pass:
+- invalid/missing cache causes fallback/rebuild, not model changes;
+- a Local Model read/processing issue is reported as an occurrence/runtime-health issue while ordinary Markdown remains usable;
+- a global assurance failure is shown as **assurance unavailable**, never as zero findings;
+- a Workbench core startup error leaves Obsidian usable and offers explicit recovery;
+- only one cache write / assurance scan / full index operation can own that subsystem at a time.
+
 ## Acceptance record
 
 Record:
 - Obsidian version / OS;
 - vault note count;
 - cold startup quiet wait;
+- time to core ready;
 - cold full index time;
+- occurrence hydration queued/start/complete behavior;
 - warm restore/reconciliation time;
 - cache write time;
 - JavaScript heap (diagnostics);
