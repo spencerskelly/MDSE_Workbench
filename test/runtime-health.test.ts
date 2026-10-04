@@ -1,175 +1,159 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeRuntimeHealth } from "../src/core/runtime-health";
+import { summarizeRuntimeHealth, type RuntimeHealthInput } from "../src/core/runtime-health";
+
+const base = (patch: Partial<RuntimeHealthInput> = {}): RuntimeHealthInput => ({
+  ready: true,
+  building: false,
+  coreError: null,
+  occurrenceError: null,
+  localPending: 0,
+  localQueued: 0,
+  livePending: 0,
+  localReadErrors: 0,
+  schemaLoaded: true,
+  schemaError: null,
+  schemaWarnings: 0,
+  cacheWriteError: null,
+  cacheCurrent: true,
+  cachePending: false,
+  assuranceActive: false,
+  assurance: null,
+  ...patch,
+});
 
 test("runtime health distinguishes startup, syncing, healthy and attention without running assurance", () => {
   assert.equal(
-    summarizeRuntimeHealth({
+    summarizeRuntimeHealth(base({
       ready: false,
-      building: false,
-      coreError: null,
-      occurrenceError: null,
-      localPending: 0,
-      localQueued: 0,
-      livePending: 0,
-      localReadErrors: 0,
-      schemaWarnings: 0,
-      cacheWriteError: null,
+      schemaLoaded: false,
       cacheCurrent: false,
-      assurance: null,
-    }).level,
+    })).level,
     "starting",
   );
 
-  const syncing = summarizeRuntimeHealth({
-    ready: true,
-    building: false,
-    coreError: null,
-    occurrenceError: null,
+  const syncing = summarizeRuntimeHealth(base({
     localPending: 12,
-    localQueued: 0,
-    livePending: 0,
-    localReadErrors: 0,
-    schemaWarnings: 0,
-    cacheWriteError: null,
     cacheCurrent: false,
-    assurance: null,
-  });
+    cachePending: true,
+  }));
   assert.equal(syncing.level, "syncing");
   assert.match(syncing.label, /occurrence data loading/);
 
-  const healthy = summarizeRuntimeHealth({
-    ready: true,
-    building: false,
-    coreError: null,
-    occurrenceError: null,
-    localPending: 0,
-    localQueued: 0,
-    livePending: 0,
-    localReadErrors: 0,
-    schemaWarnings: 0,
-    cacheWriteError: null,
-    cacheCurrent: true,
-    assurance: null,
-  });
+  const healthy = summarizeRuntimeHealth(base());
   assert.equal(healthy.level, "ready");
   assert.equal(healthy.label, "Workbench ✓");
-  assert.match(healthy.detail, /on demand/);
+  assert.match(healthy.detail, /optional capabilities|healthy/);
 
-  const attention = summarizeRuntimeHealth({
-    ready: true,
-    building: false,
-    coreError: null,
-    occurrenceError: null,
-    localPending: 0,
-    localQueued: 0,
-    livePending: 0,
+  const attention = summarizeRuntimeHealth(base({
     localReadErrors: 2,
     schemaWarnings: 1,
     cacheWriteError: "disk full",
     cacheCurrent: false,
-    assurance: null,
-  });
+  }));
   assert.equal(attention.level, "attention");
-  assert.match(attention.label, /4 issues/);
+  assert.equal(attention.capabilities.occurrence.state, "failed");
+  assert.equal(attention.capabilities.cache.state, "failed");
+  assert.equal(attention.capabilities.schema.state, "ready", "schema warnings are readiness-compatible");
 });
 
 test("engineering findings do not turn runtime health into a runtime failure", () => {
-  const h = summarizeRuntimeHealth({
-    ready: true,
-    building: false,
-    coreError: null,
-    occurrenceError: null,
-    localPending: 0,
-    localQueued: 0,
-    livePending: 0,
-    localReadErrors: 0,
-    schemaWarnings: 0,
-    cacheWriteError: null,
-    cacheCurrent: true,
+  const h = summarizeRuntimeHealth(base({
     assurance: { current: true, findings: 7, computedAt: 1 },
-  });
+  }));
   assert.equal(h.level, "ready");
+  assert.equal(h.capabilities.assurance.state, "ready");
   assert.match(h.label, /7 review/);
-  assert.match(h.detail, /Runtime is healthy/);
 });
 
-
-test("coalesced live edits appear as syncing rather than runtime failure", () => {
-  const h = summarizeRuntimeHealth({
-    ready: true,
-    building: false,
-    coreError: null,
-    occurrenceError: null,
-    localPending: 0,
-    localQueued: 0,
-    livePending: 3,
-    localReadErrors: 0,
-    schemaWarnings: 0,
-    cacheWriteError: null,
-    cacheCurrent: false,
-    assurance: null,
-  });
-  assert.equal(h.level, "syncing");
-  assert.match(h.label, /applying 3/);
-  assert.match(h.detail, /coalesced live edits/);
-});
-
-
-test("core and occurrence failures are reported as scoped runtime attention", () => {
-  const core = summarizeRuntimeHealth({
+test("coalesced live edits appear as core pending rather than runtime failure", () => {
+  const h = summarizeRuntimeHealth(base({
     ready: false,
-    building: false,
-    coreError: "schema parser crashed",
-    occurrenceError: null,
-    localPending: 0,
-    localQueued: 0,
-    livePending: 0,
-    localReadErrors: 0,
-    schemaWarnings: 0,
-    cacheWriteError: null,
+    livePending: 3,
     cacheCurrent: false,
-    assurance: null,
-  });
-  assert.equal(core.level, "attention");
-  assert.match(core.label, /core unavailable/);
-  assert.match(core.rows.map((r) => r[1]).join(" "), /schema parser crashed/);
+    cachePending: true,
+  }));
+  assert.equal(h.capabilities.core.state, "pending");
+  assert.equal(h.capabilities.core.detail, "starting");
+  assert.notEqual(h.level, "attention");
+});
 
-  const occurrence = summarizeRuntimeHealth({
-    ready: true,
-    building: false,
-    coreError: null,
-    occurrenceError: "background failure",
-    localPending: 0,
-    localQueued: 0,
-    livePending: 0,
-    localReadErrors: 0,
-    schemaWarnings: 0,
-    cacheWriteError: null,
+test("core and occurrence failures are independently reported", () => {
+  const core = summarizeRuntimeHealth(base({
+    ready: false,
+    coreError: "index failed",
     cacheCurrent: false,
-    assurance: null,
-  });
-  assert.equal(occurrence.level, "attention");
+  }));
+  assert.equal(core.capabilities.core.state, "failed");
+  assert.equal(core.capabilities.schema.state, "ready");
+  assert.match(core.rows.map((r) => r[1]).join(" "), /index failed/);
+
+  const occurrence = summarizeRuntimeHealth(base({
+    occurrenceError: "background failure",
+    cacheCurrent: false,
+  }));
+  assert.equal(occurrence.capabilities.core.state, "ready");
+  assert.equal(occurrence.capabilities.occurrence.state, "failed");
   assert.match(occurrence.rows.map((r) => r[1]).join(" "), /background failure/);
 });
 
-
-test("deferred occurrence work is reported as queued without implying core unavailability", () => {
-  const h = summarizeRuntimeHealth({
-    ready: true,
-    building: false,
-    coreError: null,
-    occurrenceError: null,
+test("deferred occurrence work is reported as pending without implying core unavailability", () => {
+  const h = summarizeRuntimeHealth(base({
     localPending: 12,
     localQueued: 12,
-    livePending: 0,
-    localReadErrors: 0,
-    schemaWarnings: 0,
-    cacheWriteError: null,
     cacheCurrent: false,
-    assurance: null,
-  });
-  assert.equal(h.level, "syncing");
-  assert.match(h.label, /occurrence data queued/);
-  assert.match(h.detail, /Core model is ready/);
+    cachePending: true,
+  }));
+  assert.equal(h.capabilities.core.state, "ready");
+  assert.equal(h.capabilities.occurrence.state, "pending");
+  assert.match(h.capabilities.occurrence.detail, /12 note\(s\) queued/);
+});
+
+test("schema failure remains distinct from core failure", () => {
+  const h = summarizeRuntimeHealth(base({
+    ready: false,
+    schemaLoaded: false,
+    schemaError: "relationships.yaml parse error",
+    cacheCurrent: false,
+  }));
+  assert.equal(h.capabilities.schema.state, "failed");
+  assert.equal(h.capabilities.core.state, "pending");
+  assert.match(h.capabilities.core.detail, /blocked by schema/);
+  assert.equal(h.level, "attention");
+});
+
+test("cache readiness and failure are independently visible", () => {
+  const pending = summarizeRuntimeHealth(base({
+    cacheCurrent: false,
+    cachePending: true,
+  }));
+  assert.equal(pending.capabilities.cache.state, "pending");
+  assert.match(pending.capabilities.cache.detail, /pending/);
+
+  const failed = summarizeRuntimeHealth(base({
+    cacheCurrent: false,
+    cachePending: true,
+    cacheWriteError: "quota exceeded",
+  }));
+  assert.equal(failed.capabilities.cache.state, "failed");
+  assert.equal(failed.capabilities.core.state, "ready");
+});
+
+test("assurance pending, ready and failed are independent capability states", () => {
+  const computing = summarizeRuntimeHealth(base({
+    assuranceActive: true,
+  }));
+  assert.equal(computing.capabilities.assurance.state, "pending");
+  assert.equal(computing.capabilities.assurance.detail, "computing");
+
+  const ready = summarizeRuntimeHealth(base({
+    assurance: { current: true, findings: 0, computedAt: 1 },
+  }));
+  assert.equal(ready.capabilities.assurance.state, "ready");
+
+  const failed = summarizeRuntimeHealth(base({
+    assurance: { current: true, findings: 0, computedAt: 1, error: "validator unavailable" },
+  }));
+  assert.equal(failed.capabilities.assurance.state, "failed");
+  assert.equal(failed.capabilities.core.state, "ready");
 });
