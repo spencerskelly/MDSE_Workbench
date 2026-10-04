@@ -915,6 +915,16 @@ export default class MdseWorkbench extends Plugin {
       ["Authored links", String(s.links)],
       ["Local Model hydration", this.indexer!.localHydrationPending ? `${this.indexer!.localHydrationPending} note(s) pending` : "settled"],
       ["Local Model read errors", String(this.indexer!.localReadErrorCount), this.indexer!.localReadErrorCount > 0],
+      ["Hydration cost / Object", (() => {
+        const h = this.indexer!.localHydrationCostSummary;
+        return h.owners
+          ? `${h.averageMs.toFixed(2)} ms avg · read ${h.averageReadMs.toFixed(2)} ms · parse ${h.averageParseMs.toFixed(2)} ms · ${h.owners} owner(s)`
+          : "not measured";
+      })()],
+      ["Slowest hydrated Object", (() => {
+        const h = this.indexer!.localHydrationCostSummary;
+        return h.maxPath ? `${h.maxPath} · ${h.maxMs.toFixed(2)} ms` : "not measured";
+      })()],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
       ["Time to core ready", this.lastTimeToCoreReadyMs === null ? "not measured" : `${(this.lastTimeToCoreReadyMs / 1000).toFixed(2)} s`],
       ["Time to occurrence ready", this.lastTimeToOccurrenceReadyMs === null ? (this.indexer!.localHydrationPending ? "pending" : "not measured") : `${(this.lastTimeToOccurrenceReadyMs / 1000).toFixed(2)} s`],
