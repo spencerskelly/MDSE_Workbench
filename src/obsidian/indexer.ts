@@ -15,6 +15,8 @@ const LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 const BURST_REBUILD = 300;
 /** Quiet time before a scheduled rebuild runs, so a pull or first-time indexing finishes first. */
 const QUIET_MS = 3000;
+/** Coalesce rapid editor/metadata events before reparsing one note body. */
+const LIVE_DEBOUNCE_MS = 250;
 
 export interface BuildStats {
   mode: "full" | "restored" | "reconciled";
@@ -63,6 +65,10 @@ export class Indexer {
   private lastHydrationCandidatesValue = 0;
   /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
   private readonly localReadErrors = new Map<string, string>();
+  /** Rapid live edits are coalesced so one keystroke burst does not trigger repeated Local Model body reads. */
+  private readonly livePending = new Set<string>();
+  private liveApplyTimer: number | null = null;
+  private liveApplyTask: Promise<void> | null = null;
   /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
   private relationshipResolveTimer: number | null = null;
   private relationshipResolveTask: Promise<void> | null = null;
@@ -135,8 +141,9 @@ export class Indexer {
 
   /** Wait until all asynchronous semantic work that can affect queries has settled. */
   async whenLocalSettled(): Promise<void> {
-    while (this.hydrationTask || this.pendingLocalReads.size || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
+    while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work: Promise<unknown>[] = [...this.pendingLocalReads];
+      if (this.liveApplyTask) work.push(this.liveApplyTask);
       if (this.hydrationTask) work.push(this.hydrationTask);
       if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
       if (work.length) await Promise.all(work);
@@ -480,6 +487,11 @@ export class Indexer {
     // during the build; otherwise Obsidian's first-start metadata burst can trigger a redundant
     // second whole-vault rebuild immediately after the first one (W-343 / RTA-1).
     this.dirty.clear();
+    this.livePending.clear();
+    if (this.liveApplyTimer !== null) {
+      window.clearTimeout(this.liveApplyTimer);
+      this.liveApplyTimer = null;
+    }
     this.localReadErrors.clear();
     const epoch = ++this.hydrationEpoch;
     const index = new ModelIndex(this.schema);
@@ -556,29 +568,69 @@ export class Indexer {
     this.pendingLocalReads.add(task);
   }
 
-  /** One file changed or was created. Cheap; never starts a build directly. */
+  /** One file changed or was created. Rapid events are coalesced by path. */
   changed(path: string): void {
     if (!this.liveChanges) return;
     if (!this.stats || this.running) {
       this.dirty.add(path);
       return;
     }
-    const existed = this.fingerprints.has(path);
-    this.apply(path);
-    const existsNow = this.fingerprints.has(path);
-    if (!existed && existsNow) this.scheduleRelationshipReresolution();
+    this.livePending.add(path);
     const now = Date.now();
     if (now - this.burstStarted > 10000) {
       this.burstStarted = now;
       this.burst = 0;
     }
-    if (++this.burst >= BURST_REBUILD) this.scheduleRebuild();
+    this.burst++;
+    if (this.burst >= BURST_REBUILD || this.livePending.size >= BURST_REBUILD) {
+      this.livePending.clear();
+      if (this.liveApplyTimer !== null) {
+        window.clearTimeout(this.liveApplyTimer);
+        this.liveApplyTimer = null;
+      }
+      this.scheduleRebuild();
+      return;
+    }
+    this.scheduleLiveApply();
   }
 
   removed(path: string): void {
-    const existed = this.fingerprints.has(path);
     this.changed(path);
-    if (existed) this.scheduleRelationshipReresolution();
+  }
+
+  private scheduleLiveApply(): void {
+    if (!this.liveChanges || this.rebuildPending) return;
+    if (this.liveApplyTimer !== null) window.clearTimeout(this.liveApplyTimer);
+    this.liveApplyTimer = window.setTimeout(() => {
+      this.liveApplyTimer = null;
+      this.beginLiveApply();
+    }, LIVE_DEBOUNCE_MS);
+  }
+
+  private beginLiveApply(): void {
+    if (!this.liveChanges || this.rebuildPending || this.running || this.liveApplyTask || !this.livePending.size) {
+      if (this.livePending.size && !this.rebuildPending && !this.liveApplyTask) this.scheduleLiveApply();
+      return;
+    }
+    const paths = [...this.livePending].sort();
+    this.livePending.clear();
+    let task: Promise<void>;
+    task = (async () => {
+      let pathSetChanged = false;
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i];
+        const existed = this.fingerprints.has(path);
+        this.apply(path);
+        const existsNow = this.fingerprints.has(path);
+        if (existed !== existsNow) pathSetChanged = true;
+        if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+      }
+      if (pathSetChanged) this.scheduleRelationshipReresolution();
+    })().finally(() => {
+      if (this.liveApplyTask === task) this.liveApplyTask = null;
+      if (this.livePending.size) this.scheduleLiveApply();
+    });
+    this.liveApplyTask = task;
   }
 
   scheduleRebuild(): void {
@@ -591,6 +643,10 @@ export class Indexer {
 
   dispose(): void {
     if (this.timer !== null) window.clearTimeout(this.timer);
+    if (this.liveApplyTimer !== null) window.clearTimeout(this.liveApplyTimer);
+    this.liveApplyTimer = null;
+    this.livePending.clear();
+    this.liveApplyTask = null;
     if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
