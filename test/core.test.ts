@@ -581,7 +581,7 @@ test("every view uses only relationship fields and classes that exist in the sch
       for (const c of [...(st.from ?? []), ...(st.to ?? []), ...(profile.startTypes ?? [])]) assert.ok(schema.classNames.has(c), `${name}: class ${c} exists`);
     }
   }
-  assert.deepEqual(Object.keys(PROFILES).sort(), ["Behavior", "Design", "Evidence", "Failure and risk", "Functional", "Interfaces", "Requirements", "Scenario", "Structure", "Verification", "Where Used"]);
+  assert.deepEqual(Object.keys(PROFILES).sort(), ["Behavior", "Design", "Evidence", "Failure and risk", "Functional", "Interfaces", "Internal", "Requirements", "Scenario", "Structure", "Verification", "Where Used"]);
 });
 
 test("where used: parents, owners, performers and dependants, followed upward, arrows as stored (WB-102)", () => {
