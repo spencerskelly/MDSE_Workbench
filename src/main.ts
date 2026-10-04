@@ -536,7 +536,12 @@ export default class MdseWorkbench extends Plugin {
     const t0 = performance.now();
     try {
       await indexer.whenLocalSettled(false);
-      if (indexer.building || indexer.rebuildPending) {
+      if (
+        indexer.building ||
+        indexer.rebuildPending ||
+        !this.backgroundWorkAllowed("cacheWrite", indexer) ||
+        Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS
+      ) {
         this.scheduleSemanticCacheWrite();
         return;
       }
