@@ -228,10 +228,10 @@ test("part deletion reports same-note endpoint dependencies", () => {
   assert.doesNotMatch(result.after, /#### K1/);
 });
 
-test("deletion slice refuses non-part Local Model records", () => {
+test("deletion slice refuses connection and flow Local Model records", () => {
   assert.throws(
-    () => planLocalRecordDelete(note(), "ep-" + tokenC),
-    /part occurrences only/,
+    () => planLocalRecordDelete(note(), "conn-" + tokenD),
+    /part and endpoint occurrences only/,
   );
 });
 
