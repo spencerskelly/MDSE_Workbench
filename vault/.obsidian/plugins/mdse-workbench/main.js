@@ -3106,7 +3106,6 @@ var Indexer = class {
     else this.index.remove(path);
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.removeLocalRegion(path);
     if (this.mayHaveLocalModel(file)) {
       try {
         const text = await this.app.vault.cachedRead(file);
@@ -3115,9 +3114,15 @@ var Indexer = class {
           this.localReadErrors.delete(path);
         }
       } catch (e) {
-        if (this.localRevision.get(path) === revision) this.localReadErrors.set(path, e.message);
+        if (this.localRevision.get(path) === revision) {
+          this.removeLocalRegion(path);
+          this.localReadErrors.set(path, e.message);
+        }
       }
-    } else this.localReadErrors.delete(path);
+    } else {
+      this.removeLocalRegion(path);
+      this.localReadErrors.delete(path);
+    }
     this.bumpRevision(path);
   }
   /**
@@ -3256,8 +3261,8 @@ var Indexer = class {
   applyLocal(path, file) {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.removeLocalRegion(path);
     if (!file || !this.mayHaveLocalModel(file)) {
+      this.removeLocalRegion(path);
       this.localReadErrors.delete(path);
       return;
     }
@@ -3269,6 +3274,7 @@ var Indexer = class {
       this.bumpRevision(path);
     }).catch((e) => {
       if (this.localRevision.get(path) !== revision) return;
+      this.removeLocalRegion(path);
       this.localReadErrors.set(path, e.message);
       this.bumpRevision(path);
     }).finally(() => this.pendingLocalReads.delete(task));
