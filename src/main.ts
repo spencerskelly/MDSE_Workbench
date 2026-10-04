@@ -108,7 +108,7 @@ export default class MdseWorkbench extends Plugin {
   private startupRunStartedAt: number | null = null;
   private startPromise: Promise<void> | null = null;
   private pendingRebuild = false;
-  /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
+  /** Last foreground model/UI activity; background subsystems share this preemption signal. */
   private lastChange = Date.now();
   /** Latched once Obsidian says its metadata/link-resolution pass is complete. */
   private metadataResolved = false;
@@ -218,7 +218,7 @@ export default class MdseWorkbench extends Plugin {
     this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
     this.addCommand({ id: "local-model-findings", name: "Check Local Model (write findings report)", callback: () => void this.checkLocalModel() });
     this.addRibbonIcon("list-checks", "Workbench Review", () => void this.openReview());
-    this.registerEvent(this.app.metadataCache.on("changed", () => (this.lastChange = Date.now())));
+    this.registerEvent(this.app.metadataCache.on("changed", () => this.markForegroundActivity()));
     this.registerEvent(this.app.metadataCache.on("resolved", () => {
       this.metadataResolved = true;
       this.indexer?.linkResolutionSettled();
@@ -296,6 +296,24 @@ export default class MdseWorkbench extends Plugin {
       "This view is lightweight: it reports already-known runtime state and does not trigger a whole-model assurance scan.",
       "Engineering findings are not treated as a runtime failure; open Review when you want the current global assurance results.",
     ]).open();
+  }
+
+  private markForegroundActivity(): void {
+    this.lastChange = Date.now();
+  }
+
+  /** Single policy gate used by every optional/background Workbench subsystem. */
+  private backgroundWorkAllowed(indexer: Indexer | null = this.indexer): boolean {
+    return !!(
+      !this.unloaded &&
+      indexer &&
+      this.indexer === indexer &&
+      this.isReady() &&
+      !indexer.building &&
+      !indexer.rebuildPending &&
+      indexer.liveUpdatePending === 0 &&
+      Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS
+    );
   }
 
   private scheduleRuntimeHealthRefresh(): void {
@@ -397,7 +415,7 @@ export default class MdseWorkbench extends Plugin {
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
       // Background occurrence parsing must yield to active use. If the engineer just edited
       // something or live semantic updates are pending, leave the capability queued and try later.
-      if (Date.now() - this.lastChange < LOCAL_BACKGROUND_DELAY_MS || indexer.liveUpdatePending > 0) {
+      if (!this.backgroundWorkAllowed(indexer)) {
         this.scheduleBackgroundLocalHydration();
         return;
       }
@@ -435,7 +453,7 @@ export default class MdseWorkbench extends Plugin {
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (current.building || current.rebuildPending || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+      if (!this.backgroundWorkAllowed(current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -596,7 +614,7 @@ export default class MdseWorkbench extends Plugin {
     const schema = this.schema;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
-      this.indexer.setBackgroundIdleCheck(() => Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS);
+      this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed(this.indexer));
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
@@ -794,6 +812,7 @@ export default class MdseWorkbench extends Plugin {
 
   /** WB-111: validate the shared Local Model index, write the report and open it. */
   async checkLocalModel(): Promise<void> {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const notice = new Notice("MDSE Workbench: checking Local Model…", 0);
     try {
@@ -814,6 +833,7 @@ export default class MdseWorkbench extends Plugin {
   }
 
   async openReview(): Promise<void> {
+    this.markForegroundActivity();
     const existing = this.app.workspace.getLeavesOfType(REVIEW_VIEW)[0];
     const leaf = existing ?? this.app.workspace.getLeaf("tab");
     if (!existing) await leaf.setViewState({ type: REVIEW_VIEW, active: true });
@@ -836,6 +856,7 @@ export default class MdseWorkbench extends Plugin {
   }
 
   async diagnostics(): Promise<void> {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const s = this.indexer!.stats!;
     const schema = this.schema!;
@@ -881,6 +902,7 @@ export default class MdseWorkbench extends Plugin {
 
   /** Lists the views that can start from this note's type and opens the one chosen. */
   pickView(path: string): void {
+    this.markForegroundActivity();
     if (!this.isReady()) {
       new Notice("MDSE Workbench is still indexing. Try again in a moment.");
       return;
@@ -892,6 +914,7 @@ export default class MdseWorkbench extends Plugin {
   }
 
   async explore(starts: string[], profile: ViewProfile = STRUCTURE_PROFILE): Promise<void> {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer as Indexer;
     if (profileNeedsLocalOccurrences(profile)) {
@@ -1011,6 +1034,7 @@ export default class MdseWorkbench extends Plugin {
   }
 
   async checkView(): Promise<void> {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer as Indexer;
     const f = this.app.workspace.getActiveFile();
@@ -1052,6 +1076,7 @@ export default class MdseWorkbench extends Plugin {
   }
 
   relate(firstPath: string, secondPath: string): void {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const index = this.indexer!.index;
     const a = index.notes.get(firstPath);
@@ -1073,6 +1098,7 @@ export default class MdseWorkbench extends Plugin {
   }
 
   async undo(): Promise<void> {
+    this.markForegroundActivity();
     if (!this.writer) return;
     new Notice(await this.writer.undo(), 15000);
   }
