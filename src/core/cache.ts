@@ -171,10 +171,18 @@ function deserializeNote(raw: unknown): NoteRecord {
   const type = optionalString(raw, "type");
   const id = optionalString(raw, "id");
   const uid = optionalString(raw, "uid");
-  if (raw.broken !== undefined && !arrayOfBroken(raw.broken)) throw new Error(`Malformed cached broken links for ${raw.path}.`);
-  if (raw.localRefs !== undefined && !arrayOfLocalRefs(raw.localRefs)) throw new Error(`Malformed cached local references for ${raw.path}.`);
-  if (raw.abstract !== undefined && typeof raw.abstract !== "boolean") throw new Error(`Malformed cached abstract value for ${raw.path}.`);
-  if (raw.abstractInvalid !== undefined && typeof raw.abstractInvalid !== "boolean") throw new Error(`Malformed cached abstract-invalid value for ${raw.path}.`);
+  let broken: Array<{ field: string; link: string }> | undefined;
+  if (raw.broken !== undefined) {
+    if (!arrayOfBroken(raw.broken)) throw new Error(`Malformed cached broken links for ${raw.path}.`);
+    broken = raw.broken.map((x) => ({ ...x }));
+  }
+  let localRefs: Array<{ field: string; path: string; localId: string }> | undefined;
+  if (raw.localRefs !== undefined) {
+    if (!arrayOfLocalRefs(raw.localRefs)) throw new Error(`Malformed cached local references for ${raw.path}.`);
+    localRefs = raw.localRefs.map((x) => ({ ...x }));
+  }
+  const abstract = optionalBoolean(raw, "abstract", raw.path);
+  const abstractInvalid = optionalBoolean(raw, "abstractInvalid", raw.path);
   return {
     path: raw.path,
     name: raw.name,
@@ -183,11 +191,11 @@ function deserializeNote(raw: unknown): NoteRecord {
     ...(uid !== undefined ? { uid } : {}),
     fields,
     unresolved: raw.unresolved,
-    ...(raw.broken !== undefined ? { broken: raw.broken.map((x) => ({ ...x })) } : {}),
+    ...(broken ? { broken } : {}),
     ...(repeat ? { repeat } : {}),
-    ...(raw.abstract !== undefined ? { abstract: raw.abstract } : {}),
-    ...(raw.abstractInvalid !== undefined ? { abstractInvalid: raw.abstractInvalid } : {}),
-    ...(raw.localRefs !== undefined ? { localRefs: raw.localRefs.map((x) => ({ ...x })) } : {}),
+    ...(abstract !== undefined ? { abstract } : {}),
+    ...(abstractInvalid !== undefined ? { abstractInvalid } : {}),
+    ...(localRefs ? { localRefs } : {}),
   };
 }
 
@@ -211,10 +219,13 @@ function deserializeRegion(raw: unknown): LocalRegion {
     if (!isFinding(finding)) throw new Error("Malformed Local Model finding cache entry.");
     return { ...finding };
   });
+  if (!(raw.schemaVersion === null || typeof raw.schemaVersion === "string")) throw new Error("Malformed Local Model schema version in cache.");
+  if (!(raw.startLine === null || typeof raw.startLine === "number")) throw new Error("Malformed Local Model start line in cache.");
+  if (!(raw.endLine === null || typeof raw.endLine === "number")) throw new Error("Malformed Local Model end line in cache.");
   return {
-    schemaVersion: raw.schemaVersion === null || typeof raw.schemaVersion === "string" ? raw.schemaVersion : null,
-    startLine: raw.startLine === null || typeof raw.startLine === "number" ? raw.startLine : null,
-    endLine: raw.endLine === null || typeof raw.endLine === "number" ? raw.endLine : null,
+    schemaVersion: raw.schemaVersion,
+    startLine: raw.startLine,
+    endLine: raw.endLine,
     records,
     findings,
     structured: raw.structured,
@@ -230,27 +241,30 @@ function deserializeLocalRecord(raw: unknown): LocalRecord {
     if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" || typeof entry[1] !== "string") throw new Error("Malformed Local Model field cache entry.");
     fields.set(entry[0], entry[1]);
   }
+  if (typeof raw.usage !== "string" || typeof raw.usageExplicit !== "boolean" || typeof raw.sourceSchemaVersion !== "string") {
+    throw new Error("Malformed Local Model scalar cache entry.");
+  }
   return {
     kind: raw.kind,
     localId: raw.localId,
     identifier: raw.identifier,
     line: raw.line,
     fields,
-    definition: linkOrNull(raw.definition),
-    usage: typeof raw.usage === "string" ? raw.usage : "standard",
-    usageExplicit: raw.usageExplicit === true,
-    part: linkOrNull(raw.part),
-    parent: linkOrNull(raw.parent),
-    exposes: links(raw.exposes),
-    equals: links(raw.equals),
-    endpointA: linkOrNull(raw.endpointA),
-    endpointB: linkOrNull(raw.endpointB),
-    roleA: nullableString(raw.roleA),
-    roleB: nullableString(raw.roleB),
-    multiplicity: nullableString(raw.multiplicity),
-    endpointKind: nullableString(raw.endpointKind),
-    connectionId: nullableString(raw.connectionId),
-    sourceSchemaVersion: typeof raw.sourceSchemaVersion === "string" ? raw.sourceSchemaVersion : "",
+    definition: strictLinkOrNull(raw.definition, "definition"),
+    usage: raw.usage,
+    usageExplicit: raw.usageExplicit,
+    part: strictLinkOrNull(raw.part, "part"),
+    parent: strictLinkOrNull(raw.parent, "parent"),
+    exposes: strictLinks(raw.exposes, "exposes"),
+    equals: strictLinks(raw.equals, "equals"),
+    endpointA: strictLinkOrNull(raw.endpointA, "endpointA"),
+    endpointB: strictLinkOrNull(raw.endpointB, "endpointB"),
+    roleA: strictNullableString(raw.roleA, "roleA"),
+    roleB: strictNullableString(raw.roleB, "roleB"),
+    multiplicity: strictNullableString(raw.multiplicity, "multiplicity"),
+    endpointKind: strictNullableString(raw.endpointKind, "endpointKind"),
+    connectionId: strictNullableString(raw.connectionId, "connectionId"),
+    sourceSchemaVersion: raw.sourceSchemaVersion,
   };
 }
 
@@ -263,12 +277,29 @@ function optionalString(o: Obj, k: string): string | undefined {
   if (typeof v !== "string") throw new Error(`Malformed cached ${k}.`);
   return v;
 }
-const nullableString = (v: unknown): string | null => v === null || v === undefined ? null : typeof v === "string" ? v : null;
+function optionalBoolean(o: Obj, k: string, path: string): boolean | undefined {
+  const v = o[k];
+  if (v === undefined) return undefined;
+  if (typeof v !== "boolean") throw new Error(`Malformed cached ${k} value for ${path}.`);
+  return v;
+}
+function strictNullableString(v: unknown, field: string): string | null {
+  if (v === null) return null;
+  if (typeof v === "string") return v;
+  throw new Error(`Malformed Local Model ${field} cache entry.`);
+}
 const isLocalKind = (v: unknown): v is LocalRecord["kind"] => v === "part" || v === "endpoint" || v === "connection" || v === "flow";
 const isFingerprint = (v: unknown): v is FileFingerprint => isObject(v) && typeof v.mtime === "number" && typeof v.size === "number" && (v.hash === undefined || typeof v.hash === "string");
 const isLink = (v: unknown): v is LinkRef => isObject(v) && typeof v.text === "string" && typeof v.target === "string" && typeof v.blockId === "string" && (v.alias === undefined || typeof v.alias === "string");
-const linkOrNull = (v: unknown): LinkRef | null => v === null || v === undefined ? null : isLink(v) ? { text: v.text, target: v.target, blockId: v.blockId, ...(typeof v.alias === "string" ? { alias: v.alias } : {}) } : null;
-const links = (v: unknown): LinkRef[] => Array.isArray(v) ? v.filter(isLink).map((x) => ({ ...x })) : [];
+function strictLinkOrNull(v: unknown, field: string): LinkRef | null {
+  if (v === null) return null;
+  if (!isLink(v)) throw new Error(`Malformed Local Model ${field} link cache entry.`);
+  return { ...v };
+}
+function strictLinks(v: unknown, field: string): LinkRef[] {
+  if (!Array.isArray(v) || !v.every(isLink)) throw new Error(`Malformed Local Model ${field} links cache entry.`);
+  return v.map((x) => ({ ...x }));
+}
 const isFinding = (v: unknown): v is LocalFinding => isObject(v) && typeof v.code === "string" && (v.severity === "error" || v.severity === "warning") && typeof v.message === "string";
 const arrayOfBroken = (v: unknown): v is Array<{ field: string; link: string }> => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.link === "string");
 const arrayOfLocalRefs = (v: unknown): v is Array<{ field: string; path: string; localId: string }> => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.path === "string" && typeof x.localId === "string");
