@@ -89,7 +89,7 @@ jobs:
 
           xvfb-run -a bash -euo pipefail -c '
             node -e '"'"'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.NOTE_COUNT),label:"cold-real-obsidian"},null,2))'"'"'
-            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9223 >"$RUNNER_TEMP/obsidian-cold.log" 2>&1 &
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9223 "obsidian://open?vault=mdseintegration" >"$RUNNER_TEMP/obsidian-cold.log" 2>&1 &
             PID=$!
             trap "kill $PID 2>/dev/null || true" EXIT
 
