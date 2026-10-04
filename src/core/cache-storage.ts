@@ -282,9 +282,14 @@ function isObject(v: unknown): v is Obj {
 function isManifestShape(v: unknown): v is CacheDiskManifest {
   if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || (v.sequence as number) < 0 || typeof v.generation !== "string" || !isObject(v.header)) return false;
   if (!isObject(v.fingerprints) || !isObject(v.notes) || !isObject(v.localRegions)) return false;
-  const shardSet = (x: Obj) =>
-    Number.isInteger(x.count) && (x.count as number) >= 0 &&
-    Number.isInteger(x.total) && (x.total as number) >= 0;
+  const shardSet = (x: Obj) => {
+    if (!Number.isInteger(x.count) || (x.count as number) < 0 ||
+        !Number.isInteger(x.total) || (x.total as number) < 0) return false;
+    if (x.generations === undefined) return true;
+    return Array.isArray(x.generations) &&
+      x.generations.length === x.count &&
+      x.generations.every((generation) => typeof generation === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(generation));
+  };
   return shardSet(v.fingerprints) && shardSet(v.notes) && shardSet(v.localRegions) &&
     typeof v.header.createdAt === "number";
 }
