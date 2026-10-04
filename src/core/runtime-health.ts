@@ -9,6 +9,8 @@ export type RuntimeHealthLevel = "starting" | "syncing" | "ready" | "attention";
 export interface RuntimeHealthInput {
   ready: boolean;
   building: boolean;
+  coreError: string | null;
+  occurrenceError: string | null;
   localPending: number;
   livePending: number;
   localReadErrors: number;
@@ -33,6 +35,18 @@ export interface RuntimeHealth {
 
 export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth {
   if (!input.ready) {
+    if (input.coreError) {
+      return {
+        level: "attention",
+        label: "Workbench · core unavailable",
+        detail: "Workbench core model startup failed, but Obsidian remains usable.",
+        rows: [
+          ["Model service", "unavailable", true],
+          ["Core error", input.coreError, true],
+          ["Recovery", "Correct the reported issue, then run Rebuild index"],
+        ],
+      };
+    }
     const level: RuntimeHealthLevel = input.building ? "syncing" : "starting";
     return {
       level,
@@ -47,16 +61,18 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
 
   const rows: Array<[string, string, boolean?]> = [];
   const assuranceError = input.assurance?.current ? input.assurance.error ?? null : null;
-  const hardAttention = input.localReadErrors > 0 || !!input.cacheWriteError || input.schemaWarnings > 0 || !!assuranceError;
+  const hardAttention = input.localReadErrors > 0 || !!input.occurrenceError || !!input.cacheWriteError || input.schemaWarnings > 0 || !!assuranceError;
   rows.push(["Model service", input.livePending ? `${input.livePending} live update(s) pending` : "ready"]);
   rows.push([
     "Local Model",
-    input.localReadErrors
-      ? `${input.localReadErrors} read error(s)`
-      : input.localPending
-        ? `${input.localPending} note(s) hydrating`
-        : "settled",
-    input.localReadErrors > 0,
+    input.occurrenceError
+      ? `background processing issue: ${input.occurrenceError}`
+      : input.localReadErrors
+        ? `${input.localReadErrors} read error(s)`
+        : input.localPending
+          ? `${input.localPending} note(s) hydrating`
+          : "settled",
+    !!input.occurrenceError || input.localReadErrors > 0,
   ]);
   rows.push(["Schema", input.schemaWarnings ? `${input.schemaWarnings} warning(s)` : "compatible", input.schemaWarnings > 0]);
   rows.push([
@@ -80,7 +96,7 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
   }
 
   if (hardAttention) {
-    const issues = input.localReadErrors + input.schemaWarnings + (input.cacheWriteError ? 1 : 0) + (assuranceError ? 1 : 0);
+    const issues = input.localReadErrors + input.schemaWarnings + (input.occurrenceError ? 1 : 0) + (input.cacheWriteError ? 1 : 0) + (assuranceError ? 1 : 0);
     return {
       level: "attention",
       label: `Workbench · ${issues} issue${issues === 1 ? "" : "s"}`,
