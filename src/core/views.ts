@@ -42,6 +42,8 @@ export interface ViewProfile {
   nodeCap: number;
   /** Children shown per note before the rest are counted as "more" (readability). */
   perParent?: number;
+  /** This projection consumes governed Local Model occurrence records and must hydrate them first. */
+  needsLocalOccurrences?: boolean;
 }
 
 /** Spike default. View Profiles become vault configuration later (WB-001, review item 6). */
@@ -57,6 +59,7 @@ export const STRUCTURE_PROFILE: ViewProfile = {
   depth: 2,
   nodeCap: 80,
   perParent: 12,
+  needsLocalOccurrences: true,
 };
 
 export const INTERNAL_PROFILE: ViewProfile = {
@@ -66,6 +69,7 @@ export const INTERNAL_PROFILE: ViewProfile = {
   steps: [],
   depth: 0,
   nodeCap: 200,
+  needsLocalOccurrences: true,
 };
 
 /**
@@ -124,6 +128,7 @@ export const REQUIREMENTS_PROFILE: ViewProfile = {
   depth: 2,
   nodeCap: 80,
   perParent: 12,
+  needsLocalOccurrences: true,
 };
 
 /** Where Used (WB-102): everything that contains or uses the note, followed upward through assemblies. */
@@ -145,6 +150,7 @@ export const WHERE_USED_PROFILE: ViewProfile = {
   depth: 3,
   nodeCap: 80,
   perParent: 12,
+  needsLocalOccurrences: true,
 };
 
 /** Interfaces (WB-102): ports, what they connect to, outer and inner ports, and the item flows. */
@@ -170,6 +176,7 @@ export const INTERFACES_PROFILE: ViewProfile = {
   depth: 3,
   nodeCap: 80,
   perParent: 12,
+  needsLocalOccurrences: true,
 };
 
 /** Verification (WB-102): what verifies what, and what a verification covers. */
@@ -709,7 +716,7 @@ export function withLocalInternal(index: ModelIndex, local: LocalModelIndex, res
 
 /** True only for views whose semantics include governed Local Model occurrences. */
 export function profileNeedsLocalOccurrences(profile: ViewProfile): boolean {
-  return ["Internal", "Structure", "Interfaces", "Where Used", "Requirements"].includes(profile.name);
+  return profile.needsLocalOccurrences === true;
 }
 
 export function withLocalOccurrences(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile): ViewResult {
