@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalPartCreateModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalPartCreateModal, LocalPartDeleteModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -226,6 +226,10 @@ export class NoteDetailPanel extends Component {
       const addPart = head.createEl("button", { text: "Add part occurrence…", cls: "mdse-detail-btn" });
       addPart.onclick = () => this.createPartOccurrence(file);
     }
+    if (this.editing && record.kind === "part") {
+      const deletePart = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
+      deletePart.onclick = () => this.deletePartOccurrence(file, record);
+    }
     const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
     owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
     const occurrence = head.createEl("button", { text: "Open occurrence", cls: "mdse-detail-btn" });
@@ -320,6 +324,24 @@ export class NoteDetailPanel extends Component {
         : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data.",
     });
     root.scrollTop = 0;
+  }
+
+  private deletePartOccurrence(file: TFile, record: LocalRecord): void {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalPartDeleteModal(
+        this.app,
+        file.basename,
+        record.identifier,
+        () => editor.stageLocalRecordDelete(file.path, record.localId),
+        (transactionId) => editor.applyLocalDelete(transactionId),
+        (transactionId) => { editor.cancelLocalDelete(transactionId); },
+        () => { void this.show(file, false); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot delete occurrence: ${(e as Error).message}`, 12000);
+    }
   }
 
   private createPartOccurrence(file: TFile): void {
