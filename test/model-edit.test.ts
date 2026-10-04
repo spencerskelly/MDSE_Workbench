@@ -212,3 +212,24 @@ test("invalid structural creation is rejected before a transaction can write any
   assert.equal(store.text, before);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("structural Apply is blocked when staged Local Model findings contain errors", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const newId = "part-20261004233100000skellyspencer";
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "part",
+    localId: newId,
+    heading: "K2",
+    fields: { definition: "[[Main Contactor]]", usage: "not-a-valid-usage" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.severity === "error"));
+  await assert.rejects(service.applyLocalCreate(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(transactions.history().length, 0);
+  assert.doesNotMatch(store.text, /#### K2/);
+  service.cancelLocalCreate(staged.transaction.id);
+});
