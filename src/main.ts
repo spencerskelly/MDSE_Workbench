@@ -354,6 +354,7 @@ export default class MdseWorkbench extends Plugin {
     }
 
     const indexer = this.indexer;
+    if (!indexer) return;
     let stats = null as Awaited<ReturnType<Indexer["build"]>> | null;
 
     // RTA-3 preview is deliberately opt-in. It restores only after Obsidian is quiet; this
