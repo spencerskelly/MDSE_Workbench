@@ -174,6 +174,7 @@ export default class MdseWorkbench extends Plugin {
           ready: () => this.isReady(),
           index: () => (this.indexer as Indexer).index,
           revision: () => (this.indexer as Indexer).revision,
+          settle: () => (this.indexer as Indexer).whenLocalSettled(),
           schema: () => this.schema as Schema,
           writer: () => this.writer as RelationshipWriter,
           localFindings: () => {
