@@ -99,6 +99,14 @@ export class Indexer {
     return this.hydrationRemaining + this.deferredHydrationFiles.length;
   }
 
+  get localHydrationQueued(): number {
+    return this.deferredHydrationFiles.length;
+  }
+
+  get localHydrationActive(): number {
+    return this.hydrationRemaining;
+  }
+
   get liveUpdatePending(): number {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
   }
