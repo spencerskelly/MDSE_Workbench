@@ -393,3 +393,62 @@ test("vault identity mismatch rejects every restore surface before state install
   assert.throws(() => restoreLocalSemanticState(cache, schema, scope), /Incompatible semantic cache: vault identity/);
   assert.throws(() => restoreSemanticState(cache, schema, scope), /Incompatible semantic cache: vault identity/);
 });
+
+
+test("relationship semantic changes invalidate cache even without a schema-version bump", () => {
+  const { index, local, fingerprints } = state();
+  const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
+  const first = schema.relationships[0];
+  assert.ok(first, "fixture must contain at least one relationship");
+
+  const changedRelationship = {
+    ...first,
+    sameClass: !first.sameClass,
+  };
+  const changedSchema = {
+    ...schema,
+    relationships: [changedRelationship, ...schema.relationships.slice(1)],
+    // Keep the human-readable versions deliberately identical. The semantic signature must still
+    // protect every restore surface when the rules themselves change.
+    relationshipsVersion: schema.relationshipsVersion,
+    elementTypesVersion: schema.elementTypesVersion,
+  };
+
+  assert.notEqual(schemaSignature(changedSchema), schemaSignature(schema));
+  assert.throws(
+    () => restoreCoreSemanticState(cache, changedSchema, scope),
+    /Incompatible semantic cache: schema semantics/,
+  );
+  assert.throws(
+    () => restoreLocalSemanticState(cache, changedSchema, scope),
+    /Incompatible semantic cache: schema semantics/,
+  );
+  assert.throws(
+    () => restoreSemanticState(cache, changedSchema, scope),
+    /Incompatible semantic cache: schema semantics/,
+  );
+});
+
+test("relationship schema signature covers edge interpretation fields", () => {
+  const base = schema.relationships[0];
+  assert.ok(base, "fixture must contain at least one relationship");
+  const signature = schemaSignature(schema);
+  const variants = [
+    { ...base, field: base.field + "Changed" },
+    { ...base, inverse: (base.inverse ?? "inverse") + "Changed" },
+    { ...base, kind: base.kind === "paired" ? "oneWay" as const : "paired" as const },
+    { ...base, from: base.from === "any" ? ["Object"] : "any" as const },
+    { ...base, to: base.to === "any" ? ["Object"] : "any" as const },
+    { ...base, sameClass: !base.sameClass },
+    { ...base, provisional: !base.provisional },
+    { ...base, temporary: !base.temporary },
+  ];
+
+  for (const relationship of variants) {
+    const changedSchema = {
+      ...schema,
+      relationships: [relationship, ...schema.relationships.slice(1)],
+    };
+    assert.notEqual(schemaSignature(changedSchema), signature);
+  }
+});
