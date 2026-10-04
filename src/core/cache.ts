@@ -69,12 +69,18 @@ interface CachedLocalRegion extends Omit<LocalRegion, "records" | "findings"> {
   findings: LocalFinding[];
 }
 
-export interface SemanticCache {
+export interface CoreSemanticCache {
   header: CacheHeader;
   fingerprints: Record<string, FileFingerprint>;
   notes: CachedNoteRecord[];
+}
+
+export interface LocalSemanticCache {
+  header: CacheHeader;
   localRegions: Array<[string, CachedLocalRegion]>;
 }
+
+export interface SemanticCache extends CoreSemanticCache, LocalSemanticCache {}
 
 export interface RestoredSemanticState {
   index: ModelIndex;
@@ -145,13 +151,31 @@ export function serializeSemanticState(
  * must discard/rebuild the cache rather than trying to "repair" derived semantics.
  */
 export function restoreCoreSemanticState(cache: unknown, schema: Schema, scope: CacheScope): RestoredCoreSemanticState {
-  const restored = restoreSemanticState(cache, schema, scope);
-  return { index: restored.index, fingerprints: restored.fingerprints };
+  const problem = cacheCompatibilityProblem(cache, expectedCompatibility(schema, scope));
+  if (problem) throw new Error(`Incompatible semantic cache: ${problem}.`);
+  if (!isObject(cache) || !Array.isArray(cache.notes) || !isObject(cache.fingerprints)) {
+    throw new Error("Malformed core semantic cache payload.");
+  }
+  const index = new ModelIndex(schema);
+  for (const raw of cache.notes) index.upsert(deserializeNote(raw));
+  const fingerprints = new Map<string, FileFingerprint>();
+  for (const [path, raw] of Object.entries(cache.fingerprints)) {
+    if (!isFingerprint(raw)) throw new Error(`Malformed fingerprint for ${path}.`);
+    fingerprints.set(path, { ...raw });
+  }
+  return { index, fingerprints };
 }
 
 export function restoreLocalSemanticState(cache: unknown, schema: Schema, scope: CacheScope): RestoredLocalSemanticState {
-  const restored = restoreSemanticState(cache, schema, scope);
-  return { local: restored.local };
+  const problem = cacheCompatibilityProblem(cache, expectedCompatibility(schema, scope));
+  if (problem) throw new Error(`Incompatible semantic cache: ${problem}.`);
+  if (!isObject(cache) || !Array.isArray(cache.localRegions)) throw new Error("Malformed Local Model semantic cache payload.");
+  const local = new LocalModelIndex();
+  for (const entry of cache.localRegions) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") throw new Error("Malformed Local Model cache entry.");
+    local.set(entry[0], deserializeRegion(entry[1]));
+  }
+  return { local };
 }
 
 export function restoreSemanticState(cache: unknown, schema: Schema, scope: CacheScope): RestoredSemanticState {
@@ -494,14 +518,31 @@ export function joinSemanticCache(
 ): SemanticCache {
   if (!isDiskManifest(manifest)) throw new Error("Malformed semantic cache manifest.");
   if (manifest.manifestVersion !== CACHE_MANIFEST_VERSION) throw new Error(`Unsupported cache manifest version ${manifest.manifestVersion}.`);
-  const fingerprints = joinFingerprintShards(manifest, fingerprintShards);
-  const notes = joinNoteShards(manifest, noteShards);
-  const localRegions = joinLocalShards(manifest, localShards);
+  return {
+    ...joinCoreSemanticCache(manifest, fingerprintShards, noteShards),
+    ...joinLocalSemanticCache(manifest, localShards),
+  };
+}
+
+export function joinCoreSemanticCache(
+  manifest: CacheDiskManifest,
+  fingerprintShards: readonly unknown[],
+  noteShards: readonly unknown[],
+): CoreSemanticCache {
   return {
     header: manifest.header,
-    fingerprints,
-    notes,
-    localRegions,
+    fingerprints: joinFingerprintShards(manifest, fingerprintShards),
+    notes: joinNoteShards(manifest, noteShards),
+  };
+}
+
+export function joinLocalSemanticCache(
+  manifest: CacheDiskManifest,
+  localShards: readonly unknown[],
+): LocalSemanticCache {
+  return {
+    header: manifest.header,
+    localRegions: joinLocalShards(manifest, localShards),
   };
 }
 
