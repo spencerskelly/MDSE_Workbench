@@ -81,9 +81,12 @@ console.log("Validated isolated overlap case",caseName,{readable:result.launchTo
 NODE
 }
 
-measure_case baseline "" 0
-measure_case nodian nodian 1
-measure_case breadcrumbs breadcrumbs 2
-measure_case dataview dataview 3
-measure_case fileclass fileclass 4
-measure_case advanced-canvas advanced-canvas 5
+# Sacrificial first case absorbs runner/filesystem/Obsidian first-pass effects.
+measure_case warmup "" 0
+measure_case baseline-start "" 1
+measure_case nodian nodian 2
+measure_case breadcrumbs breadcrumbs 3
+measure_case dataview dataview 4
+measure_case fileclass fileclass 5
+measure_case advanced-canvas advanced-canvas 6
+measure_case baseline-end "" 7
