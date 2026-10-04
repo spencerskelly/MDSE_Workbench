@@ -786,7 +786,7 @@ function schemaSignature(schema) {
 
 // src/core/cache.ts
 var CACHE_FORMAT_VERSION = 1;
-var CACHE_SEMANTIC_VERSION = 1;
+var CACHE_SEMANTIC_VERSION = 2;
 function expectedCompatibility(schema, scope) {
   return {
     formatVersion: CACHE_FORMAT_VERSION,
@@ -848,6 +848,7 @@ function serializeNote(n) {
     ...n.type !== void 0 ? { type: n.type } : {},
     ...n.id !== void 0 ? { id: n.id } : {},
     ...n.uid !== void 0 ? { uid: n.uid } : {},
+    authoredLinks: (n.authoredLinks ?? []).map((x) => ({ ...x })),
     fields: [...n.fields.entries()].map(([k, v]) => [k, [...v]]),
     unresolved: n.unresolved,
     ...n.broken ? { broken: n.broken.map((x) => ({ ...x })) } : {},
@@ -858,7 +859,7 @@ function serializeNote(n) {
   };
 }
 function deserializeNote(raw) {
-  if (!isObject(raw) || typeof raw.path !== "string" || typeof raw.name !== "string" || typeof raw.unresolved !== "number" || !Array.isArray(raw.fields)) {
+  if (!isObject(raw) || typeof raw.path !== "string" || typeof raw.name !== "string" || typeof raw.unresolved !== "number" || !Array.isArray(raw.fields) || !arrayOfAuthoredLinks(raw.authoredLinks)) {
     throw new Error("Malformed note cache entry.");
   }
   const fields = /* @__PURE__ */ new Map();
@@ -890,6 +891,7 @@ function deserializeNote(raw) {
     ...type !== void 0 ? { type } : {},
     ...id !== void 0 ? { id } : {},
     ...uid !== void 0 ? { uid } : {},
+    authoredLinks: raw.authoredLinks.map((x) => ({ ...x })),
     fields,
     unresolved: raw.unresolved,
     ...broken ? { broken } : {},
@@ -1031,6 +1033,7 @@ function strictLinks(v, field) {
 var isFinding = (v) => isObject(v) && typeof v.code === "string" && (v.severity === "error" || v.severity === "warning") && typeof v.message === "string";
 var arrayOfBroken = (v) => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.link === "string");
 var arrayOfLocalRefs = (v) => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.path === "string" && typeof x.localId === "string");
+var arrayOfAuthoredLinks = (v) => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.link === "string" && typeof x.linkpath === "string");
 function pairsNumber(v, label) {
   if (!Array.isArray(v)) throw new Error(`Malformed cached ${label}.`);
   const out = /* @__PURE__ */ new Map();
@@ -1135,9 +1138,9 @@ function planReconciliation(cached, current) {
 }
 function reconciliationMode(plan, incrementalLimit = 300) {
   if (!Number.isInteger(incrementalLimit) || incrementalLimit < 1) throw new Error("incrementalLimit must be a positive integer.");
-  if (plan.added.length || plan.deleted.length) return "full";
-  if (!plan.changed.length) return "none";
-  return plan.changed.length <= incrementalLimit ? "incremental" : "full";
+  const changed = plan.changed.length + plan.added.length + plan.deleted.length;
+  if (!changed) return "none";
+  return changed <= incrementalLimit ? "incremental" : "full";
 }
 
 // src/core/cache-storage.ts
@@ -2127,6 +2130,50 @@ function toCanvas(index, view, profile = STRUCTURE_PROFILE) {
 
 // src/obsidian/indexer.ts
 var import_obsidian = require("obsidian");
+
+// src/core/relationship-resolution.ts
+function resolveAuthoredRelationshipLinks(authored, fromPath, schema, resolve) {
+  const fields = /* @__PURE__ */ new Map();
+  let unresolved = 0;
+  const broken = [];
+  const repeat = /* @__PURE__ */ new Map();
+  const localRefs = [];
+  for (const item of authored) {
+    const field = item.field;
+    if (!schema.byField.has(field) && !schema.byInverse.has(field)) continue;
+    const path = resolve(item.linkpath, fromPath);
+    if (!path) {
+      unresolved++;
+      broken.push({ field, link: item.link });
+      continue;
+    }
+    const localId = blockId(item.link);
+    if (localId) {
+      localRefs.push({ field, path, localId });
+      continue;
+    }
+    let list = fields.get(field);
+    if (!list) fields.set(field, list = []);
+    if (!list.includes(path)) list.push(path);
+    else repeat.set(`${field}|${path}`, (repeat.get(`${field}|${path}`) ?? 1) + 1);
+  }
+  return {
+    fields,
+    unresolved,
+    broken,
+    ...repeat.size ? { repeat } : {},
+    ...localRefs.length ? { localRefs } : {}
+  };
+}
+function blockId(link) {
+  const hash = link.indexOf("#^");
+  if (hash < 0) return null;
+  const tail = link.slice(hash + 2);
+  const id = tail.split("|")[0].split("]]")[0].trim();
+  return id || null;
+}
+
+// src/obsidian/indexer.ts
 var CHUNK = 500;
 var LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 var BURST_REBUILD = 300;
@@ -2200,37 +2247,33 @@ var Indexer = class {
    * resolution of links authored in otherwise unchanged notes (W-344).
    */
   reconcileStablePaths(paths) {
-    if (!this.running) this.running = this.doReconcileStable(paths).finally(() => this.running = null);
+    return this.reconcilePlan({ unchanged: [], changed: [...paths], added: [], deleted: [] });
+  }
+  /**
+   * Reconcile a warm-cache plan. Content changes/additions are parsed; deletions are removed.
+   * When the path set changes, every cached authored relationship link is re-resolved against
+   * Obsidian's current metadata cache without rereading unchanged Markdown bodies.
+   */
+  reconcilePlan(plan) {
+    if (!this.running) this.running = this.doReconcilePlan(plan).finally(() => this.running = null);
     return this.running;
   }
   record(file) {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter;
     if (!fm) return null;
-    const fields = /* @__PURE__ */ new Map();
-    let unresolved = 0;
-    const broken = [];
-    const repeat = /* @__PURE__ */ new Map();
-    const localRefs = [];
+    const authoredLinks = [];
     for (const fl of cache.frontmatterLinks ?? []) {
       const field = fl.key.split(".")[0];
       if (!this.schema.byField.has(field) && !this.schema.byInverse.has(field)) continue;
-      const dest = this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian.getLinkpath)(fl.link), file.path);
-      if (!dest) {
-        unresolved++;
-        broken.push({ field, link: fl.link });
-        continue;
-      }
-      const hash = fl.link.indexOf("#^");
-      if (hash >= 0) {
-        localRefs.push({ field, path: dest.path, localId: fl.link.slice(hash + 2).split("|")[0].trim() });
-        continue;
-      }
-      let list = fields.get(field);
-      if (!list) fields.set(field, list = []);
-      if (!list.includes(dest.path)) list.push(dest.path);
-      else repeat.set(`${field}|${dest.path}`, (repeat.get(`${field}|${dest.path}`) ?? 1) + 1);
+      authoredLinks.push({ field, link: fl.link, linkpath: (0, import_obsidian.getLinkpath)(fl.link) });
     }
+    const resolved = resolveAuthoredRelationshipLinks(
+      authoredLinks,
+      file.path,
+      this.schema,
+      (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path
+    );
     const str = (v) => v === void 0 || v === null || v === "" ? void 0 : String(v);
     const abstract = fm.abstract === true ? true : fm.abstract === false ? false : void 0;
     const abstractInvalid = fm.abstract !== void 0 && fm.abstract !== null && fm.abstract !== "" && abstract === void 0;
@@ -2240,13 +2283,14 @@ var Indexer = class {
       type: str(fm.type),
       id: str(fm.id),
       uid: str(fm.uid),
-      fields,
-      unresolved,
-      broken,
-      repeat: repeat.size ? repeat : void 0,
+      authoredLinks,
+      fields: resolved.fields,
+      unresolved: resolved.unresolved,
+      broken: resolved.broken,
+      repeat: resolved.repeat,
       abstract,
       abstractInvalid: abstractInvalid || void 0,
-      localRefs: localRefs.length ? localRefs : void 0
+      localRefs: resolved.localRefs
     };
   }
   /** Metadata-only prefilter: body reads are limited to notes that can actually contain a Local Model region. */
@@ -2269,35 +2313,71 @@ var Indexer = class {
       builtAt
     };
   }
-  async doReconcileStable(paths) {
+  async doReconcilePlan(plan) {
     const t0 = performance.now();
-    const unique = [...new Set(paths)].sort();
-    for (let i = 0; i < unique.length; i++) {
-      const path = unique[i];
+    const changedOrAdded = [.../* @__PURE__ */ new Set([...plan.changed, ...plan.added])].sort();
+    const deleted = [...new Set(plan.deleted)].sort();
+    for (const path of deleted) {
+      this.index.remove(path);
+      this.local.remove(path);
+      this.fingerprints.delete(path);
+      this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
+    }
+    for (let i = 0; i < changedOrAdded.length; i++) {
+      const path = changedOrAdded[i];
       const f = this.app.vault.getAbstractFileByPath(path);
       if (!(f instanceof import_obsidian.TFile) || f.extension !== "md") {
-        throw new Error(`Stable-path reconciliation found missing Markdown file ${path}; full rebuild required.`);
+        throw new Error(`Warm reconciliation expected Markdown file ${path}, but it is unavailable.`);
       }
       await this.applyAwaited(path, f);
       if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
     }
+    if (plan.added.length || plan.deleted.length) await this.reResolveAllRelationships();
     const backlog = [...this.dirty];
     this.dirty.clear();
     if (backlog.length > CHUNK) this.scheduleRebuild();
     else {
+      let needsFull = false;
       for (let i = 0; i < backlog.length; i++) {
         const path = backlog[i];
         const f = this.app.vault.getAbstractFileByPath(path);
         if (!(f instanceof import_obsidian.TFile) || f.extension !== "md") {
-          this.scheduleRebuild();
+          needsFull = true;
           break;
         }
         await this.applyAwaited(path, f);
         if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
       }
+      if (needsFull) this.scheduleRebuild();
     }
     this.stats = this.makeStats("reconciled", Math.round(performance.now() - t0), Date.now());
     return this.stats;
+  }
+  /**
+   * Re-resolve relationship links from cached authored evidence after the note path set changes.
+   * This is CPU/metadata work only: unchanged Markdown files and Local Model bodies are not read.
+   */
+  async reResolveAllRelationships() {
+    const notes = [...this.index.notes.values()];
+    for (let i = 0; i < notes.length; i++) {
+      const rec = notes[i];
+      if (!rec.authoredLinks) throw new Error(`Cached note ${rec.path} has no authored-link evidence; full rebuild required.`);
+      const resolved = resolveAuthoredRelationshipLinks(
+        rec.authoredLinks,
+        rec.path,
+        this.schema,
+        (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path
+      );
+      this.index.upsert({
+        ...rec,
+        fields: resolved.fields,
+        unresolved: resolved.unresolved,
+        broken: resolved.broken,
+        repeat: resolved.repeat,
+        localRefs: resolved.localRefs
+      });
+      if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
+    }
   }
   /** Awaited variant used by controlled startup reconciliation. */
   async applyAwaited(path, file) {
@@ -4189,14 +4269,15 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         const initialMode = reconciliationMode(initialPlan);
         if (initialMode !== "full") {
           indexer.installRestored(restored, cache.header.createdAt);
-          this.lastWarmRestore = initialPlan.changed.length ? `restored; ${initialPlan.changed.length} changed path(s) to reconcile` : "restored; cache matched current file fingerprints";
+          const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
+          this.lastWarmRestore = initialChanges ? `restored; ${initialChanges} path change(s) to reconcile` : "restored; cache matched current file fingerprints";
           indexer.enableLiveChanges();
-          this.setRuntimeStatus("indexing", initialPlan.changed.length ? `reconciling ${initialPlan.changed.length} changed` : "validating cached state");
-          stats = await indexer.reconcileStablePaths(initialPlan.changed);
+          this.setRuntimeStatus("indexing", initialChanges ? `reconciling ${initialChanges} path change(s)` : "validating cached state");
+          stats = await indexer.reconcilePlan(initialPlan);
           let after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
           let afterMode = reconciliationMode(after);
           if (afterMode === "incremental") {
-            stats = await indexer.reconcileStablePaths(after.changed);
+            stats = await indexer.reconcilePlan(after);
             after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
             afterMode = reconciliationMode(after);
           }
@@ -4275,8 +4356,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         ["Safe next-start mode", mode]
       ];
       new ReportModal(this.app, "MDSE semantic cache", rows, [
-        "Inspection is read-only. Warm restore is still disabled; the vault remains authoritative.",
-        mode === "full" && (plan.added.length || plan.deleted.length) ? "A path-set change can alter wikilink resolution, so the current safe policy requires a full rebuild." : ""
+        "Inspection is read-only. The vault remains authoritative; cache state is always disposable.",
+        mode === "incremental" && (plan.added.length || plan.deleted.length) ? "Path-set changes are safe to reconcile because semantic-cache v2 retains authored relationship links and re-resolves them against current Obsidian metadata." : mode === "full" ? "The pending change set exceeds the bounded incremental startup budget, so the safe next-start path is a full chunked rebuild." : ""
       ].filter(Boolean)).open();
     } catch (e) {
       new import_obsidian8.Notice(`Semantic cache is unavailable or invalid: ${e.message}`, 15e3);
