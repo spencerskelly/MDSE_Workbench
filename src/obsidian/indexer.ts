@@ -347,6 +347,10 @@ export class Indexer {
       .then((text) => {
         if (this.localRevision.get(path) !== revision) return;
         this.local.set(path, parseLocalModel(text));
+        // Local Model body parsing completes after the note/frontmatter apply. Treat that as
+        // a second semantic revision so Review/cache consumers cannot mistake pre-parse state
+        // for the final semantic state of this edit.
+        this.bumpRevision();
       })
       .finally(() => this.pendingLocalReads.delete(task));
     this.pendingLocalReads.add(task);
