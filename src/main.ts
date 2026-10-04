@@ -278,7 +278,7 @@ export default class MdseWorkbench extends Plugin {
     return uid.trim();
   }
 
-  /** Load schema, build the index, then follow vault changes (WB-033, WB-086). */
+  /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
   async start(rebuild: boolean): Promise<void> {
     this.setRuntimeStatus("starting");
     try {
@@ -288,12 +288,14 @@ export default class MdseWorkbench extends Plugin {
       new Notice(`MDSE Workbench: could not read the schema files. ${(e as Error).message} Check the paths in settings.`);
       return;
     }
+
     const schema = this.schema;
+    const firstStart = !this.indexer;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
       const schemaPaths = () => [normalizePath(this.settings.relationshipsPath), normalizePath(this.settings.elementTypesPath)];
-      // Follow changes from the start; the indexer only remembers them until its first build.
+
       this.registerEvent(
         this.app.metadataCache.on("changed", (file) => {
           if (!schemaPaths().includes(file.path)) this.indexer?.changed(file.path);
@@ -308,27 +310,69 @@ export default class MdseWorkbench extends Plugin {
       );
       this.registerEvent(
         this.app.vault.on("modify", (f) => {
-          // Schema edited: reload rules and rebuild, so rules are never stale.
           if (schemaPaths().includes(f.path)) void this.start(true);
         }),
       );
       this.register(() => this.indexer?.dispose());
-      // Do nothing until Obsidian's own cache has finished and the vault has been quiet.
-      // On a large vault that first caching takes minutes; indexing alongside it made the app
-      // look frozen (0.0.4). No fixed timeout: a slow vault just starts later.
+
+      // Obsidian's first metadata-cache pass can emit a changed event for every note.
+      // Do not compete with it. The initial full build or warm reconciliation reads the
+      // current filesystem after the vault becomes quiet.
       this.setRuntimeStatus("waiting");
       const waitStarted = performance.now();
       await this.whenVaultQuiet();
       this.lastStartupWaitMs = Math.round(performance.now() - waitStarted);
       if (this.unloaded) return;
-      this.indexer.enableLiveChanges();
     } else {
       this.indexer.setSchema(schema);
-      this.indexer.enableLiveChanges();
     }
-    this.setRuntimeStatus("indexing");
-    const stats = await this.indexer.build();
-    this.setRuntimeStatus("ready", `${stats.elements} elements`);
+
+    const indexer = this.indexer;
+    let stats = null as Awaited<ReturnType<Indexer["build"]>> | null;
+
+    // RTA-3 preview is deliberately opt-in. It restores only after Obsidian is quiet; this
+    // proves cache/reconciliation correctness before we later consider earlier UI availability.
+    if (firstStart && !rebuild && this.settings.warmCachePreview) {
+      try {
+        const scope = { vaultUid: await this.loadVaultUid() };
+        const cache = await readSemanticCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
+        const restored = restoreSemanticState(cache, schema, scope);
+        const initialPlan = planReconciliation(restored.fingerprints, indexer.currentFingerprints());
+        const initialMode = reconciliationMode(initialPlan);
+
+        if (initialMode !== "full") {
+          indexer.installRestored(restored, cache.header.createdAt);
+          indexer.enableLiveChanges();
+          this.setRuntimeStatus("indexing", initialPlan.changed.length ? `reconciling ${initialPlan.changed.length} changed` : "validating cached state");
+          stats = await indexer.reconcileStablePaths(initialPlan.changed);
+
+          // Catch changes that happened after the first fingerprint snapshot. One bounded
+          // incremental retry is allowed; anything still moving or any path-set change uses
+          // the proven full build instead of guessing.
+          let after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
+          let afterMode = reconciliationMode(after);
+          if (afterMode === "incremental") {
+            stats = await indexer.reconcileStablePaths(after.changed);
+            after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
+            afterMode = reconciliationMode(after);
+          }
+          if (afterMode !== "none") {
+            stats = null;
+          }
+        }
+      } catch (e) {
+        this.lastCacheWriteError = `warm restore not used: ${(e as Error).message}`;
+        stats = null;
+      }
+    }
+
+    if (!stats) {
+      indexer.enableLiveChanges();
+      this.setRuntimeStatus("indexing");
+      stats = await indexer.build();
+    }
+
+    this.setRuntimeStatus("ready", `${stats.elements} elements · ${stats.mode}`);
     this.scheduleSemanticCacheWrite();
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
