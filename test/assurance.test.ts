@@ -72,3 +72,36 @@ test("assurance retries once when the semantic revision changes during a scan", 
   assert.equal(snapshot.stale, false);
   assert.equal(manager.peek(), snapshot);
 });
+
+
+test("assurance failure is contained and cached for the current semantic revision", async () => {
+  const index = new ModelIndex(fixtureSchema());
+  index.upsert(note("A.md", "Object"));
+  let revision = 3;
+  let calls = 0;
+  const manager = new AssuranceManager({
+    revision: () => revision,
+    settle: async () => {},
+    index: () => index,
+    localFindings: () => {
+      calls++;
+      throw new Error("validator boom");
+    },
+  });
+
+  const failed = await manager.get();
+  assert.equal(failed.revision, 3);
+  assert.equal(failed.stale, false);
+  assert.match(failed.error ?? "", /validator boom/);
+  assert.equal(failed.all.length, 0);
+
+  const same = await manager.get();
+  assert.equal(same, failed);
+  assert.equal(calls, 1, "repeat UI consumers reuse the scoped failure snapshot");
+
+  revision++;
+  const retried = await manager.get();
+  assert.equal(retried.revision, 4);
+  assert.match(retried.error ?? "", /validator boom/);
+  assert.equal(calls, 2, "a semantic revision change retries assurance");
+});
