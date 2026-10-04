@@ -6,7 +6,7 @@
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
-import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
+import { BACKGROUND_MAX_DEFERRAL_MS, BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
 import { CacheMutationGate } from "./core/cache-mutation";
 import { canPublishCoreReady } from "./core/core-readiness";
@@ -118,6 +118,8 @@ export default class MdseWorkbench extends Plugin {
   private pendingRebuild = false;
   /** Last foreground model/UI activity; background subsystems share this preemption signal. */
   private lastChange = Date.now();
+  /** First time each optional background lane became pending; intermittent edits must not starve it forever. */
+  private readonly backgroundPendingSince = new Map<"backgroundHydration" | "assurance" | "cacheWrite", number>();
   /** Latched once Obsidian says its metadata/link-resolution pass is complete. */
   private metadataResolved = false;
   private unloaded = false;
@@ -346,21 +348,34 @@ export default class MdseWorkbench extends Plugin {
     return active;
   }
 
+  private markBackgroundPending(kind: "backgroundHydration" | "assurance" | "cacheWrite"): void {
+    if (!this.backgroundPendingSince.has(kind)) this.backgroundPendingSince.set(kind, Date.now());
+  }
+
+  private clearBackgroundPending(kind: "backgroundHydration" | "assurance" | "cacheWrite"): void {
+    this.backgroundPendingSince.delete(kind);
+  }
+
   private backgroundWorkAllowed(kind: "backgroundHydration" | "assurance" | "cacheWrite", indexer: Indexer | null = this.indexer): boolean {
     if (!indexer || this.indexer !== indexer) return false;
+    const now = Date.now();
+    const pendingSince = this.backgroundPendingSince.get(kind);
     const base = canRunBackgroundWork({
       unloaded: this.unloaded,
       ready: this.isReady(),
       building: indexer.building,
       rebuildPending: indexer.rebuildPending,
       liveUpdatePending: indexer.liveUpdatePending,
-      quietForMs: Date.now() - this.lastChange,
-      minimumQuietMs: BACKGROUND_RESUME_QUIET_MS,
+      quietForMs: now - this.lastChange,
+      minimumQuietMs: kind === "cacheWrite" ? CACHE_PERSIST_QUIET_MS : BACKGROUND_RESUME_QUIET_MS,
+      waitingForMs: pendingSince === undefined ? 0 : now - pendingSince,
+      maxDeferralMs: BACKGROUND_MAX_DEFERRAL_MS,
     });
     return base && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
   }
 
   private async waitForBackgroundWork(kind: "backgroundHydration" | "assurance" | "cacheWrite", indexer: Indexer): Promise<void> {
+    this.markBackgroundPending(kind);
     while (!this.unloaded && this.indexer === indexer && !this.backgroundWorkAllowed(kind, indexer)) {
       await new Promise((r) => window.setTimeout(r, 250));
     }
@@ -460,7 +475,11 @@ export default class MdseWorkbench extends Plugin {
   private scheduleBackgroundLocalHydration(): void {
     if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     const indexer = this.indexer;
-    if (!indexer || !this.isReady() || !indexer.localHydrationPending) return;
+    if (!indexer || !this.isReady() || !indexer.localHydrationPending) {
+      this.clearBackgroundPending("backgroundHydration");
+      return;
+    }
+    this.markBackgroundPending("backgroundHydration");
     this.localBackgroundTimer = window.setTimeout(() => {
       this.localBackgroundTimer = null;
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
@@ -476,6 +495,7 @@ export default class MdseWorkbench extends Plugin {
         .then(() => {
           if (this.unloaded || this.indexer !== indexer) return;
           this.lastOccurrenceError = null;
+          if (!indexer.localHydrationPending) this.clearBackgroundPending("backgroundHydration");
           void this.markOccurrenceReady(indexer);
           this.refreshRuntimeHealth();
           this.scheduleSemanticCacheWrite();
@@ -497,14 +517,18 @@ export default class MdseWorkbench extends Plugin {
     if (!this.cacheMutationGate.writesAllowed()) return;
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
     const indexer = this.indexer;
-    if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
+    if (!indexer?.stats || indexer.revision === this.lastCachedRevision) {
+      this.clearBackgroundPending("cacheWrite");
+      return;
+    }
+    this.markBackgroundPending("cacheWrite");
     const delay = cachePersistenceDelayMs(Date.now(), this.lastCacheWriteAt);
     this.cacheWriteTimer = window.setTimeout(() => {
       this.cacheWriteTimer = null;
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS) {
+      if (!this.backgroundWorkAllowed("cacheWrite", current)) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -539,8 +563,7 @@ export default class MdseWorkbench extends Plugin {
       if (
         indexer.building ||
         indexer.rebuildPending ||
-        !this.backgroundWorkAllowed("cacheWrite", indexer) ||
-        Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS
+        !this.backgroundWorkAllowed("cacheWrite", indexer)
       ) {
         this.scheduleSemanticCacheWrite();
         return;
@@ -575,6 +598,7 @@ export default class MdseWorkbench extends Plugin {
       if (indexer.revision === revision) {
         this.lastCachedRevision = revision;
         indexer.markCacheCommitted(revision);
+        this.clearBackgroundPending("cacheWrite");
       } else this.scheduleSemanticCacheWrite();
       indexer.trimLocalRetention();
       this.refreshRuntimeHealth();
@@ -929,9 +953,14 @@ export default class MdseWorkbench extends Plugin {
 
   private async getAssurance(force = false): Promise<AssuranceSnapshot> {
     if (!this.assurance || !this.indexer || !this.schema) throw new Error("Workbench assurance is not ready.");
-    const snapshot = await this.assurance.get(force);
-    this.refreshRuntimeHealth();
-    return snapshot;
+    if (!force) this.markBackgroundPending("assurance");
+    try {
+      const snapshot = await this.assurance.get(force);
+      this.refreshRuntimeHealth();
+      return snapshot;
+    } finally {
+      this.clearBackgroundPending("assurance");
+    }
   }
 
   async diagnostics(): Promise<void> {
