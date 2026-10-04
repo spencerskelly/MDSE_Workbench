@@ -116,3 +116,99 @@ test("atomic Local Model patch requires durable owner identity", async () => {
   assert.equal(transactions.history().length, 0);
   assert.equal(store.text, note());
 });
+
+
+test("structural Local Model creation is staged until Apply and can be cancelled", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager([], () => "2026-10-04T23:20:00.000Z");
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const before = store.text;
+  const newId = "part-20261004232000000skellyspencer";
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "part",
+    localId: newId,
+    heading: "K2",
+    fields: { definition: "[[Main Contactor]]", identifier: "K2" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(staged.transaction.status, "draft");
+  assert.equal(store.text, before, "staging must not write the vault");
+  assert.match(staged.plan.after, /#### K2/);
+
+  const review = service.reviewLocalCreate(staged.transaction.id);
+  assert.equal(review.transaction.status, "draft");
+  assert.equal(review.transaction.issues.length, 0);
+
+  const cancelled = service.cancelLocalCreate(staged.transaction.id);
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(store.text, before);
+  assert.equal(transactions.history().length, 0);
+});
+
+test("structural Local Model creation applies only after Review and enters shared undo/redo history", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager([], () => "2026-10-04T23:21:00.000Z");
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const newId = "part-20261004232100000skellyspencer";
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "part",
+    localId: newId,
+    heading: "K2",
+    fields: { definition: "[[Main Contactor]]", identifier: "K2" },
+  });
+  service.reviewLocalCreate(staged.transaction.id);
+  await service.applyLocalCreate(staged.transaction.id);
+
+  assert.match(store.text, /#### K2/);
+  assert.equal(transactions.history().length, 1);
+  assert.equal(transactions.history()[0].scope, "structural");
+  assert.equal(transactions.history()[0].changes[0].kind, "local.create");
+
+  await transactions.undo();
+  assert.equal(store.text, note());
+  await transactions.redo();
+  assert.match(store.text, /#### K2/);
+});
+
+test("stale structural Apply is blocked and leaves the proposal staged", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const newId = "part-20261004232200000skellyspencer";
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "part",
+    localId: newId,
+    heading: "K2",
+    fields: { definition: "[[Main Contactor]]", identifier: "K2" },
+  });
+  store.text += "\nexternal change";
+
+  await assert.rejects(service.applyLocalCreate(staged.transaction.id), /changed while/);
+  assert.equal(transactions.history().length, 0);
+  assert.equal(service.reviewLocalCreate(staged.transaction.id).transaction.status, "draft");
+  assert.doesNotMatch(store.text, /#### K2/);
+  service.cancelLocalCreate(staged.transaction.id);
+});
+
+test("invalid structural creation is rejected before a transaction can write anything", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const before = store.text;
+
+  await assert.rejects(
+    service.stageLocalRecordCreate("Assembly.md", {
+      kind: "part",
+      localId: "part-20261004232300000skellyspencer",
+      heading: "K2",
+      fields: {},
+    }),
+    /requires a definition/,
+  );
+  assert.equal(store.text, before);
+  assert.equal(transactions.history().length, 0);
+});
