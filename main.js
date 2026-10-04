@@ -2402,6 +2402,11 @@ var MetadataChangeBurst = class {
   }
 };
 
+// src/core/source-reconciliation.ts
+function hasPendingSourceReconciliation(state) {
+  return state.building || state.rebuildPending || state.livePending > 0 || state.liveApplyTimerPending || state.liveApplyActive || state.relationshipResolvePending || state.relationshipResolveTimerPending || state.relationshipResolveActive;
+}
+
 // src/obsidian/indexer.ts
 var CHUNK = 500;
 var LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
@@ -2481,6 +2486,29 @@ var Indexer = class {
   }
   get liveUpdatePending() {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
+  }
+  get sourceReconciliationPending() {
+    return hasPendingSourceReconciliation({
+      building: this.building,
+      rebuildPending: this.rebuildPending,
+      livePending: this.livePending.size,
+      liveApplyTimerPending: this.liveApplyTimer !== null,
+      liveApplyActive: this.liveApplyTask !== null,
+      relationshipResolvePending: this.relationshipResolvePending,
+      relationshipResolveTimerPending: this.relationshipResolveTimer !== null,
+      relationshipResolveActive: this.relationshipResolveTask !== null
+    });
+  }
+  /** Wait until note/path semantics and relationship resolution are stable before deriving a view. */
+  async whenSourceSettled() {
+    while (this.sourceReconciliationPending) {
+      const work = [];
+      if (this.running) work.push(this.running);
+      if (this.liveApplyTask) work.push(this.liveApplyTask);
+      if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
+      if (work.length) await Promise.all(work);
+      else await new Promise((r) => window.setTimeout(r, 50));
+    }
   }
   get lastLocalHydrationMs() {
     return this.lastHydrationMsValue;
@@ -5428,12 +5456,14 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer;
+    await indexer.whenSourceSettled();
     if (profileNeedsLocalOccurrences(profile)) {
       this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements \xB7 loading occurrence data for ${profile.name}`);
       await indexer.whenLocalSettled();
       void this.markOccurrenceReady(indexer);
       this.refreshRuntimeHealth();
     }
+    await indexer.whenSourceSettled();
     const index = indexer.index;
     const t0 = performance.now();
     if (profile.startTypes) {
@@ -5546,10 +5576,12 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
+    await indexer.whenSourceSettled();
     if (profileNeedsLocalOccurrences(profile)) {
       await indexer.whenLocalSettled();
       void this.markOccurrenceReady(indexer);
     }
+    await indexer.whenSourceSettled();
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
