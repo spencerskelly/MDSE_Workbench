@@ -2487,9 +2487,14 @@ var Indexer = class {
     const files = paths.map((path) => this.app.vault.getAbstractFileByPath(path)).filter((f) => f instanceof import_obsidian.TFile && f.extension === "md");
     this.startLocalHydration(files, epoch);
   }
-  /** Wait until all asynchronous semantic work that can affect occurrence-aware queries has settled. */
-  async whenLocalSettled() {
-    this.beginDeferredLocalHydration(false);
+  /**
+   * Wait for asynchronous semantic work.
+   * - demanded=true: an explicit occurrence-aware consumer promotes hydration and finishes it.
+   * - demanded=false: background/cache callers may start background hydration but never steal
+   *   priority from resumed foreground activity.
+   */
+  async whenLocalSettled(demanded = true) {
+    this.beginDeferredLocalHydration(!demanded);
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work = [...this.pendingLocalReads];
       if (this.liveApplyTask) work.push(this.liveApplyTask);
@@ -4854,7 +4859,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       }
       indexer.beginDeferredLocalHydration(true);
       this.scheduleRuntimeHealthRefresh();
-      void indexer.whenLocalSettled().then(() => {
+      void indexer.whenLocalSettled(false).then(() => {
         if (this.unloaded || this.indexer !== indexer) return;
         this.lastOccurrenceError = null;
         this.refreshRuntimeHealth();
@@ -4895,7 +4900,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (!schema || !indexer || indexer.building || !indexer.stats || indexer.revision === this.lastCachedRevision) return;
     const t0 = performance.now();
     try {
-      await indexer.whenLocalSettled();
+      await indexer.whenLocalSettled(false);
       if (indexer.building || indexer.rebuildPending) {
         this.scheduleSemanticCacheWrite();
         return;
@@ -5373,7 +5378,6 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   async checkView() {
     if (!this.ready()) return;
     const indexer = this.indexer;
-    await indexer.whenLocalSettled();
     const f = this.app.workspace.getActiveFile();
     const meta = f ? this.views[f.path] : void 0;
     if (!f || !meta) {
@@ -5381,6 +5385,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
+    if (profileNeedsLocalOccurrences(profile)) await indexer.whenLocalSettled();
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
