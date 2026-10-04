@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
-import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, INTERNAL_PROFILE, PROFILES, REQUIREMENTS_PROFILE, signature, STRUCTURE_PROFILE, toCanvas, traverse, WHERE_USED_PROFILE, withLocalInterfaces, withLocalRequirements, withLocalStructure, withLocalWhereUsed, type ViewProfile } from "../src/core/views";
+import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, INTERNAL_PROFILE, PROFILES, REQUIREMENTS_PROFILE, profileNeedsLocalOccurrences, signature, STRUCTURE_PROFILE, toCanvas, traverse, WHERE_USED_PROFILE, withLocalInterfaces, withLocalOccurrences, withLocalRequirements, withLocalStructure, withLocalWhereUsed, type ViewProfile } from "../src/core/views";
 import { buildInternalView, preserveInternalLayout } from "../src/core/internal-view";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { editingBlocked, parseSchema } from "../src/core/schema";
@@ -731,4 +731,24 @@ test("Internal curated refresh preserves stable node placement",()=>{
   assert.deepEqual([kept.x,kept.y,kept.width,kept.height],[777,333,240,130]);
   const added=merged.nodes.find((n)=>n.id==="local:part-new")!;
   assert.deepEqual([added.x,added.y],[400,100]);
+});
+
+
+test("definition-only profiles never touch Local Model data", () => {
+  const idx = indexOf(schema, [note("Function.md", "Function")]);
+  const base = traverse(idx, ["Function.md"], FUNCTIONAL_PROFILE);
+  const local = new Proxy(new LocalModelIndex(), {
+    get() {
+      throw new Error("definition-only profile touched Local Model data");
+    },
+  });
+  assert.equal(profileNeedsLocalOccurrences(FUNCTIONAL_PROFILE), false);
+  assert.equal(withLocalOccurrences(idx, local, () => undefined, base, FUNCTIONAL_PROFILE), base);
+});
+
+test("only explicitly occurrence-aware profiles request Local Model data", () => {
+  const occurrenceAware = new Set(["Structure", "Internal", "Requirements", "Where Used", "Interfaces"]);
+  for (const profile of Object.values(PROFILES)) {
+    assert.equal(profileNeedsLocalOccurrences(profile), occurrenceAware.has(profile.name), profile.name);
+  }
 });
