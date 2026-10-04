@@ -11,6 +11,8 @@ import {
   planReconciliation,
   reconciliationMode,
   type FileFingerprint,
+  cacheBucketForPath,
+  cacheDirtyBucketsForPaths,
 } from "../src/core/cache";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { ModelIndex, type NoteRecord } from "../src/core/model";
@@ -299,4 +301,25 @@ test("path-bucket sharding keeps existing paths in stable shard identities when 
   for (const path of ["Assembly.md", "Target.md"]) {
     assert.equal(bucketOf(before.noteShards, path), bucketOf(after.noteShards, path));
   }
+});
+
+
+test("stable cache bucket planning changes only buckets addressed by changed paths", () => {
+  const paths = ["A.md", "Folder/B.md", "Other/C.md"];
+  const planned = cacheDirtyBucketsForPaths(paths, 8, 4, 8);
+
+  assert.deepEqual(
+    planned.notes,
+    [...new Set(paths.map((p) => cacheBucketForPath(p, 8)))].sort((a, b) => a - b),
+  );
+  assert.deepEqual(
+    planned.localRegions,
+    [...new Set(paths.map((p) => cacheBucketForPath(p, 4)))].sort((a, b) => a - b),
+  );
+  assert.deepEqual(planned.fingerprints, planned.notes);
+
+  const one = cacheDirtyBucketsForPaths(["A.md"], 8, 4, 8);
+  assert.equal(one.notes.length, 1);
+  assert.equal(one.localRegions.length, 1);
+  assert.equal(one.fingerprints.length, 1);
 });
