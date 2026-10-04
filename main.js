@@ -2534,6 +2534,10 @@ function blockId(link) {
 }
 
 // src/core/relationship-dependencies.ts
+var TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES = 5e3;
+function shouldUseFullRelationshipReresolution(candidateCount) {
+  return candidateCount > TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES;
+}
 var ReversePathDependencyIndex = class {
   constructor() {
     this.byTarget = /* @__PURE__ */ new Map();
@@ -3288,7 +3292,9 @@ var Indexer = class {
     if (plan.added.length || plan.deleted.length) {
       const changedPaths = [...plan.added, ...plan.deleted];
       const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
-      await this.reResolveRelationships(candidates);
+      await this.reResolveRelationships(
+        shouldUseFullRelationshipReresolution(candidates.length) ? void 0 : candidates
+      );
     }
     const backlog = [...this.dirty];
     this.dirty.clear();
@@ -3384,7 +3390,9 @@ var Indexer = class {
     const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
     const startedAt = performance.now();
-    task = this.reResolveRelationships(candidates).then((changedSourceCount) => {
+    task = this.reResolveRelationships(
+      shouldUseFullRelationshipReresolution(candidates.length) ? void 0 : candidates
+    ).then((changedSourceCount) => {
       this.relationshipReresolutionHistoryValue.push({
         at: Date.now(),
         changedPaths,
