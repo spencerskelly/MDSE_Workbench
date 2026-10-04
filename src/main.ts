@@ -193,11 +193,13 @@ export default class MdseWorkbench extends Plugin {
     this.app.workspace.onLayoutReady(() => void this.start(false));
   }
 
-  private setRuntimeStatus(state: "starting" | "waiting" | "indexing" | "ready" | "error", detail = ""): void {
+  private setRuntimeStatus(state: "starting" | "waiting" | "restoring" | "reconciling" | "indexing" | "ready" | "error", detail = ""): void {
     if (!this.statusEl) return;
     const label =
       state === "starting" ? "MDSE Workbench: starting" :
       state === "waiting" ? "MDSE Workbench: waiting for vault" :
+      state === "restoring" ? "MDSE Workbench: restoring cache" :
+      state === "reconciling" ? "MDSE Workbench: reconciling" :
       state === "indexing" ? "MDSE Workbench: indexing" :
       state === "ready" ? "MDSE Workbench: ready" :
       "MDSE Workbench: attention";
@@ -387,6 +389,7 @@ export default class MdseWorkbench extends Plugin {
     // proves cache/reconciliation correctness before we later consider earlier UI availability.
     if (firstStart && !rebuild && this.settings.warmCachePreview) {
       try {
+        this.setRuntimeStatus("restoring");
         const scope = { vaultUid: await this.loadVaultUid() };
         const cache = await readSemanticCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
         const restored = restoreSemanticState(cache, schema, scope);
@@ -394,14 +397,17 @@ export default class MdseWorkbench extends Plugin {
         const initialMode = reconciliationMode(initialPlan);
 
         if (initialMode !== "full") {
-          indexer.installRestored(restored, cache.header.createdAt);
+          stats = indexer.installRestored(restored, cache.header.createdAt);
           const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
           this.lastWarmRestore = initialChanges
             ? `restored; ${initialChanges} path change(s) to reconcile`
             : "restored; cache matched current file fingerprints";
           indexer.enableLiveChanges();
-          this.setRuntimeStatus("indexing", initialChanges ? `reconciling ${initialChanges} path change(s)` : "validating cached state");
-          stats = await indexer.reconcilePlan(initialPlan);
+
+          if (initialMode === "incremental") {
+            this.setRuntimeStatus("reconciling", `${initialChanges} path change(s)`);
+            stats = await indexer.reconcilePlan(initialPlan);
+          }
 
           // Catch changes that happened after the first fingerprint snapshot. One bounded
           // incremental retry is allowed; if the vault remains busy or exceeds the incremental
@@ -409,13 +415,13 @@ export default class MdseWorkbench extends Plugin {
           let after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
           let afterMode = reconciliationMode(after);
           if (afterMode === "incremental") {
+            const retryChanges = after.changed.length + after.added.length + after.deleted.length;
+            this.setRuntimeStatus("reconciling", `${retryChanges} newer path change(s)`);
             stats = await indexer.reconcilePlan(after);
             after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
             afterMode = reconciliationMode(after);
           }
-          if (afterMode !== "none") {
-            stats = null;
-          }
+          if (afterMode !== "none") stats = null;
         }
       } catch (e) {
         this.lastWarmRestore = `not used: ${(e as Error).message}`;
