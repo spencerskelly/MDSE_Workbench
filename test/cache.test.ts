@@ -9,6 +9,7 @@ import {
   shardSemanticCache,
   joinSemanticCache,
   planReconciliation,
+  reconciliationMode,
   type FileFingerprint,
 } from "../src/core/cache";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
@@ -227,4 +228,14 @@ test("warm-start reconciliation identifies unchanged, changed, added and deleted
     added: ["New.md"],
     deleted: ["Gone.md"],
   });
+});
+
+
+test("warm-start policy stays incremental only while the path set is stable", () => {
+  assert.equal(reconciliationMode({ unchanged: ["A"], changed: [], added: [], deleted: [] }), "none");
+  assert.equal(reconciliationMode({ unchanged: [], changed: ["A"], added: [], deleted: [] }), "incremental");
+  assert.equal(reconciliationMode({ unchanged: [], changed: ["A"], added: ["B"], deleted: [] }), "full", "adding a path can change wikilink resolution");
+  assert.equal(reconciliationMode({ unchanged: [], changed: [], added: [], deleted: ["B"] }), "full", "deleting/renaming a path can change wikilink resolution");
+  assert.equal(reconciliationMode({ unchanged: [], changed: ["A", "B"], added: [], deleted: [] }, 1), "full", "large stable-path bursts use the proven full rebuild");
+  assert.throws(() => reconciliationMode({ unchanged: [], changed: [], added: [], deleted: [] }, 0), /positive integer/);
 });
