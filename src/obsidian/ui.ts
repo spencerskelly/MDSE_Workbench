@@ -397,3 +397,164 @@ export class LocalPartDeleteModal extends Modal {
     };
   }
 }
+
+
+export class LocalEndpointCreateModal extends Modal {
+  private staged: StagedLocalCreate | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly partName: string,
+    private readonly partLocalId: string,
+    private readonly localId: string,
+    private readonly stage: (input: NewLocalRecord) => Promise<StagedLocalCreate>,
+    private readonly apply: (transactionId: string) => Promise<void>,
+    private readonly cancel: (transactionId: string) => void,
+    private readonly onApplied: (localId: string) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.renderCompose();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try { this.cancel(staged.transaction.id); } catch { /* already cancelled */ }
+    }
+  }
+
+  private renderCompose(): void {
+    this.titleEl.setText("Add endpoint occurrence");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Create an endpoint occurrence on part ${this.partName} in ${this.ownerName}. Parent/exposes/connection topology is intentionally deferred.`,
+    });
+
+    const field = (label: string, value = "", placeholder = ""): HTMLInputElement => {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: label });
+      const input = row.createEl("input", { type: "text", cls: "mdse-detail-input", value });
+      if (placeholder) input.setAttr("placeholder", placeholder);
+      input.onkeydown = (e) => e.stopPropagation();
+      return input;
+    };
+
+    const heading = field("Endpoint name", "", "J1");
+    const definition = field("Reusable definition", "", "[[CAN Port]]");
+    const endpointKind = field("Endpoint kind", "", "physical");
+    const usage = field("Usage", "standard", "standard");
+    const multiplicity = field("Multiplicity", "", "optional");
+
+    const part = this.contentEl.createEl("p", { cls: "mdse-muted", text: `Attached part: ${this.partName} (#^${this.partLocalId})` });
+    part.setAttr("title", "The part relationship is fixed for this creation slice.");
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Local ID: ${this.localId}` });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => {
+      void (async () => {
+        review.disabled = true;
+        try {
+          const fields: Record<string, string> = {
+            definition: definition.value.trim(),
+            part: `[[#^${this.partLocalId}|${this.partName}]]`,
+          };
+          if (endpointKind.value.trim()) fields.kind = endpointKind.value.trim();
+          if (usage.value.trim() && usage.value.trim() !== "standard") fields.usage = usage.value.trim();
+          if (multiplicity.value.trim()) fields.multiplicity = multiplicity.value.trim();
+
+          const staged = await this.stage({
+            kind: "endpoint",
+            localId: this.localId,
+            heading: heading.value.trim(),
+            fields,
+          });
+          this.staged = staged;
+          this.renderReview(staged, {
+            heading: heading.value.trim(),
+            definition: definition.value.trim(),
+            endpointKind: endpointKind.value.trim(),
+            usage: usage.value.trim() || "standard",
+            multiplicity: multiplicity.value.trim(),
+          });
+        } catch (e) {
+          new Notice(`Cannot stage endpoint: ${(e as Error).message}`, 12000);
+          review.disabled = false;
+        }
+      })();
+    };
+  }
+
+  private renderReview(
+    staged: StagedLocalCreate,
+    values: { heading: string; definition: string; endpointKind: string; usage: string; multiplicity: string },
+  ): void {
+    this.titleEl.setText("Review new endpoint occurrence");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const row = (key: string, value: string) => {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value || "—" });
+    };
+    row("Owner", this.ownerName);
+    row("Part", this.partName);
+    row("Transaction", staged.transaction.label);
+    row("Scope", staged.transaction.scope);
+    row("Endpoint", values.heading);
+    row("Reusable definition", values.definition);
+    row("Endpoint kind", values.endpointKind);
+    row("Usage", values.usage);
+    row("Multiplicity", values.multiplicity);
+    row("Local ID", staged.plan.localId);
+
+    const findings = staged.plan.findings;
+    const blocking = findings.filter((finding) => finding.severity === "error");
+    if (findings.length) {
+      const box = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      box.createEl("strong", { text: blocking.length ? "Validation findings" : "Validation warnings" });
+      for (const finding of findings) {
+        box.createEl("p", {
+          text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+          cls: finding.severity === "error" ? "mdse-warn" : undefined,
+        });
+      }
+    } else {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will add one endpoint occurrence attached to the selected part." });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied(staged.plan.localId);
+          new Notice(`Created endpoint occurrence ${values.heading}.`, 5000);
+        } catch (e) {
+          new Notice(`Not applied: ${(e as Error).message}`, 12000);
+          apply.disabled = false;
+        }
+      })();
+    };
+  }
+}
