@@ -383,6 +383,9 @@ export class LocalModelIndex {
     this.remove(path);
     if (!region) return;
     this.regions.set(path, region);
+    // Quarantined regions remain available for findings/diagnostics, but never contribute
+    // occurrence identity or topology to the shared usable Local Model index.
+    if (!region.structured) return;
     for (const r of region.records) {
       if (!r.localId) continue;
       const l = this.ids.get(r.localId) ?? [];
@@ -406,6 +409,18 @@ export class LocalModelIndex {
 
   find(localId: string): ReadonlyArray<{ path: string; record: LocalRecord }> {
     return this.ids.get(localId) ?? [];
+  }
+
+  isQuarantined(path: string): boolean {
+    const region = this.regions.get(path);
+    return !!region && !region.structured;
+  }
+
+  quarantinedPaths(): string[] {
+    return [...this.regions.entries()]
+      .filter(([, region]) => !region.structured)
+      .map(([path]) => path)
+      .sort();
   }
 
   recordsOf(path: string, kind?: LocalKind): LocalRecord[] {
