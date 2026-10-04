@@ -497,3 +497,23 @@ export function planReconciliation(
   for (const path of [...cached.keys()].sort()) if (!current.has(path)) deleted.push(path);
   return { unchanged, changed, added, deleted };
 }
+
+
+export type ReconciliationMode = "none" | "incremental" | "full";
+
+/**
+ * Conservative warm-start policy.
+ *
+ * Note relationships currently cache resolved target paths. Adding/removing/renaming a file can
+ * change how an unchanged wikilink resolves, so a path-set change requires a full rebuild until
+ * the cache retains enough authored-link information to safely re-resolve dependants.
+ *
+ * Content-only changes on stable paths may reconcile incrementally. A large changed-file burst
+ * also falls back to the proven chunked full rebuild.
+ */
+export function reconciliationMode(plan: ReconciliationPlan, incrementalLimit = 300): ReconciliationMode {
+  if (!Number.isInteger(incrementalLimit) || incrementalLimit < 1) throw new Error("incrementalLimit must be a positive integer.");
+  if (plan.added.length || plan.deleted.length) return "full";
+  if (!plan.changed.length) return "none";
+  return plan.changed.length <= incrementalLimit ? "incremental" : "full";
+}
