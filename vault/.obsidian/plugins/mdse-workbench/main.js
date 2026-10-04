@@ -2623,7 +2623,9 @@ function removeReverseSource(index, keys, sourcePath) {
   }
 }
 function linkpathKeys(value) {
-  const clean = value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\.md$/i, "");
+  const withoutAlias = value.split("|", 1)[0];
+  const withoutFragment = withoutAlias.split("#", 1)[0];
+  const clean = withoutFragment.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\.md$/i, "").toLowerCase();
   if (!clean) return [];
   const slash = clean.lastIndexOf("/");
   const base3 = slash >= 0 ? clean.slice(slash + 1) : clean;
