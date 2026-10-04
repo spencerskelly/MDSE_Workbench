@@ -19,7 +19,7 @@ import { nodeAt, parseTranslate, undefinedName, type CanvasNodeJson } from "./co
 import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
 import { analyzeLocalModel, writeFindingsReport } from "./obsidian/localmodel";
-import { ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from "./obsidian/cache";
+import { clearWorkbenchCache, ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from "./obsidian/cache";
 
 /** Quiet time with no cache activity before the first index build starts. */
 const QUIET_START_MS = 8000;
@@ -98,6 +98,7 @@ export default class MdseWorkbench extends Plugin {
 
     this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => this.diagnostics() });
     this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
+    this.addCommand({ id: "clear-semantic-cache", name: "Clear semantic cache", callback: () => this.confirmClearSemanticCache() });
     this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
     this.addCommand({
       id: "explore-structure",
@@ -412,6 +413,32 @@ export default class MdseWorkbench extends Plugin {
   /** Quiet version of ready(): no notice. Used by Review, which waits and retries. */
   private isReady(): boolean {
     return !!(this.schema && this.indexer && this.writer && !this.indexer.building && this.indexer.stats);
+  }
+
+  private confirmClearSemanticCache(): void {
+    new ConfirmModal(
+      this.app,
+      "Delete Workbench's disposable semantic cache? The Markdown/YAML model is not changed. The next startup will use the full rebuild path.",
+      "Clear semantic cache",
+      () => void this.clearSemanticCache(),
+    ).open();
+  }
+
+  private async clearSemanticCache(): Promise<void> {
+    if (this.cacheWriteTimer !== null) {
+      window.clearTimeout(this.cacheWriteTimer);
+      this.cacheWriteTimer = null;
+    }
+    try {
+      await clearWorkbenchCache(this.app);
+      this.lastCacheWriteAt = null;
+      this.lastCacheWriteMs = null;
+      this.lastCacheWriteError = null;
+      this.lastWarmRestore = "cache cleared; next startup will rebuild from the vault";
+      new Notice("MDSE Workbench: semantic cache cleared. Model files were not changed.");
+    } catch (e) {
+      new Notice(`MDSE Workbench: could not clear semantic cache: ${(e as Error).message}`, 12000);
+    }
   }
 
   async inspectSemanticCache(): Promise<void> {
