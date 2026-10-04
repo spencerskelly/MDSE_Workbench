@@ -253,6 +253,7 @@ export default class MdseWorkbench extends Plugin {
             current: cachedAssurance.revision === indexer?.revision && !cachedAssurance.stale,
             findings: cachedAssurance.all.length,
             computedAt: cachedAssurance.computedAt,
+            error: cachedAssurance.error,
           }
         : null,
     });
@@ -774,12 +775,15 @@ export default class MdseWorkbench extends Plugin {
       ["Local Model read errors", String(this.indexer!.localReadErrorCount), this.indexer!.localReadErrorCount > 0],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
-      ["Assurance snapshot", `${assurance.ms} ms · revision ${assurance.revision}${assurance.stale ? " · stale/retrying" : ""}`],
-      ["Missing inverses", String(f.missingInverse.length), f.missingInverse.length > 0],
-      ["Inverses with no forward link", String(f.orphanInverse.length), f.orphanInverse.length > 0],
-      ["Links that break endpoint rules", String(f.offRule.length)],
-      ["Provisional links (tracesTo)", String(f.provisional.length)],
-      ["Unresolved relationship links", String(f.unresolvedLinks), f.unresolvedLinks > 0],
+      ["Assurance snapshot", assurance.error
+        ? `unavailable · ${assurance.ms} ms · revision ${assurance.revision}`
+        : `${assurance.ms} ms · revision ${assurance.revision}${assurance.stale ? " · stale/retrying" : ""}`, !!assurance.error],
+      ["Assurance error", assurance.error ?? "none", !!assurance.error],
+      ["Missing inverses", assurance.error ? "not evaluated" : String(f.missingInverse.length), !assurance.error && f.missingInverse.length > 0],
+      ["Inverses with no forward link", assurance.error ? "not evaluated" : String(f.orphanInverse.length), !assurance.error && f.orphanInverse.length > 0],
+      ["Links that break endpoint rules", assurance.error ? "not evaluated" : String(f.offRule.length)],
+      ["Provisional links (tracesTo)", assurance.error ? "not evaluated" : String(f.provisional.length)],
+      ["Unresolved relationship links", assurance.error ? "not evaluated" : String(f.unresolvedLinks), !assurance.error && f.unresolvedLinks > 0],
       ["relationships.yaml", schema.relationshipsVersion],
       ["element-types.yaml", schema.elementTypesVersion],
       ["Editing", editingBlocked(schema) ? "off (schema too old)" : "on", editingBlocked(schema)],
