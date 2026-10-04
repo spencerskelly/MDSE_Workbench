@@ -77,8 +77,8 @@ function summarizeRuntimeHealth(input) {
   if (pending > 0) {
     return {
       level: "syncing",
-      label: `Workbench \xB7 syncing ${pending}`,
-      detail: input.livePending ? "Core model is usable while coalesced live edits and Local Model hydration finish." : "Core model is ready while Local Model hydration finishes in the background.",
+      label: input.livePending ? `Workbench \u2713 \xB7 applying ${input.livePending}` : "Workbench \u2713 \xB7 occurrence data loading",
+      detail: input.livePending ? "Core model remains usable while coalesced live edits finish." : "Core model is ready; occurrence-aware capabilities are loading in the background.",
       rows
     };
   }
@@ -2317,12 +2317,36 @@ function blockId(link) {
   return id || null;
 }
 
+// src/core/cooperative.ts
+var CooperativeBudget = class {
+  constructor(budgetMs = 12, now = () => performance.now()) {
+    this.budgetMs = budgetMs;
+    this.now = now;
+    if (!(budgetMs > 0) || !Number.isFinite(budgetMs)) throw new Error("Cooperative budget must be a positive finite number.");
+    this.startedAt = this.now();
+  }
+  shouldYield() {
+    return this.now() - this.startedAt >= this.budgetMs;
+  }
+  reset() {
+    this.startedAt = this.now();
+  }
+  async checkpoint(yieldNow) {
+    if (!this.shouldYield()) return false;
+    await yieldNow();
+    this.reset();
+    return true;
+  }
+};
+
 // src/obsidian/indexer.ts
 var CHUNK = 500;
 var LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 var BURST_REBUILD = 300;
 var QUIET_MS = 3e3;
 var LIVE_DEBOUNCE_MS = 250;
+var WORK_SLICE_MS = 12;
+var yieldToUi = () => new Promise((resolve) => window.setTimeout(resolve, 0));
 var Indexer = class {
   constructor(app, schema) {
     this.app = app;
@@ -2558,6 +2582,7 @@ var Indexer = class {
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
       this.bumpRevision(path);
     }
+    const reconcileBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < changedOrAdded.length; i++) {
       const path = changedOrAdded[i];
       const f = this.app.vault.getAbstractFileByPath(path);
@@ -2565,7 +2590,7 @@ var Indexer = class {
         throw new Error(`Warm reconciliation expected Markdown file ${path}, but it is unavailable.`);
       }
       await this.applyAwaited(path, f);
-      if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+      await reconcileBudget.checkpoint(yieldToUi);
     }
     if (plan.added.length || plan.deleted.length) await this.reResolveAllRelationships();
     const backlog = [...this.dirty];
@@ -2581,7 +2606,7 @@ var Indexer = class {
           break;
         }
         await this.applyAwaited(path, f);
-        if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+        await reconcileBudget.checkpoint(yieldToUi);
       }
       if (needsFull) this.scheduleRebuild();
     }
@@ -2595,6 +2620,7 @@ var Indexer = class {
   async reResolveAllRelationships() {
     const notes = [...this.index.notes.values()];
     let changed = 0;
+    const resolveBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < notes.length; i++) {
       const rec = notes[i];
       if (!rec.authoredLinks) throw new Error(`Cached note ${rec.path} has no authored-link evidence; full rebuild required.`);
@@ -2616,7 +2642,7 @@ var Indexer = class {
         this.cacheDirtyPaths.add(rec.path);
         changed++;
       }
-      if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
+      await resolveBudget.checkpoint(yieldToUi);
     }
     if (changed) this.bumpRevision();
     return changed;
@@ -2697,6 +2723,7 @@ var Indexer = class {
     let task;
     task = (async () => {
       let changed = false;
+      const hydrationBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < files.length; i++) {
         if (epoch !== this.hydrationEpoch) return;
         const file = files[i];
@@ -2720,7 +2747,7 @@ var Indexer = class {
         } finally {
           if (epoch === this.hydrationEpoch) this.hydrationRemaining = Math.max(0, files.length - i - 1);
         }
-        if (i % 50 === 49) await new Promise((r) => window.setTimeout(r, 0));
+        await hydrationBudget.checkpoint(yieldToUi);
       }
       if (changed && epoch === this.hydrationEpoch) this.bumpRevision();
     })().finally(() => {
@@ -2755,13 +2782,14 @@ var Indexer = class {
     const files = this.app.vault.getMarkdownFiles();
     const localCandidates = [];
     const fingerprints = /* @__PURE__ */ new Map();
+    const buildBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       fingerprints.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
       const rec = this.record(file);
       if (rec) index.upsert(rec);
       if (this.mayHaveLocalModel(file)) localCandidates.push(file);
-      if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
+      await buildBudget.checkpoint(yieldToUi);
     }
     this.index = index;
     this.local = local;
@@ -2863,13 +2891,14 @@ var Indexer = class {
     let task;
     task = (async () => {
       let pathSetChanged = false;
+      const liveBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         const existed = this.fingerprints.has(path);
         this.apply(path);
         const existsNow = this.fingerprints.has(path);
         if (existed !== existsNow) pathSetChanged = true;
-        if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+        await liveBudget.checkpoint(yieldToUi);
       }
       if (pathSetChanged) this.scheduleRelationshipReresolution();
     })().finally(() => {
@@ -4667,9 +4696,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.refreshRuntimeHealth();
       const indexer = this.indexer;
       if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationPending > 0) {
-        void indexer.whenLocalSettled().then(() => {
-          if (!this.unloaded && this.indexer === indexer) this.refreshRuntimeHealth();
-        });
+        this.scheduleRuntimeHealthRefresh();
       }
     }, 400);
   }
@@ -4730,6 +4757,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.localBackgroundTimer = window.setTimeout(() => {
       this.localBackgroundTimer = null;
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
+      if (Date.now() - this.lastChange < LOCAL_BACKGROUND_DELAY_MS || indexer.liveUpdatePending > 0) {
+        this.scheduleBackgroundLocalHydration();
+        return;
+      }
       indexer.beginDeferredLocalHydration();
       this.scheduleRuntimeHealthRefresh();
       void indexer.whenLocalSettled().then(() => {
