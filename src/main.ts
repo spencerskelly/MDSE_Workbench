@@ -277,7 +277,9 @@ export default class MdseWorkbench extends Plugin {
   private async loadVaultUid(): Promise<string> {
     const raw = parseYaml(await this.app.vault.adapter.read(".vault.yaml")) as { vault_uid?: unknown };
     const uid = raw?.vault_uid;
-    if (typeof uid !== "string" || !uid.trim()) throw new Error(".vault.yaml has no usable vault_uid.");
+    if (typeof uid !== "string" || !uid.trim() || uid.trim() === "UNINITIALIZED") {
+      throw new Error(".vault.yaml does not yet have an initialized vault_uid.");
+    }
     return uid.trim();
   }
 
