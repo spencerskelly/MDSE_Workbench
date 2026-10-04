@@ -1,0 +1,185 @@
+name: Integrated live-edit acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/integration-live-edit.yml"
+      - "bench/obsidian-live-edit-probe.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  live-edit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NOTE_COUNT: "12000"
+      BACKGROUND_COUNT: "500"
+      OBSIDIAN_VERSION: "1.13.7"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Verify exact accepted Workbench candidate bytes
+        run: |
+          sha256sum -c artifact-sha256.txt
+          npm ci
+          npm install --no-save chrome-remote-interface
+
+      - name: Install Obsidian desktop and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          curl -L --retry 3 -o "$RUNNER_TEMP/obsidian.deb" \
+            "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian_${OBSIDIAN_VERSION}_amd64.deb"
+          sudo apt-get install -y "$RUNNER_TEMP/obsidian.deb"
+
+      - name: Prepare disposable live-edit vault
+        run: |
+          VAULT="$RUNNER_TEMP/mdse-live-edit"
+          echo "VAULT=$VAULT" >> "$GITHUB_ENV"
+          rm -rf "$VAULT"
+          mkdir -p "$VAULT/.obsidian/plugins/mdse-workbench" "$VAULT/Acceptance" "$VAULT/Background"
+
+          cp -R vault/99_System "$VAULT/99_System"
+          npm run bench:generate -- "$NOTE_COUNT" "$VAULT/IntegrationData"
+          cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/mdse-workbench/"
+          printf '%s\n' '["mdse-workbench"]' > "$VAULT/.obsidian/community-plugins.json"
+
+          cat > "$VAULT/.vault.yaml" <<'EOF'
+          vault_uid: 20261004220000000liveeditaccept
+          vault_name: MDSE Live Edit Acceptance
+          default_branch: main
+          EOF
+
+          cat > "$VAULT/Acceptance/Live Anchor.md" <<'EOF'
+          ---
+          type: Object
+          id: LIVE-ANCHOR
+          uid: 20261004220000001liveeditfixture
+          status: Draft
+          hasPart:
+            - "[[Live Target]]"
+          ---
+          # Live Anchor
+          EOF
+
+          cat > "$VAULT/Acceptance/Live Function.md" <<'EOF'
+          ---
+          type: Function
+          id: LIVE-FUNCTION
+          uid: 20261004220000004liveeditfixture
+          status: Draft
+          ---
+          # Live Function
+          EOF
+
+          for i in $(seq 1 "$BACKGROUND_COUNT"); do
+            cat > "$VAULT/Background/Background $i.md" <<EOF
+          ---
+          type: Object
+          id: BG-$i
+          uid: 20261004221$(printf "%06d" "$i")backgroundx
+          status: Draft
+          ---
+          # Background $i
+
+          ## Local Model
+          <!-- MDSE:LOCAL-MODEL START schema=0.2 -->
+
+          ### Part Occurrences
+
+          #### Background occurrence $i
+          - definition: [[Live Function]]
+          ^part-20261004221$(printf "%06d" "$i")backgroundx
+
+          <!-- MDSE:LOCAL-MODEL END -->
+          EOF
+          done
+
+      - name: Register disposable vault
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-live-edit
+        run: |
+          mkdir -p "$XDG_CONFIG_HOME/obsidian"
+          export VAULT
+          node -e 'const fs=require("fs"),p=require("path");const out=p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json");fs.writeFileSync(out,JSON.stringify({vaults:{liveedit:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
+
+      - name: Run real-Obsidian live-edit acceptance
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-live-edit
+        run: |
+          export VAULT NOTE_COUNT BACKGROUND_COUNT
+          rm -rf "$VAULT/.obsidian/plugins/mdse-workbench/cache"
+          rm -f "$VAULT/.mdse_integration_result.json" "$VAULT/.mdse_integration_metadata.json" "$VAULT/.mdse_integration_readable.json"
+          TOTAL=$((NOTE_COUNT + BACKGROUND_COUNT + 2))
+          export TOTAL
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.TOTAL),label:"live-edit"},null,2))'
+
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9242 >"$RUNNER_TEMP/live-edit-obsidian.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9242 >"$RUNNER_TEMP/live-edit-activate.log" 2>&1
+            node bench/obsidian-live-edit-probe.mjs "$VAULT" 9242 | tee live-edit-acceptance.json
+          '
+
+      - name: Validate live-edit acceptance result
+        run: |
+          node <<'NODE'
+          const fs=require("fs");
+          const r=JSON.parse(fs.readFileSync("live-edit-acceptance.json","utf8"));
+          const fail=(m)=>{throw new Error(m)};
+          if(!r.accepted) fail("probe did not accept");
+          const ops=r.results.map((x)=>x.op);
+          if(JSON.stringify(ops)!==JSON.stringify(["add","edit","rename","move","delete"])) fail("operation sequence incomplete: "+ops);
+          for(const x of r.results) {
+            if(!(x.background?.active>0)) fail(x.op+" did not occur while background occurrence work was active");
+          }
+          if(r.sourcePendingAfter) fail("source reconciliation remained pending");
+          if(r.livePendingAfter!==0) fail("live update queue remained pending");
+          if(r.occurrencePendingAfter!==0) fail("occurrence work remained pending");
+          if(r.localReadErrorsAfter!==0) fail("Local Model read errors remained");
+          if(r.results.find((x)=>x.op==="add")?.relationshipResolved!==true) fail("add relationship did not resolve");
+          if(r.results.find((x)=>x.op==="edit")?.performsResolved!==true) fail("edit relationship did not resolve");
+          if(r.results.find((x)=>x.op==="rename")?.oldPathRemoved!==true) fail("rename did not remove old path");
+          if(r.results.find((x)=>x.op==="move")?.oldPathRemoved!==true) fail("move did not remove old path");
+          if(r.results.find((x)=>x.op==="delete")?.relationshipRemoved!==true) fail("delete did not remove relationship");
+          console.log("Integrated live-edit acceptance passed:",JSON.stringify(r,null,2));
+          NODE
+
+      - name: Write acceptance summary
+        if: always()
+        run: |
+          if [ -f live-edit-acceptance.json ]; then
+            node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const r=require("./live-edit-acceptance.json");
+          console.log("## Integrated live-edit acceptance");
+          console.log("");
+          console.log("| Operation | Background active | Pending background | Result |");
+          console.log("|---|---:|---:|---|");
+          for(const x of r.results) {
+            console.log("| "+x.op+" | "+x.background.active+" | "+x.background.pending+" | pass |");
+          }
+          console.log("");
+          console.log("Final source pending: "+r.sourcePendingAfter);
+          console.log("Final occurrence pending: "+r.occurrencePendingAfter);
+          NODE
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-edit-evidence
+          path: |
+            live-edit-acceptance.json
+            ${{ runner.temp }}/live-edit-obsidian.log
+            ${{ runner.temp }}/live-edit-activate.log
+          if-no-files-found: warn
