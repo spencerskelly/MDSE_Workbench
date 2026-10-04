@@ -2393,6 +2393,9 @@ var Indexer = class {
     this.hydrationTask = null;
     this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = 0;
+    /** Background occurrence hydration pauses while foreground activity resumes; explicit consumers promote it. */
+    this.hydrationDemanded = false;
+    this.backgroundIdle = () => true;
     this.hydrationRemaining = 0;
     this.hydrationStartedAt = null;
     this.lastHydrationMsValue = null;
@@ -2464,18 +2467,29 @@ var Indexer = class {
   enableLiveChanges() {
     this.liveChanges = true;
   }
-  /** Start deferred occurrence parsing when an occurrence-aware consumer actually needs it. */
-  beginDeferredLocalHydration() {
-    if (this.hydrationTask || !this.deferredHydrationPaths.length) return;
+  setBackgroundIdleCheck(check) {
+    this.backgroundIdle = check;
+  }
+  /**
+   * Start deferred occurrence parsing. Background starts may pause again if foreground activity
+   * resumes; an explicit occurrence-aware consumer promotes the same task to demanded work.
+   */
+  beginDeferredLocalHydration(background = false) {
+    if (this.hydrationTask) {
+      if (!background) this.hydrationDemanded = true;
+      return;
+    }
+    if (!this.deferredHydrationPaths.length) return;
     const paths = this.deferredHydrationPaths;
     const epoch = this.deferredHydrationEpoch;
     this.deferredHydrationPaths = [];
+    this.hydrationDemanded = !background;
     const files = paths.map((path) => this.app.vault.getAbstractFileByPath(path)).filter((f) => f instanceof import_obsidian.TFile && f.extension === "md");
     this.startLocalHydration(files, epoch);
   }
   /** Wait until all asynchronous semantic work that can affect occurrence-aware queries has settled. */
   async whenLocalSettled() {
-    this.beginDeferredLocalHydration();
+    this.beginDeferredLocalHydration(false);
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work = [...this.pendingLocalReads];
       if (this.liveApplyTask) work.push(this.liveApplyTask);
@@ -2504,6 +2518,7 @@ var Indexer = class {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
     this.hydrationEpoch++;
     this.hydrationTask = null;
+    this.hydrationDemanded = false;
     this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
@@ -2750,6 +2765,10 @@ var Indexer = class {
       const hydrationBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < files.length; i++) {
         if (epoch !== this.hydrationEpoch) return;
+        while (!this.hydrationDemanded && (!this.backgroundIdle() || this.liveUpdatePending > 0)) {
+          await new Promise((r) => window.setTimeout(r, 250));
+          if (epoch !== this.hydrationEpoch) return;
+        }
         const file = files[i];
         const path = file.path;
         const revision = (this.localRevision.get(path) ?? 0) + 1;
@@ -2777,6 +2796,7 @@ var Indexer = class {
     })().finally(() => {
       if (this.hydrationTask === task) {
         this.hydrationTask = null;
+        this.hydrationDemanded = false;
         this.hydrationRemaining = 0;
         if (this.hydrationStartedAt !== null) {
           this.lastHydrationMsValue = Math.round(performance.now() - this.hydrationStartedAt);
@@ -4832,7 +4852,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.scheduleBackgroundLocalHydration();
         return;
       }
-      indexer.beginDeferredLocalHydration();
+      indexer.beginDeferredLocalHydration(true);
       this.scheduleRuntimeHealthRefresh();
       void indexer.whenLocalSettled().then(() => {
         if (this.unloaded || this.indexer !== indexer) return;
@@ -4981,6 +5001,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const firstStart = !this.indexer;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
+      this.indexer.setBackgroundIdleCheck(() => Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS);
       this.writer = new RelationshipWriter(this.app, () => this.schema, () => this.indexer.index);
       this.assurance = new AssuranceManager({
         revision: () => this.indexer.revision,
