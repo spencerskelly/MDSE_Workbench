@@ -761,11 +761,13 @@ export default class MdseWorkbench extends Plugin {
     }
 
     if (!stats) {
-      indexer.enableLiveChanges();
       this.setRuntimeStatus("indexing");
       stats = await recoverWithColdBuild(
         () => indexer.discardProvisionalSemanticState(),
-        () => indexer.build(),
+        async () => {
+          indexer.enableLiveChanges();
+          return await indexer.build();
+        },
       );
     }
 
