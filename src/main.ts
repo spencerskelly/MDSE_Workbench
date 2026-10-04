@@ -411,6 +411,14 @@ export default class MdseWorkbench extends Plugin {
         this.scheduleSemanticCacheWrite();
         return;
       }
+      // Persistence must not become the reason deferred occurrence capabilities start. If
+      // occurrence data is still queued/active, leave the cache dirty and try after that
+      // background lane has completed (or after an explicit consumer requested it).
+      if (current.localHydrationPending > 0) {
+        this.scheduleBackgroundLocalHydration();
+        this.scheduleSemanticCacheWrite();
+        return;
+      }
       if (this.cacheWriteTask) return;
       let task: Promise<void>;
       task = this.persistSemanticCache().finally(() => {
