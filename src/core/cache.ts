@@ -520,7 +520,7 @@ function joinNoteShards(manifest: CacheDiskManifest, shards: readonly unknown[])
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache note shard index.");
     ordered[raw.index] = raw as unknown as NoteCacheShard;
   }
-  const notes = ordered.flatMap((s) => s.notes);
+  const notes = ordered.flatMap((s) => s.notes).sort((a, b) => a.path.localeCompare(b.path));
   if (notes.length !== manifest.notes.total) throw new Error("Semantic cache note total mismatch.");
   return notes;
 }
@@ -535,7 +535,7 @@ function joinLocalShards(manifest: CacheDiskManifest, shards: readonly unknown[]
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache Local Model shard index.");
     ordered[raw.index] = raw as unknown as LocalCacheShard;
   }
-  const regions = ordered.flatMap((s) => s.localRegions);
+  const regions = ordered.flatMap((s) => s.localRegions).sort((a, b) => a[0].localeCompare(b[0]));
   if (regions.length !== manifest.localRegions.total) throw new Error("Semantic cache Local Model total mismatch.");
   return regions;
 }
