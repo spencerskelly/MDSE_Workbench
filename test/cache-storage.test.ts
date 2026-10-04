@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { serializeSemanticState } from "../src/core/cache";
 import {
   cacheManifestPaths,
+  cacheSlotPaths,
   readSemanticCacheGeneration,
   writeSemanticCacheGeneration,
   type CacheStorage,
@@ -92,7 +93,7 @@ test("dual manifest slots preserve the previous generation if the newest commit 
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), second);
 
   // Break the newest generation. Reader must fall back to the other committed slot.
-  storage.files.delete("runtime/cache/generations/good-new/notes-00001.json");
+  storage.files.delete("runtime/cache/slots/b/notes-00001.json");
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), first);
 
   // Corrupt the newest manifest slot itself; the previous slot still protects startup.
@@ -104,26 +105,34 @@ test("dual manifest slots preserve the previous generation if the newest commit 
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), first);
 });
 
-test("a partial uncommitted next generation cannot displace a committed generation", async () => {
-  const { cache } = sampleCache();
+test("a partial uncommitted next slot cannot displace a committed generation", async () => {
+  const first = sampleCache(100).cache;
+  const second = sampleCache(200).cache;
   const storage = new MemoryStorage();
-  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "good", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", first, "good-a", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", second, "good-b", { notesPerShard: 1, regionsPerShard: 1 });
 
-  // Crash simulation: generation files appear, but neither manifest slot names them.
-  storage.files.set("runtime/cache/generations/bad/notes-00000.json", "{}");
-  assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), cache);
+  // Next write targets the older A slot. Simulate only its first shard being overwritten
+  // with a new generation token, then crash before its manifest is committed.
+  const [slotA] = cacheSlotPaths("runtime/cache");
+  const newerShard = JSON.parse(storage.files.get(slotA + "/notes-00000.json") ?? "{}");
+  newerShard.generation = "unfinished-c";
+  storage.files.set(slotA + "/notes-00000.json", JSON.stringify(newerShard));
+
+  // A's old manifest now rejects its mixed shards; B is still a complete committed cache.
+  assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), second);
 });
 
 test("with no complete committed generation, missing or corrupt shards fail closed", async () => {
   const { cache } = sampleCache();
   const storage = new MemoryStorage();
   await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "g0001", { notesPerShard: 1, regionsPerShard: 1 });
-  storage.files.delete("runtime/cache/generations/g0001/notes-00001.json");
+  storage.files.delete("runtime/cache/slots/a/notes-00001.json");
   await assert.rejects(() => readSemanticCacheGeneration(storage, "runtime/cache"), /No complete semantic cache generation/);
 
   const storage2 = new MemoryStorage();
   await writeSemanticCacheGeneration(storage2, "runtime/cache", cache, "g0001", { notesPerShard: 1, regionsPerShard: 1 });
-  storage2.files.set("runtime/cache/generations/g0001/notes-00000.json", "{not json");
+  storage2.files.set("runtime/cache/slots/a/notes-00000.json", "{not json");
   await assert.rejects(() => readSemanticCacheGeneration(storage2, "runtime/cache"), /No complete semantic cache generation/);
 });
 
