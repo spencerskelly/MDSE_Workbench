@@ -19,6 +19,8 @@ export interface ReviewHost {
   app: App;
   ready(): boolean;
   index(): ModelIndex;
+  /** Monotonic semantic revision; Review recomputes global assurance only when this changes. */
+  revision(): number;
   schema(): Schema;
   writer(): RelationshipWriter;
   localFindings(): LocalFinding[];
@@ -41,6 +43,7 @@ export class ReviewView extends ItemView {
   private type = "";
   private field = "";
   private timer: number | null = null;
+  private computedRevision = -1;
 
   constructor(leaf: WorkspaceLeaf, private readonly host: ReviewHost) {
     super(leaf);
@@ -75,8 +78,8 @@ export class ReviewView extends ItemView {
     }, 1000);
   }
 
-  /** Recomputes findings from the index and redraws. */
-  refresh(): void {
+  /** Recompute global assurance only when the semantic model revision changed. */
+  refresh(force = false): void {
     if (!this.host.ready()) {
       this.contentEl.empty();
       this.contentEl.createEl("p", { text: "Workbench is still indexing. This screen will fill in when it finishes.", cls: "mdse-muted" });
@@ -84,8 +87,12 @@ export class ReviewView extends ItemView {
       this.later();
       return;
     }
-    this.all = toFindings(this.host.index().findings(), this.host.localFindings());
-    this.resolved.clear();
+    const revision = this.host.revision();
+    if (force || revision !== this.computedRevision) {
+      this.all = toFindings(this.host.index().findings(), this.host.localFindings());
+      this.computedRevision = revision;
+      this.resolved.clear();
+    }
     this.render();
   }
 
@@ -100,7 +107,7 @@ export class ReviewView extends ItemView {
     const counts = countByCategory(this.all.filter((f) => !this.resolved.has(f.key)));
     const head = el.createDiv({ cls: "mdse-review-head" });
     head.createEl("h3", { text: "Review" });
-    head.createEl("button", { text: "Refresh" }).onclick = () => this.refresh();
+    head.createEl("button", { text: "Refresh" }).onclick = () => this.refresh(true);
 
     const cats = el.createDiv({ cls: "mdse-review-cats" });
     for (const c of CATEGORIES) {
