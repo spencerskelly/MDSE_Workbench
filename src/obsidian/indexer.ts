@@ -59,6 +59,7 @@ export class Indexer {
   /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
   private relationshipResolveTimer: number | null = null;
   private relationshipResolveTask: Promise<void> | null = null;
+  private relationshipResolvePending = false;
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -90,7 +91,7 @@ export class Indexer {
 
   /** Wait until all asynchronous semantic work that can affect queries has settled. */
   async whenLocalSettled(): Promise<void> {
-    while (this.hydrationTask || this.pendingLocalReads.size || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
+    while (this.hydrationTask || this.pendingLocalReads.size || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work: Promise<unknown>[] = [...this.pendingLocalReads];
       if (this.hydrationTask) work.push(this.hydrationTask);
       if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
@@ -297,18 +298,42 @@ export class Indexer {
    */
   private scheduleRelationshipReresolution(): void {
     if (!this.liveChanges) return;
+    this.relationshipResolvePending = true;
     if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
+    // Prefer Obsidian's metadata "resolved" signal. This timer is only a bounded fallback for
+    // environments that do not emit it after a path-set change.
     this.relationshipResolveTimer = window.setTimeout(() => {
       this.relationshipResolveTimer = null;
-      if (this.rebuildPending || this.running || !this.stats) return;
-      let task: Promise<void>;
-      task = this.reResolveAllRelationships()
-        .then(() => undefined)
-        .finally(() => {
-          if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
-        });
-      this.relationshipResolveTask = task;
-    }, 500);
+      this.beginRelationshipReresolution();
+    }, 1500);
+  }
+
+  /** Called by the plugin when Obsidian reports that wikilink resolution has settled. */
+  linkResolutionSettled(): void {
+    if (!this.relationshipResolvePending) return;
+    if (this.relationshipResolveTimer !== null) {
+      window.clearTimeout(this.relationshipResolveTimer);
+      this.relationshipResolveTimer = null;
+    }
+    this.beginRelationshipReresolution();
+  }
+
+  private beginRelationshipReresolution(): void {
+    if (!this.relationshipResolvePending) return;
+    if (this.rebuildPending || this.running || !this.stats) {
+      this.scheduleRelationshipReresolution();
+      return;
+    }
+    if (this.relationshipResolveTask) return;
+    this.relationshipResolvePending = false;
+    let task: Promise<void>;
+    task = this.reResolveAllRelationships()
+      .then(() => undefined)
+      .finally(() => {
+        if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
+        if (this.relationshipResolvePending) this.scheduleRelationshipReresolution();
+      });
+    this.relationshipResolveTask = task;
   }
 
   /** Awaited variant used by controlled startup reconciliation. */
@@ -481,6 +506,7 @@ export class Indexer {
     if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
+    this.relationshipResolvePending = false;
     this.hydrationEpoch++;
     this.hydrationTask = null;
     this.hydrationRemaining = 0;
