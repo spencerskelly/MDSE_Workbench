@@ -1231,9 +1231,9 @@ function shardSemanticCache(cache, generation, noteBuckets = 32, localBuckets = 
       sequence: 0,
       generation,
       header: cache.header,
-      fingerprints: { count: fingerprintShards.length, total: Object.keys(cache.fingerprints).length },
-      notes: { count: noteShards.length, total: cache.notes.length },
-      localRegions: { count: localShards.length, total: cache.localRegions.length }
+      fingerprints: { count: fingerprintShards.length, total: Object.keys(cache.fingerprints).length, generations: fingerprintShards.map(() => generation) },
+      notes: { count: noteShards.length, total: cache.notes.length, generations: noteShards.map(() => generation) },
+      localRegions: { count: localShards.length, total: cache.localRegions.length, generations: localShards.map(() => generation) }
     },
     fingerprintShards,
     noteShards,
@@ -1265,7 +1265,7 @@ function joinFingerprintShards(manifest, shards) {
   if (shards.length !== manifest.fingerprints.count) throw new Error("Semantic cache fingerprint shard count mismatch.");
   const ordered = new Array(shards.length);
   for (const raw of shards) {
-    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.fingerprints)) {
+    if (!isObject(raw) || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || raw.generation !== expectedShardGeneration(manifest.fingerprints, raw.index, manifest.generation) || !Array.isArray(raw.fingerprints)) {
       throw new Error("Malformed semantic cache fingerprint shard.");
     }
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache fingerprint shard index.");
@@ -1288,7 +1288,7 @@ function joinNoteShards(manifest, shards) {
   if (shards.length !== manifest.notes.count) throw new Error("Semantic cache note shard count mismatch.");
   const ordered = new Array(shards.length);
   for (const raw of shards) {
-    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.notes)) {
+    if (!isObject(raw) || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || raw.generation !== expectedShardGeneration(manifest.notes, raw.index, manifest.generation) || !Array.isArray(raw.notes)) {
       throw new Error("Malformed semantic cache note shard.");
     }
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache note shard index.");
@@ -1302,7 +1302,7 @@ function joinLocalShards(manifest, shards) {
   if (shards.length !== manifest.localRegions.count) throw new Error("Semantic cache Local Model shard count mismatch.");
   const ordered = new Array(shards.length);
   for (const raw of shards) {
-    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.localRegions)) {
+    if (!isObject(raw) || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || raw.generation !== expectedShardGeneration(manifest.localRegions, raw.index, manifest.generation) || !Array.isArray(raw.localRegions)) {
       throw new Error("Malformed semantic cache Local Model shard.");
     }
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache Local Model shard index.");
@@ -1338,7 +1338,12 @@ function isDiskManifest(v) {
   return isShardSet(v.fingerprints) && isShardSet(v.notes) && isShardSet(v.localRegions);
 }
 function isShardSet(v) {
-  return isObject(v) && Number.isInteger(v.count) && Number.isInteger(v.total) && v.count >= 0 && v.total >= 0;
+  if (!isObject(v) || !Number.isInteger(v.count) || !Number.isInteger(v.total) || v.count < 0 || v.total < 0) return false;
+  if (v.generations === void 0) return true;
+  return Array.isArray(v.generations) && v.generations.length === v.count && v.generations.every((generation) => typeof generation === "string" && generation.length > 0);
+}
+function expectedShardGeneration(set, index, fallback) {
+  return set.generations?.[index] ?? fallback;
 }
 function planReconciliation(cached, current) {
   const unchanged = [];
@@ -1392,13 +1397,16 @@ async function writeSemanticCacheGeneration(storage, root, cache, generation, op
   const slotRoot = cacheSlotPaths(clean)[slot];
   await storage.mkdir(slotRoot);
   for (const shard of sharded.fingerprintShards) {
-    await storage.write(`${slotRoot}/fingerprints-${pad(shard.index)}.json`, JSON.stringify(shard));
+    const path = `${slotRoot}/fingerprints-${pad(shard.index)}.json`;
+    sharded.manifest.fingerprints.generations[shard.index] = await writeShardIfChanged(storage, path, shard, "fingerprints");
   }
   for (const shard of sharded.noteShards) {
-    await storage.write(`${slotRoot}/notes-${pad(shard.index)}.json`, JSON.stringify(shard));
+    const path = `${slotRoot}/notes-${pad(shard.index)}.json`;
+    sharded.manifest.notes.generations[shard.index] = await writeShardIfChanged(storage, path, shard, "notes");
   }
   for (const shard of sharded.localShards) {
-    await storage.write(`${slotRoot}/local-${pad(shard.index)}.json`, JSON.stringify(shard));
+    const path = `${slotRoot}/local-${pad(shard.index)}.json`;
+    sharded.manifest.localRegions.generations[shard.index] = await writeShardIfChanged(storage, path, shard, "localRegions");
   }
   await storage.write(cacheManifestPaths(clean)[slot], JSON.stringify(sharded.manifest));
   return sharded.manifest;
@@ -1453,6 +1461,19 @@ async function readSlot(storage, clean, slot, manifest) {
   ]);
   return joinSemanticCache(manifest, fingerprintShards, noteShards, localShards);
 }
+async function writeShardIfChanged(storage, path, desired, payloadKey) {
+  const desiredPayload = desired[payloadKey];
+  try {
+    const existing = JSON.parse(await storage.read(path));
+    if (isObject2(existing) && typeof existing.generation === "string" && typeof existing.index === "number" && existing.index === desired.index && Array.isArray(existing[payloadKey]) && Array.isArray(desiredPayload) && JSON.stringify(existing[payloadKey]) === JSON.stringify(desiredPayload)) {
+      assertGeneration(existing.generation);
+      return existing.generation;
+    }
+  } catch {
+  }
+  await storage.write(path, JSON.stringify(desired));
+  return desired.generation;
+}
 async function readJsonSeries(storage, paths, concurrency = 4) {
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Cache read concurrency must be a positive integer.");
   const out = new Array(paths.length);
@@ -1506,7 +1527,11 @@ function isObject2(v) {
 function isManifestShape(v) {
   if (!isObject2(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0 || typeof v.generation !== "string" || !isObject2(v.header)) return false;
   if (!isObject2(v.fingerprints) || !isObject2(v.notes) || !isObject2(v.localRegions)) return false;
-  const shardSet = (x) => Number.isInteger(x.count) && x.count >= 0 && Number.isInteger(x.total) && x.total >= 0;
+  const shardSet = (x) => {
+    if (!Number.isInteger(x.count) || x.count < 0 || !Number.isInteger(x.total) || x.total < 0) return false;
+    if (x.generations === void 0) return true;
+    return Array.isArray(x.generations) && x.generations.length === x.count && x.generations.every((generation) => typeof generation === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(generation));
+  };
   return shardSet(v.fingerprints) && shardSet(v.notes) && shardSet(v.localRegions) && typeof v.header.createdAt === "number";
 }
 
