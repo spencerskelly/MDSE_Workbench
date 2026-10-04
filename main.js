@@ -25,6 +25,78 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian8 = require("obsidian");
 
+// src/core/runtime-health.ts
+function summarizeRuntimeHealth(input) {
+  if (!input.ready) {
+    const level = input.building ? "syncing" : "starting";
+    return {
+      level,
+      label: input.building ? "Workbench \xB7 indexing" : "Workbench \xB7 starting",
+      detail: "Model service is not ready yet.",
+      rows: [
+        ["Model service", input.building ? "indexing" : "starting"],
+        ["Local Model", input.localPending ? `${input.localPending} pending` : "not yet available"]
+      ]
+    };
+  }
+  const rows = [];
+  const hardAttention = input.localReadErrors > 0 || !!input.cacheWriteError || input.schemaWarnings > 0;
+  rows.push(["Model service", "ready"]);
+  rows.push([
+    "Local Model",
+    input.localReadErrors ? `${input.localReadErrors} read error(s)` : input.localPending ? `${input.localPending} note(s) hydrating` : "settled",
+    input.localReadErrors > 0
+  ]);
+  rows.push(["Schema", input.schemaWarnings ? `${input.schemaWarnings} warning(s)` : "compatible", input.schemaWarnings > 0]);
+  rows.push([
+    "Semantic cache",
+    input.cacheWriteError ? `write issue: ${input.cacheWriteError}` : input.cacheCurrent ? "current" : "pending/coalesced",
+    !!input.cacheWriteError
+  ]);
+  if (!input.assurance) {
+    rows.push(["Global assurance", "not run for current model revision"]);
+  } else if (!input.assurance.current) {
+    rows.push(["Global assurance", "stale; recomputes on demand"]);
+  } else {
+    rows.push([
+      "Global assurance",
+      input.assurance.findings ? `${input.assurance.findings} finding(s)` : "current \xB7 no findings",
+      input.assurance.findings > 0
+    ]);
+  }
+  if (hardAttention) {
+    const issues = input.localReadErrors + input.schemaWarnings + (input.cacheWriteError ? 1 : 0);
+    return {
+      level: "attention",
+      label: `Workbench \xB7 ${issues} issue${issues === 1 ? "" : "s"}`,
+      detail: "The model remains readable; inspect runtime health for the affected subsystem.",
+      rows
+    };
+  }
+  if (input.localPending > 0) {
+    return {
+      level: "syncing",
+      label: `Workbench \xB7 syncing ${input.localPending}`,
+      detail: "Core model is ready while Local Model hydration finishes in the background.",
+      rows
+    };
+  }
+  if (input.assurance?.current && input.assurance.findings > 0) {
+    return {
+      level: "ready",
+      label: `Workbench \u2713 \xB7 ${input.assurance.findings} review`,
+      detail: "Runtime is healthy; engineering findings are available in Review.",
+      rows
+    };
+  }
+  return {
+    level: "ready",
+    label: "Workbench \u2713",
+    detail: input.assurance?.current ? "Runtime and current assurance are healthy." : "Runtime is healthy; global assurance runs on demand.",
+    rows
+  };
+}
+
 // src/core/localmodel.ts
 var READABLE_VERSIONS = ["0.1", "0.2"];
 var PREFIX = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
@@ -4351,6 +4423,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.runtimeHistory = Array.isArray(stored.runtimeHistory) ? stored.runtimeHistory.slice(-20) : [];
     this.addSettingTab(new WorkbenchSettings(this.app, this));
     this.statusEl = this.addStatusBarItem();
+    this.statusEl.addClass("mod-clickable");
+    this.registerDomEvent(this.statusEl, "click", () => this.showRuntimeHealth());
     this.setRuntimeStatus("starting");
     this.detail = new NoteDetailPanel(this.app, {
       schema: () => this.schema,
@@ -4364,6 +4438,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.addChild(this.detail);
     this.registerDetailClicks();
     this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => void this.diagnostics() });
+    this.addCommand({ id: "runtime-health", name: "Show runtime health", callback: () => this.showRuntimeHealth() });
     this.addCommand({ id: "runtime-history", name: "Show runtime history", callback: () => this.showRuntimeHistory() });
     this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
     this.addCommand({ id: "clear-semantic-cache", name: "Clear semantic cache", callback: () => this.confirmClearSemanticCache() });
@@ -4458,6 +4533,39 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.statusEl.setText(detail ? `${label} \xB7 ${detail}` : label);
     this.statusEl.setAttr("aria-label", "MDSE Workbench runtime status");
   }
+  /** Cheap health summary from already-known state. Never runs global assurance. */
+  runtimeHealth() {
+    const indexer = this.indexer;
+    const cachedAssurance = this.assurance?.peek() ?? null;
+    return summarizeRuntimeHealth({
+      ready: this.isReady(),
+      building: !!indexer?.building,
+      localPending: indexer?.localHydrationPending ?? 0,
+      localReadErrors: indexer?.localReadErrorCount ?? 0,
+      schemaWarnings: this.schema?.warnings.length ?? 0,
+      cacheWriteError: this.lastCacheWriteError,
+      cacheCurrent: !!indexer && indexer.revision === this.lastCachedRevision,
+      assurance: cachedAssurance ? {
+        current: cachedAssurance.revision === indexer?.revision && !cachedAssurance.stale,
+        findings: cachedAssurance.all.length,
+        computedAt: cachedAssurance.computedAt
+      } : null
+    });
+  }
+  refreshRuntimeHealth() {
+    if (!this.statusEl || !this.isReady()) return;
+    const health = this.runtimeHealth();
+    this.statusEl.setText(health.label);
+    this.statusEl.setAttr("aria-label", `MDSE Workbench runtime health: ${health.detail}`);
+  }
+  showRuntimeHealth() {
+    const health = this.runtimeHealth();
+    new ReportModal(this.app, "MDSE Workbench runtime health", health.rows, [
+      health.detail,
+      "This view is lightweight: it reports already-known runtime state and does not trigger a whole-model assurance scan.",
+      "Engineering findings are not treated as a runtime failure; open Review when you want the current global assurance results."
+    ]).open();
+  }
   /**
    * Prefer Obsidian's own metadata/link-resolution completion signal over a fixed startup delay.
    * The quiet timer remains a conservative fallback for versions/environments that do not emit it
@@ -4537,6 +4645,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       }
       if (indexer.localReadErrorCount) {
         this.lastCacheWriteError = `cache not updated: ${indexer.localReadErrorCount} Local Model read error(s)`;
+        this.refreshRuntimeHealth();
         return;
       }
       const revision = indexer.revision;
@@ -4565,9 +4674,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.lastCachedRevision = revision;
         indexer.markCacheCommitted(revision);
       } else this.scheduleSemanticCacheWrite();
+      this.refreshRuntimeHealth();
     } catch (e) {
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = e.message;
+      this.refreshRuntimeHealth();
     }
   }
   withActive(checking, run) {
@@ -4643,17 +4754,20 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.app.metadataCache.on("changed", (file) => {
           if (schemaPaths().includes(file.path)) return;
           this.indexer?.changed(file.path);
+          this.refreshRuntimeHealth();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         })
       );
       this.registerEvent(this.app.vault.on("delete", (f) => {
         this.indexer?.removed(f.path);
+        this.refreshRuntimeHealth();
         if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
       }));
       this.registerEvent(
         this.app.vault.on("rename", (f, old) => {
           this.indexer?.removed(old);
           this.indexer?.changed(f.path);
+          this.refreshRuntimeHealth();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         })
       );
@@ -4721,11 +4835,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (localPending) {
       void indexer.whenLocalSettled().then(() => {
         if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
-        const current = indexer.stats;
-        if (current) this.setRuntimeStatus("ready", `${current.elements} elements \xB7 ${current.mode}`);
+        this.refreshRuntimeHealth();
         this.scheduleSemanticCacheWrite();
       });
-    } else this.scheduleSemanticCacheWrite();
+    } else {
+      this.refreshRuntimeHealth();
+      this.scheduleSemanticCacheWrite();
+    }
     void this.recordRuntimeSample(indexer, stats);
     if (rebuild || schema.warnings.length) {
       new import_obsidian8.Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1e3).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
@@ -4755,6 +4871,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.lastCacheWriteError = null;
       this.lastCachedRevision = null;
       this.lastWarmRestore = "cache cleared; next startup will rebuild from the vault";
+      this.refreshRuntimeHealth();
       new import_obsidian8.Notice("MDSE Workbench: semantic cache cleared. Model files were not changed.");
     } catch (e) {
       new import_obsidian8.Notice(`MDSE Workbench: could not clear semantic cache: ${e.message}`, 12e3);
@@ -4828,7 +4945,9 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   async getAssurance(force = false) {
     if (!this.assurance || !this.indexer || !this.schema) throw new Error("Workbench assurance is not ready.");
-    return this.assurance.get(force);
+    const snapshot = await this.assurance.get(force);
+    this.refreshRuntimeHealth();
+    return snapshot;
   }
   async diagnostics() {
     if (!this.ready()) return;
