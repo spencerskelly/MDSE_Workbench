@@ -23,6 +23,8 @@ import { clearWorkbenchCache, ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from 
 
 /** Quiet time with no cache activity before the first index build starts. */
 const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
+const CACHE_QUIET_MS = 2000;
+const MIN_CACHE_WRITE_INTERVAL_MS = 30000;
 
 interface Settings {
   relationshipsPath: string;
@@ -69,6 +71,7 @@ export default class MdseWorkbench extends Plugin {
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
   private lastCacheWriteError: string | null = null;
+  private lastCachedRevision: number | null = null;
   private lastWarmRestore: string | null = null;
   private lastStartupWaitMs: number | null = null;
   private startPromise: Promise<void> | null = null;
@@ -231,22 +234,27 @@ export default class MdseWorkbench extends Plugin {
    */
   private scheduleSemanticCacheWrite(): void {
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
+    const indexer = this.indexer;
+    if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
+    const sinceLast = this.lastCacheWriteAt === null ? Infinity : Date.now() - this.lastCacheWriteAt;
+    const delay = Math.max(CACHE_QUIET_MS, MIN_CACHE_WRITE_INTERVAL_MS - sinceLast);
     this.cacheWriteTimer = window.setTimeout(() => {
       this.cacheWriteTimer = null;
       if (this.unloaded) return;
-      const indexer = this.indexer;
-      if (!indexer?.stats || indexer.building || indexer.rebuildPending || Date.now() - this.lastChange < 1500) {
-        if (indexer?.stats) this.scheduleSemanticCacheWrite();
+      const current = this.indexer;
+      if (!current?.stats || current.revision === this.lastCachedRevision) return;
+      if (current.building || current.rebuildPending || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+        this.scheduleSemanticCacheWrite();
         return;
       }
       void this.persistSemanticCache();
-    }, 2000);
+    }, delay);
   }
 
   private async persistSemanticCache(): Promise<void> {
     const schema = this.schema;
     const indexer = this.indexer;
-    if (!schema || !indexer || indexer.building || !indexer.stats) return;
+    if (!schema || !indexer || indexer.building || !indexer.stats || indexer.revision === this.lastCachedRevision) return;
     const t0 = performance.now();
     try {
       await indexer.whenLocalSettled();
@@ -254,6 +262,7 @@ export default class MdseWorkbench extends Plugin {
         this.scheduleSemanticCacheWrite();
         return;
       }
+      const revision = indexer.revision;
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
       const cache = serializeSemanticState(
@@ -275,6 +284,8 @@ export default class MdseWorkbench extends Plugin {
       this.lastCacheWriteAt = Date.now();
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = null;
+      if (indexer.revision === revision) this.lastCachedRevision = revision;
+      else this.scheduleSemanticCacheWrite();
     } catch (e) {
       // Cache is disposable. Failure is diagnostic only and never makes the model unavailable.
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
@@ -398,6 +409,7 @@ export default class MdseWorkbench extends Plugin {
 
         if (initialMode !== "full") {
           stats = indexer.installRestored(restored, cache.header.createdAt);
+          this.lastCachedRevision = indexer.revision;
           const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
           this.lastWarmRestore = initialChanges
             ? `restored; ${initialChanges} path change(s) to reconcile`
@@ -466,6 +478,7 @@ export default class MdseWorkbench extends Plugin {
       this.lastCacheWriteAt = null;
       this.lastCacheWriteMs = null;
       this.lastCacheWriteError = null;
+      this.lastCachedRevision = null;
       this.lastWarmRestore = "cache cleared; next startup will rebuild from the vault";
       new Notice("MDSE Workbench: semantic cache cleared. Model files were not changed.");
     } catch (e) {
@@ -576,6 +589,7 @@ export default class MdseWorkbench extends Plugin {
       ["Warm restore", this.lastWarmRestore ?? "not attempted"],
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
       ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
+      ["Semantic cache persistence", this.indexer!.revision === this.lastCachedRevision ? "current" : "pending/coalesced"],
     ];
     if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
     new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
