@@ -10,6 +10,7 @@ import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, 
 import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
 import { CacheMutationGate } from "./core/cache-mutation";
 import { canPublishCoreReady } from "./core/core-readiness";
+import { recoverWithColdBuild } from "./core/startup-recovery";
 import { formatCacheBytes } from "./core/cache-size";
 import { scheduleStartupHandoff } from "./core/startup-handoff";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreCoreSemanticState, restoreSemanticState, serializeSemanticState } from "./core/cache";
@@ -762,7 +763,10 @@ export default class MdseWorkbench extends Plugin {
     if (!stats) {
       indexer.enableLiveChanges();
       this.setRuntimeStatus("indexing");
-      stats = await indexer.build();
+      stats = await recoverWithColdBuild(
+        () => indexer.discardProvisionalSemanticState(),
+        () => indexer.build(),
+      );
     }
 
     // Restored/build stats are not a readiness signal. Publish core-ready only after every
