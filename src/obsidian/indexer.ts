@@ -12,6 +12,7 @@ import { MetadataChangeBurst } from "../core/metadata-burst";
 import { requeueHydrationPaths } from "../core/hydration-cancel";
 import { SingleFlightByKey } from "../core/single-flight";
 import { DEFAULT_LOCAL_REGION_RETENTION_LIMIT, localRegionEvictions } from "../core/local-retention";
+import { summarizeHydrationCosts, type HydrationCost, type HydrationCostSummary } from "../core/hydration-metrics";
 import { hasPendingSourceReconciliation } from "../core/source-reconciliation";
 import type { Schema } from "../core/schema";
 
@@ -83,6 +84,8 @@ export class Indexer {
   private hydrationStartedAt: number | null = null;
   private lastHydrationMsValue: number | null = null;
   private lastHydrationCandidatesValue = 0;
+  /** Latest per-owner occurrence hydration cost; one row per owner, not an unbounded history. */
+  private readonly hydrationCosts = new Map<string, HydrationCost>();
   /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
   private readonly localReadErrors = new Map<string, string>();
   /** Hydration/use recency for bounded steady-state Local Model retention. */
@@ -166,6 +169,15 @@ export class Indexer {
     return this.lastHydrationCandidatesValue;
   }
 
+  get localHydrationCostSummary(): HydrationCostSummary {
+    return summarizeHydrationCosts(this.hydrationCosts.values());
+  }
+
+  hydrationCost(path: string): HydrationCost | undefined {
+    const row = this.hydrationCosts.get(path);
+    return row ? { ...row } : undefined;
+  }
+
   get localReadErrorCount(): number {
     return this.localReadErrors.size;
   }
@@ -179,6 +191,21 @@ export class Indexer {
         message: `Could not read this note's Local Model body: ${message}`,
         path,
       }));
+  }
+
+  private measureHydration(path: string, text: string, readStartedAt: number, readFinishedAt: number): ReturnType<typeof parseLocalModel> {
+    const parseStartedAt = performance.now();
+    const region = parseLocalModel(text);
+    const parseFinishedAt = performance.now();
+    this.hydrationCosts.set(path, {
+      path,
+      readMs: readFinishedAt - readStartedAt,
+      parseMs: parseFinishedAt - parseStartedAt,
+      totalMs: parseFinishedAt - readStartedAt,
+      bytes: new TextEncoder().encode(text).byteLength,
+      records: region?.records.length ?? 0,
+    });
+    return region;
   }
 
   private setLocalRegion(path: string, region: ReturnType<typeof parseLocalModel>): void {
@@ -326,9 +353,11 @@ export class Indexer {
           this.localRevision.set(path, revision);
           this.requestedHydrationPaths.add(path);
           try {
+            const readStartedAt = performance.now();
             const text = await this.app.vault.cachedRead(file);
+            const readFinishedAt = performance.now();
             if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-            this.setLocalRegion(path, parseLocalModel(text));
+            this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.bumpRevision(path);
           } catch (e) {
@@ -379,6 +408,7 @@ export class Indexer {
     this.requestedHydrationFlights.clear();
     this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
+    this.hydrationCosts.clear();
     this.coldLocalPaths.clear();
     this.localRetentionOrder.clear();
     this.localRetentionClock = 0;
@@ -722,9 +752,11 @@ export class Indexer {
         const revision = (this.localRevision.get(path) ?? 0) + 1;
         this.localRevision.set(path, revision);
         try {
+          const readStartedAt = performance.now();
           const text = await this.app.vault.cachedRead(file);
+          const readFinishedAt = performance.now();
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
-            this.setLocalRegion(path, parseLocalModel(text));
+            this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.cacheDirtyPaths.add(path);
             changed = true;
