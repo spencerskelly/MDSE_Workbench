@@ -375,7 +375,7 @@ export default class MdseWorkbench extends Plugin {
       }
       indexer.beginDeferredLocalHydration(true);
       this.scheduleRuntimeHealthRefresh();
-      void indexer.whenLocalSettled()
+      void indexer.whenLocalSettled(false)
         .then(() => {
           if (this.unloaded || this.indexer !== indexer) return;
           this.lastOccurrenceError = null;
@@ -420,7 +420,7 @@ export default class MdseWorkbench extends Plugin {
     if (!schema || !indexer || indexer.building || !indexer.stats || indexer.revision === this.lastCachedRevision) return;
     const t0 = performance.now();
     try {
-      await indexer.whenLocalSettled();
+      await indexer.whenLocalSettled(false);
       if (indexer.building || indexer.rebuildPending) {
         this.scheduleSemanticCacheWrite();
         return;
@@ -950,7 +950,6 @@ export default class MdseWorkbench extends Plugin {
   async checkView(): Promise<void> {
     if (!this.ready()) return;
     const indexer = this.indexer as Indexer;
-    await indexer.whenLocalSettled();
     const f = this.app.workspace.getActiveFile();
     const meta = f ? this.views[f.path] : undefined;
     if (!f || !meta) {
@@ -958,6 +957,7 @@ export default class MdseWorkbench extends Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
+    if (profileNeedsLocalOccurrences(profile)) await indexer.whenLocalSettled();
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
