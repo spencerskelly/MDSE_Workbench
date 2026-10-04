@@ -234,3 +234,47 @@ test("deletion slice refuses non-part Local Model records", () => {
     /part occurrences only/,
   );
 });
+
+
+test("creates an endpoint attached to an existing part occurrence", () => {
+  const endpointId = "ep-20261004234700000skellyspencer";
+  const result = planLocalRecordCreate(note(), {
+    kind: "endpoint",
+    localId: endpointId,
+    heading: "J2",
+    fields: {
+      definition: "[[CAN Port]]",
+      part: "[[#^part-" + tokenA + "|K1]]",
+      kind: "physical",
+      usage: "standard",
+      multiplicity: "1",
+    },
+  });
+
+  const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
+  assert.equal(endpoint?.kind, "endpoint");
+  assert.equal(endpoint?.part?.blockId, "part-" + tokenA);
+  assert.equal(endpoint?.part?.target, "");
+  assert.equal(endpoint?.endpointKind, "physical");
+  assert.equal(endpoint?.multiplicity, "1");
+  assert.equal(endpoint?.usage, "standard");
+  assert.equal(endpoint?.usageExplicit, false);
+});
+
+test("endpoint creation rejects a missing local part target through validation findings", () => {
+  const endpointId = "ep-20261004234700001skellyspencer";
+  const result = planLocalRecordCreate(note(), {
+    kind: "endpoint",
+    localId: endpointId,
+    heading: "JX",
+    fields: {
+      definition: "[[CAN Port]]",
+      part: "[[#^part-20261004234700099skellyspencer|Missing]]",
+    },
+  });
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === endpointId &&
+    finding.code === "ref.local-missing" &&
+    finding.severity === "error"
+  ));
+});
