@@ -4,7 +4,7 @@
  */
 import { App, getLinkpath, TFile } from "obsidian";
 import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../core/model";
-import type { FileFingerprint, RestoredSemanticState } from "../core/cache";
+import type { FileFingerprint, ReconciliationPlan, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
 import type { Schema } from "../core/schema";
@@ -109,7 +109,16 @@ export class Indexer {
    * resolution of links authored in otherwise unchanged notes (W-344).
    */
   reconcileStablePaths(paths: readonly string[]): Promise<BuildStats> {
-    if (!this.running) this.running = this.doReconcileStable(paths).finally(() => (this.running = null));
+    return this.reconcilePlan({ unchanged: [], changed: [...paths], added: [], deleted: [] });
+  }
+
+  /**
+   * Reconcile a warm-cache plan. Content changes/additions are parsed; deletions are removed.
+   * When the path set changes, every cached authored relationship link is re-resolved against
+   * Obsidian's current metadata cache without rereading unchanged Markdown bodies.
+   */
+  reconcilePlan(plan: ReconciliationPlan): Promise<BuildStats> {
+    if (!this.running) this.running = this.doReconcilePlan(plan).finally(() => (this.running = null));
     return this.running;
   }
 
@@ -171,39 +180,79 @@ export class Indexer {
     };
   }
 
-  private async doReconcileStable(paths: readonly string[]): Promise<BuildStats> {
+  private async doReconcilePlan(plan: ReconciliationPlan): Promise<BuildStats> {
     const t0 = performance.now();
-    const unique = [...new Set(paths)].sort();
-    for (let i = 0; i < unique.length; i++) {
-      const path = unique[i];
+    const changedOrAdded = [...new Set([...plan.changed, ...plan.added])].sort();
+    const deleted = [...new Set(plan.deleted)].sort();
+
+    for (const path of deleted) {
+      this.index.remove(path);
+      this.local.remove(path);
+      this.fingerprints.delete(path);
+      this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
+    }
+
+    for (let i = 0; i < changedOrAdded.length; i++) {
+      const path = changedOrAdded[i];
       const f = this.app.vault.getAbstractFileByPath(path);
       if (!(f instanceof TFile) || f.extension !== "md") {
-        throw new Error(`Stable-path reconciliation found missing Markdown file ${path}; full rebuild required.`);
+        throw new Error(`Warm reconciliation expected Markdown file ${path}, but it is unavailable.`);
       }
       await this.applyAwaited(path, f);
       if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
     }
 
-    // Changes arriving during reconciliation are replayed once. A very large concurrent burst
-    // falls back to the existing proven full rebuild scheduler.
+    if (plan.added.length || plan.deleted.length) await this.reResolveAllRelationships();
+
+    // Changes arriving during reconciliation are replayed once. Concurrent path-set changes
+    // deliberately schedule the safe full rebuild; the next startup can remain incremental.
     const backlog = [...this.dirty];
     this.dirty.clear();
     if (backlog.length > CHUNK) this.scheduleRebuild();
     else {
+      let needsFull = false;
       for (let i = 0; i < backlog.length; i++) {
         const path = backlog[i];
         const f = this.app.vault.getAbstractFileByPath(path);
         if (!(f instanceof TFile) || f.extension !== "md") {
-          this.scheduleRebuild();
+          needsFull = true;
           break;
         }
         await this.applyAwaited(path, f);
         if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
       }
+      if (needsFull) this.scheduleRebuild();
     }
 
     this.stats = this.makeStats("reconciled", Math.round(performance.now() - t0), Date.now());
     return this.stats;
+  }
+
+  /**
+   * Re-resolve relationship links from cached authored evidence after the note path set changes.
+   * This is CPU/metadata work only: unchanged Markdown files and Local Model bodies are not read.
+   */
+  private async reResolveAllRelationships(): Promise<void> {
+    const notes = [...this.index.notes.values()];
+    for (let i = 0; i < notes.length; i++) {
+      const rec = notes[i];
+      if (!rec.authoredLinks) throw new Error(`Cached note ${rec.path} has no authored-link evidence; full rebuild required.`);
+      const resolved = resolveAuthoredRelationshipLinks(
+        rec.authoredLinks,
+        rec.path,
+        this.schema,
+        (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path,
+      );
+      this.index.upsert({
+        ...rec,
+        fields: resolved.fields,
+        unresolved: resolved.unresolved,
+        broken: resolved.broken,
+        repeat: resolved.repeat,
+        localRefs: resolved.localRefs,
+      });
+      if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
+    }
   }
 
   /** Awaited variant used by controlled startup reconciliation. */
