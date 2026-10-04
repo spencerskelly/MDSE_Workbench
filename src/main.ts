@@ -185,6 +185,7 @@ export default class MdseWorkbench extends Plugin {
     this.registerEvent(this.app.metadataCache.on("changed", () => (this.lastChange = Date.now())));
     this.registerEvent(this.app.metadataCache.on("resolved", () => {
       this.metadataResolved = true;
+      this.indexer?.linkResolutionSettled();
     }));
     this.register(() => {
       this.unloaded = true;
