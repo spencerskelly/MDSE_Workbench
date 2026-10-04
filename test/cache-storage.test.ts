@@ -101,7 +101,6 @@ test("dual manifest slots preserve the previous generation if the newest commit 
   // Corrupt the newest manifest slot itself; the previous slot still protects startup.
   const [a, b] = cacheManifestPaths("runtime/cache");
   const ma = storage.files.get(a) ?? "";
-  const mb = storage.files.get(b) ?? "";
   const newestSlot = ma.includes("good-new") ? a : b;
   storage.files.set(newestSlot, "{broken");
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), first);
