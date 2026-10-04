@@ -26,8 +26,9 @@ export interface CacheStorage {
 }
 
 export interface CacheStoreOptions {
-  notesPerShard?: number;
-  regionsPerShard?: number;
+  noteBuckets?: number;
+  localBuckets?: number;
+  fingerprintBuckets?: number;
 }
 
 const SLOT_NAMES = ["a", "b"] as const;
@@ -53,7 +54,7 @@ export async function writeSemanticCacheGeneration(
 ): Promise<ShardedSemanticCache["manifest"]> {
   assertGeneration(generation);
   const clean = cleanRoot(root);
-  const sharded = shardSemanticCache(cache, generation, options.notesPerShard, options.regionsPerShard);
+  const sharded = shardSemanticCache(cache, generation, options.noteBuckets, options.localBuckets, options.fingerprintBuckets);
 
   await storage.mkdir(clean);
   await storage.mkdir(`${clean}/slots`);
@@ -68,8 +69,12 @@ export async function writeSemanticCacheGeneration(
   const slotRoot = cacheSlotPaths(clean)[slot];
   await storage.mkdir(slotRoot);
 
-  // Stale extra shard files from a previous larger generation are harmless: the new manifest
-  // names the exact count, and every consumed shard must carry the new generation token.
+  // Stable path buckets deliberately keep shard identities fixed across generations. This still
+  // writes a complete inactive slot today; the stable buckets are the prerequisite for later
+  // dirty-bucket persistence without a cache-format rewrite.
+  for (const shard of sharded.fingerprintShards) {
+    await storage.write(`${slotRoot}/fingerprints-${pad(shard.index)}.json`, JSON.stringify(shard));
+  }
   for (const shard of sharded.noteShards) {
     await storage.write(`${slotRoot}/notes-${pad(shard.index)}.json`, JSON.stringify(shard));
   }
@@ -114,6 +119,10 @@ async function readSlot(
 ): Promise<SemanticCache> {
   assertGeneration(manifest.generation);
   const slotRoot = cacheSlotPaths(clean)[slot];
+  const fingerprintShards: unknown[] = [];
+  for (let i = 0; i < manifest.fingerprints.count; i++) {
+    fingerprintShards.push(JSON.parse(await storage.read(`${slotRoot}/fingerprints-${pad(i)}.json`)) as unknown);
+  }
   const noteShards: unknown[] = [];
   for (let i = 0; i < manifest.notes.count; i++) {
     noteShards.push(JSON.parse(await storage.read(`${slotRoot}/notes-${pad(i)}.json`)) as unknown);
@@ -122,7 +131,7 @@ async function readSlot(
   for (let i = 0; i < manifest.localRegions.count; i++) {
     localShards.push(JSON.parse(await storage.read(`${slotRoot}/local-${pad(i)}.json`)) as unknown);
   }
-  return joinSemanticCache(manifest, noteShards, localShards);
+  return joinSemanticCache(manifest, fingerprintShards, noteShards, localShards);
 }
 
 interface ManifestSlot {
@@ -173,11 +182,11 @@ function isObject(v: unknown): v is Obj {
 }
 
 function isManifestShape(v: unknown): v is CacheDiskManifest {
-  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || (v.sequence as number) < 0 || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
-  if (!isObject(v.notes) || !isObject(v.localRegions)) return false;
-  return Number.isInteger(v.notes.count) && (v.notes.count as number) >= 0 &&
-    Number.isInteger(v.notes.total) && (v.notes.total as number) >= 0 &&
-    Number.isInteger(v.localRegions.count) && (v.localRegions.count as number) >= 0 &&
-    Number.isInteger(v.localRegions.total) && (v.localRegions.total as number) >= 0 &&
+  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || (v.sequence as number) < 0 || typeof v.generation !== "string" || !isObject(v.header)) return false;
+  if (!isObject(v.fingerprints) || !isObject(v.notes) || !isObject(v.localRegions)) return false;
+  const shardSet = (x: Obj) =>
+    Number.isInteger(x.count) && (x.count as number) >= 0 &&
+    Number.isInteger(x.total) && (x.total as number) >= 0;
+  return shardSet(v.fingerprints) && shardSet(v.notes) && shardSet(v.localRegions) &&
     typeof v.header.createdAt === "number";
 }
