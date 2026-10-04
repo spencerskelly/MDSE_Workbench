@@ -275,7 +275,7 @@ export class LocalPartCreateModal extends Modal {
 }
 
 
-export class LocalPartDeleteModal extends Modal {
+export class LocalOccurrenceDeleteModal extends Modal {
   private staged: StagedLocalDelete | null = null;
   private applied = false;
 
@@ -283,6 +283,7 @@ export class LocalPartDeleteModal extends Modal {
     app: App,
     private readonly ownerName: string,
     private readonly occurrenceName: string,
+    private readonly occurrenceKind: "part" | "endpoint",
     private readonly stage: () => Promise<StagedLocalDelete>,
     private readonly apply: (transactionId: string) => Promise<void>,
     private readonly cancel: (transactionId: string) => void,
@@ -292,7 +293,7 @@ export class LocalPartDeleteModal extends Modal {
   }
 
   onOpen(): void {
-    this.titleEl.setText("Review part occurrence deletion");
+    this.titleEl.setText(`Review ${this.occurrenceKind} occurrence deletion`);
     void this.load();
   }
 
@@ -388,7 +389,7 @@ export class LocalPartDeleteModal extends Modal {
           this.staged = null;
           this.close();
           this.onApplied();
-          new Notice(`Deleted part occurrence ${this.occurrenceName}.`, 5000);
+          new Notice(`Deleted ${this.occurrenceKind} occurrence ${this.occurrenceName}.`, 5000);
         } catch (e) {
           new Notice(`Not deleted: ${(e as Error).message}`, 12000);
           apply.disabled = false;
