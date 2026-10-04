@@ -262,4 +262,8 @@ RTA-2 foundation is now implemented through the save-only runtime boundary:
 
 RTA-5 has also begun safely in Bootstrap 0.3.1: safe activation repair and its immediately following release check now reuse one in-session integrity scan instead of hashing every locked plugin file twice. Persistent cross-start hash reuse is still deferred because it must not weaken W-322/W-331 integrity.
 
-Warm restore remains disabled until the standalone Workbench source passes its test/typecheck/build gate and the save-only cache is inspected in a real vault. The next code step is the restored-index/install + stable-path incremental reconciliation service behind a disabled/controlled gate, then runtime testing before promotion.
+The standalone source gate is now green: GitHub Actions passed **95/95 tests and the TypeScript/bundle build** at commit `41f1ef9`, then produced built-artifact commit `225c480`. The exact 0.1.17 artifact has been installed into the disposable `261002083` integration vault with its plugin-lock hashes aligned.
+
+RTA-3 source is also present behind the default-OFF **Warm cache preview** gate: a validated restored index can be installed, small stable-path changes reconcile in bounded batches, path-set/large-burst/concurrent ambiguity falls back to the proven full rebuild, and startup/rebuild requests are serialized. **This is not promoted behavior yet.**
+
+The next gate is runtime acceptance in Obsidian using `docs/Testing/RTA Startup and Semantic Cache Test Sheet.md`: first prove save-only cache/inspection and normal full-build equivalence, then enable Warm cache preview in the disposable vault and compare no-change/small-change/path-change behavior against a manual full rebuild.
