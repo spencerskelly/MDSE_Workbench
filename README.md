@@ -22,7 +22,7 @@ Start from the methodology vault's `00_Workspace/00 - Current State.md`: it list
 
 **Fixtures are copies only where independent Workbench tests require them.** `test/fixtures/relationships.yaml`, `element-types.yaml`, and `local-model.yaml` must exactly equal the current authority schemas. `local-model-0.1.yaml` is a frozen historical compatibility fixture and must not be updated to current semantics. After any current-schema change, sync the current fixture and run `npm test`. The vault's `python3 Base Vault/Tools/v0.8.0/check-release.py --workbench <this clone>` fails if they differ or if the version in `package.json`, `manifest.json` and the release manifest disagree (W-320, WB-108).
 
-**CI/build note.** `.github/workflows/build-artifact.yml` is now present and is defined to run `npm ci`, `npm test` and `npm run build` on pushes to `main` and pull requests; artifact synchronization is restricted to pushes on `main`. A connector-created probe PR did not expose a workflow run in the current tooling, so the latest RTA source must still be treated as **not yet build-gated** until a real GitHub/local run reports success. Do not promote or vendor the candidate solely from source presence.
+**CI/build note.** `.github/workflows/build-artifact.yml` runs `npm ci`, `npm test` and `npm run build` on pushes to `main` and pull requests; artifact synchronization is restricted to successful pushes on `main`. The RTA/WB-106 source passed **95/95 tests plus TypeScript/bundle build** on GitHub Actions at commit `41f1ef9`; the workflow then created built-artifact commit `225c480` containing root `main.js` and the synchronized vault plugin payload. Runtime promotion still requires the integration/acceptance gates; a green source build is necessary but not sufficient.
 
 ## Status: v0.8 pre-release candidate
 
@@ -146,6 +146,6 @@ npm run bench:generate -- 60000 && npm run bench
 
 `test/fixtures/` holds copies of the vault's relationship, element and Local Model schemas (the current 0.2 authority copy and the frozen 0.1 compatibility copy); `test/localmodel.test.ts` tests the reader against both.
 
-The active build workflow is `.github/workflows/build-artifact.yml`. It is intended to run tests and the TypeScript/bundle build on `main` pushes and pull requests, and to synchronize the checked-in plugin artifact only from a successful `main` push. Until a run is visibly confirmed, also run `npm ci && npm test && npm run build` before promotion. Historical workflow material under `ci-workflows/`, if retained, is reference only unless explicitly activated.
+The active build workflow is `.github/workflows/build-artifact.yml`. It runs tests and the TypeScript/bundle build on `main` pushes and pull requests, and synchronizes the checked-in plugin artifact only from a successful `main` push. The current RTA candidate has a confirmed green run (95 tests + build); keep the same gate for every promotion. Historical workflow material under `ci-workflows/`, if retained, is reference only unless explicitly activated.
 
 To release: bump `version` in `manifest.json`, `package.json` and `versions.json`, commit, and push a tag `v<version>`.
