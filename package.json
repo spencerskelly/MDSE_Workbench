@@ -11,7 +11,8 @@
     "test": "node --import tsx --test test/*.test.ts",
     "bench:generate": "tsx bench/generate-vault.ts",
     "bench": "tsx bench/run-bench.ts",
-    "bench:cache": "tsx bench/cache-bench.ts"
+    "bench:cache": "tsx bench/cache-bench.ts",
+    "bench:startup": "tsx bench/startup-bench.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {
