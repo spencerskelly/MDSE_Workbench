@@ -68,12 +68,13 @@ function sampleCache(createdAt = 123) {
 test("generation shards are written before either commit-manifest slot", async () => {
   const { cache } = sampleCache();
   const storage = new MemoryStorage();
-  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "g0001", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "g0001", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
 
   const [a, b] = cacheManifestPaths("runtime/cache");
   const commitIndex = storage.operations.findIndex((x) => x === "write " + a || x === "write " + b);
   assert.ok(commitIndex > 0);
   assert.equal(commitIndex, storage.operations.length - 1, "a manifest slot must be the final persistence operation");
+  assert.ok(storage.operations.slice(0, commitIndex).some((x) => x.includes("fingerprints-00000.json")));
   assert.ok(storage.operations.slice(0, commitIndex).some((x) => x.includes("notes-00000.json")));
   assert.ok(storage.operations.slice(0, commitIndex).some((x) => x.includes("local-00000.json")));
 });
@@ -81,7 +82,7 @@ test("generation shards are written before either commit-manifest slot", async (
 test("a committed generation reads back to the same semantic cache", async () => {
   const { cache } = sampleCache();
   const storage = new MemoryStorage();
-  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "g0001", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "g0001", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), cache);
 });
 
@@ -90,12 +91,12 @@ test("dual manifest slots preserve the previous generation if the newest commit 
   const second = sampleCache(200).cache;
   const storage = new MemoryStorage();
 
-  await writeSemanticCacheGeneration(storage, "runtime/cache", first, "good-old", { notesPerShard: 1, regionsPerShard: 1 });
-  await writeSemanticCacheGeneration(storage, "runtime/cache", second, "good-new", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", first, "good-old", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", second, "good-new", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), second);
 
   // Break the newest generation. Reader must fall back to the other committed slot.
-  storage.files.delete("runtime/cache/slots/b/notes-00001.json");
+  storage.files.delete("runtime/cache/slots/b/notes-00000.json");
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), first);
 
   // Corrupt the newest manifest slot itself; the previous slot still protects startup.
@@ -110,8 +111,8 @@ test("a partial uncommitted next slot cannot displace a committed generation", a
   const first = sampleCache(100).cache;
   const second = sampleCache(200).cache;
   const storage = new MemoryStorage();
-  await writeSemanticCacheGeneration(storage, "runtime/cache", first, "good-a", { notesPerShard: 1, regionsPerShard: 1 });
-  await writeSemanticCacheGeneration(storage, "runtime/cache", second, "good-b", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", first, "good-a", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", second, "good-b", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
 
   // Next write targets the older A slot. Simulate only its first shard being overwritten
   // with a new generation token, then crash before its manifest is committed.
@@ -127,12 +128,12 @@ test("a partial uncommitted next slot cannot displace a committed generation", a
 test("with no complete committed generation, missing or corrupt shards fail closed", async () => {
   const { cache } = sampleCache();
   const storage = new MemoryStorage();
-  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "g0001", { notesPerShard: 1, regionsPerShard: 1 });
-  storage.files.delete("runtime/cache/slots/a/notes-00001.json");
+  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "g0001", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+  storage.files.delete("runtime/cache/slots/a/notes-00000.json");
   await assert.rejects(() => readSemanticCacheGeneration(storage, "runtime/cache"), /No complete semantic cache generation/);
 
   const storage2 = new MemoryStorage();
-  await writeSemanticCacheGeneration(storage2, "runtime/cache", cache, "g0001", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage2, "runtime/cache", cache, "g0001", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
   storage2.files.set("runtime/cache/slots/a/notes-00000.json", "{not json");
   await assert.rejects(() => readSemanticCacheGeneration(storage2, "runtime/cache"), /No complete semantic cache generation/);
 });
@@ -151,8 +152,8 @@ test("cache commit order is monotonic even if the system clock moves backward", 
   rolledBackClock.header.producerVersion = "after-clock-rollback";
   const storage = new MemoryStorage();
 
-  await writeSemanticCacheGeneration(storage, "runtime/cache", newerClock, "before-rollback", { notesPerShard: 1, regionsPerShard: 1 });
-  await writeSemanticCacheGeneration(storage, "runtime/cache", rolledBackClock, "after-rollback", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", newerClock, "before-rollback", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", rolledBackClock, "after-rollback", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
 
   const [a, b] = cacheManifestPaths("runtime/cache");
   const manifests = [a, b].map((path) => JSON.parse(storage.files.get(path) ?? "{}"));
