@@ -2217,6 +2217,7 @@ function profileNeedsLocalOccurrences(profile) {
   return profile.needsLocalOccurrences === true;
 }
 function withLocalOccurrences(index, local, resolve, base3, profile) {
+  if (!profileNeedsLocalOccurrences(profile)) return base3;
   switch (profile.name) {
     case "Internal":
       return withLocalInternal(index, local, resolve, base3, profile);
@@ -5679,7 +5680,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
     await indexer.whenSourceSettled();
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
-    const view = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
+    const view = profileNeedsLocalOccurrences(profile) ? withLocalOccurrences(index, indexer.local, resolve, baseView, profile) : baseView;
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
       new import_obsidian8.Notice(`Nothing to show: this note has no links the ${profile.name} view follows (${[...new Set(profile.steps.map((s) => s.field))].join(", ")}).`);
       return;
@@ -5794,7 +5795,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
     await indexer.whenSourceSettled();
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
-    const current = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
+    const current = profileNeedsLocalOccurrences(profile) ? withLocalOccurrences(index, indexer.local, resolve, baseView, profile) : baseView;
     const now = signature(current);
     if (now === meta.signature) new import_obsidian8.Notice("This view is current.");
     else
