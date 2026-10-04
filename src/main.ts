@@ -150,6 +150,7 @@ export default class MdseWorkbench extends Plugin {
     this.detail = new NoteDetailPanel(this.app, {
       schema: () => this.schema,
       writer: () => this.writer,
+      modelEditor: () => this.modelEditor,
       editBlocked: () => editingBlockedReason(this.isReady(), this.schema),
       elements: (exclude) => this.elements().filter((r) => r.path !== exclude),
       relate: (a, b) => this.relate(a, b),
