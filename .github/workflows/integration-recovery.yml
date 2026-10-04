@@ -89,19 +89,13 @@ jobs:
           EOF
           done
 
-      - name: Register vault
+      - name: Seed valid semantic cache
         env:
-          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery-seed
         run: |
           mkdir -p "$XDG_CONFIG_HOME/obsidian"
           export VAULT
           node -e 'const fs=require("fs"),p=require("path");fs.writeFileSync(p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json"),JSON.stringify({vaults:{recovery:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
-
-      - name: Seed valid semantic cache
-        env:
-          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
-        run: |
-          export VAULT
           rm -rf "$VAULT/.obsidian/plugins/mdse-workbench/cache"
           rm -f "$VAULT/.mdse_integration_result.json"
           node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"recovery-seed"},null,2))'
@@ -128,9 +122,11 @@ jobs:
 
       - name: Prove bad-cache fallback and plugin reload recovery
         env:
-          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery-bad
         run: |
+          mkdir -p "$XDG_CONFIG_HOME/obsidian"
           export VAULT
+          node -e 'const fs=require("fs"),p=require("path");fs.writeFileSync(p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json"),JSON.stringify({vaults:{recovery:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
           rm -f "$VAULT/.mdse_integration_result.json"
           node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"bad-cache-recovery"},null,2))'
           xvfb-run -a bash -euo pipefail -c '
@@ -143,9 +139,11 @@ jobs:
 
       - name: Prove clean Obsidian restart after recovery
         env:
-          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery-restart
         run: |
+          mkdir -p "$XDG_CONFIG_HOME/obsidian"
           export VAULT
+          node -e 'const fs=require("fs"),p=require("path");fs.writeFileSync(p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json"),JSON.stringify({vaults:{recovery:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
           rm -f "$VAULT/.mdse_integration_result.json"
           node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"post-recovery-restart"},null,2))'
           xvfb-run -a bash -euo pipefail -c '
