@@ -343,3 +343,55 @@ test("failed publication before manifest commit leaves the previous generation a
   storage.afterWrite = null;
   assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "stable-old");
 });
+
+
+test("unchanged inactive-slot shards are reused without rewriting them", async () => {
+  const first = sampleCache(100).cache;
+  const second = sampleCache(200).cache;
+  const third = sampleCache(300).cache;
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", first, "reuse-a", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", second, "reuse-b", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  storage.operations.length = 0;
+  await writeSemanticCacheGeneration(storage, "runtime/cache", third, "reuse-c", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  const writes = storage.operations.filter((operation) => operation.startsWith("write "));
+  assert.equal(writes.length, 1, "semantically unchanged shards in the inactive slot should not be rewritten");
+  assert.match(writes[0], /manifest-[ab]\.json$/);
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.createdAt, 300);
+});
+
+test("only changed inactive-slot shards are rewritten before the manifest commit", async () => {
+  const first = sampleCache(100).cache;
+  const second = sampleCache(200).cache;
+  const third = sampleCache(300).cache;
+  third.notes[0].name = "A changed";
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", first, "partial-a", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", second, "partial-b", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  storage.operations.length = 0;
+  await writeSemanticCacheGeneration(storage, "runtime/cache", third, "partial-c", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  const writes = storage.operations.filter((operation) => operation.startsWith("write "));
+  assert.equal(writes.filter((operation) => operation.includes("/notes-")).length, 1);
+  assert.equal(writes.filter((operation) => operation.includes("/fingerprints-")).length, 0);
+  assert.equal(writes.filter((operation) => operation.includes("/local-")).length, 0);
+  assert.match(writes.at(-1) ?? "", /manifest-[ab]\.json$/, "manifest must remain the final commit marker");
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).notes[0].name, "A changed");
+});
