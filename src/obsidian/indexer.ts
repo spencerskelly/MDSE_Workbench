@@ -9,6 +9,7 @@ import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/loc
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
 import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative";
 import { MetadataChangeBurst } from "../core/metadata-burst";
+import { requeueHydrationPaths } from "../core/hydration-cancel";
 import { hasPendingSourceReconciliation } from "../core/source-reconciliation";
 import type { Schema } from "../core/schema";
 
@@ -58,6 +59,7 @@ export class Indexer {
   /** Body reads started by incremental Local Model updates; consumers can wait for semantic consistency. */
   private readonly pendingLocalReads = new Set<Promise<void>>();
   private readonly requestedLocalReads = new Set<Promise<void>>();
+  private readonly requestedHydrationPaths = new Set<string>();
   /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
   private semanticRevision = 0;
   /** Paths whose derived cache buckets no longer match the last committed cache generation. */
@@ -205,9 +207,10 @@ export class Indexer {
   private cancelOccurrenceHydration(): void {
     if (!this.hydrationTask && !this.requestedLocalReads.size) return;
     this.hydrationEpoch++;
-    const queued = new Set(this.deferredHydrationPaths);
-    for (const path of this.activeHydrationPaths) queued.add(path);
-    this.deferredHydrationPaths = [...queued].sort();
+    this.deferredHydrationPaths = requeueHydrationPaths(
+      this.deferredHydrationPaths,
+      [...this.activeHydrationPaths, ...this.requestedHydrationPaths],
+    );
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationDemanded = false;
     this.hydrationRemaining = 0;
@@ -261,33 +264,44 @@ export class Indexer {
   async hydrateLocalOwners(paths: readonly string[]): Promise<void> {
     const unique = [...new Set(paths)].sort();
     if (!unique.length) return;
-    const wanted = new Set(unique);
-    this.deferredHydrationPaths = this.deferredHydrationPaths.filter((path) => !wanted.has(path));
-    const epoch = this.deferredHydrationEpoch;
-    const budget = new CooperativeBudget(WORK_SLICE_MS);
-    for (const path of unique) {
-      if (epoch !== this.hydrationEpoch) return;
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (!(file instanceof TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
-      const revision = (this.localRevision.get(path) ?? 0) + 1;
-      this.localRevision.set(path, revision);
-      let task: Promise<void>;
-      task = this.app.vault.cachedRead(file)
-        .then((text) => {
-          if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-          this.local.set(path, parseLocalModel(text));
-          this.localReadErrors.delete(path);
-          this.bumpRevision(path);
-        })
-        .catch((e) => {
-          if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-          this.localReadErrors.set(path, (e as Error).message);
-          this.bumpRevision(path);
-        })
-        .finally(() => this.requestedLocalReads.delete(task));
-      this.requestedLocalReads.add(task);
-      await task;
-      await budget.checkpoint(yieldToUi);
+
+    while (true) {
+      const wanted = new Set(unique);
+      this.deferredHydrationPaths = this.deferredHydrationPaths.filter((path) => !wanted.has(path));
+      const epoch = this.hydrationEpoch;
+      const budget = new CooperativeBudget(WORK_SLICE_MS);
+
+      for (const path of unique) {
+        if (epoch !== this.hydrationEpoch) break;
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
+        const revision = (this.localRevision.get(path) ?? 0) + 1;
+        this.localRevision.set(path, revision);
+        this.requestedHydrationPaths.add(path);
+        let task: Promise<void>;
+        task = this.app.vault.cachedRead(file)
+          .then((text) => {
+            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            this.local.set(path, parseLocalModel(text));
+            this.localReadErrors.delete(path);
+            this.bumpRevision(path);
+          })
+          .catch((e) => {
+            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            this.localReadErrors.set(path, (e as Error).message);
+            this.bumpRevision(path);
+          })
+          .finally(() => {
+            this.requestedLocalReads.delete(task);
+            this.requestedHydrationPaths.delete(path);
+          });
+        this.requestedLocalReads.add(task);
+        await task;
+        await budget.checkpoint(yieldToUi);
+      }
+
+      if (epoch === this.hydrationEpoch) return;
+      await this.whenSourceSettled();
     }
   }
 
