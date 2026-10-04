@@ -281,10 +281,11 @@ export default class MdseWorkbench extends Plugin {
       this.healthRefreshTimer = null;
       this.refreshRuntimeHealth();
       const indexer = this.indexer;
+      // Health is observation only. If background/live work is already pending, poll its cheap
+      // counters later; never call a settle/ensure method from the health path because that would
+      // make status rendering itself pull deferred capabilities into the foreground.
       if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationPending > 0) {
-        void indexer.whenLocalSettled().then(() => {
-          if (!this.unloaded && this.indexer === indexer) this.refreshRuntimeHealth();
-        });
+        this.scheduleRuntimeHealthRefresh();
       }
     }, 400);
   }
