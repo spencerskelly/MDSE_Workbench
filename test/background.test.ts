@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canRunBackgroundWork, canStartRuntimeWork, RuntimeWorkPriority } from "../src/core/background";
+import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, RuntimeWorkPriority } from "../src/core/background";
 
 const idle = {
   unloaded: false,
@@ -34,4 +34,11 @@ test("runtime work priority is explicit and ordered", () => {
   assert.equal(canStartRuntimeWork("backgroundHydration", ["requestedHydration"]), false);
   assert.equal(canStartRuntimeWork("requestedHydration", ["backgroundHydration"]), true);
   assert.equal(canStartRuntimeWork("indexing", ["requestedHydration", "cacheWrite"]), true);
+});
+
+
+test("background resume policy requires a 3 second foreground-quiet window", () => {
+  assert.equal(BACKGROUND_RESUME_QUIET_MS, 3000);
+  assert.equal(canRunBackgroundWork({ ...idle, quietForMs: BACKGROUND_RESUME_QUIET_MS - 1, minimumQuietMs: BACKGROUND_RESUME_QUIET_MS }), false);
+  assert.equal(canRunBackgroundWork({ ...idle, quietForMs: BACKGROUND_RESUME_QUIET_MS, minimumQuietMs: BACKGROUND_RESUME_QUIET_MS }), true);
 });
