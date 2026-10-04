@@ -50,6 +50,8 @@ export class Indexer {
   private readonly localRevision = new Map<string, number>();
   /** Body reads started by incremental Local Model updates; consumers can wait for semantic consistency. */
   private readonly pendingLocalReads = new Set<Promise<void>>();
+  /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
+  private semanticRevision = 0;
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -61,6 +63,14 @@ export class Indexer {
 
   get rebuildPending(): boolean {
     return this.timer !== null;
+  }
+
+  get revision(): number {
+    return this.semanticRevision;
+  }
+
+  private bumpRevision(): void {
+    this.semanticRevision++;
   }
 
   enableLiveChanges(): void {
@@ -99,6 +109,7 @@ export class Indexer {
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
     this.burst = 0;
+    this.bumpRevision();
     this.stats = this.makeStats("restored", 0, createdAt);
     return this.stats;
   }
@@ -190,6 +201,7 @@ export class Indexer {
       this.local.remove(path);
       this.fingerprints.delete(path);
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
+      this.bumpRevision();
     }
 
     for (let i = 0; i < changedOrAdded.length; i++) {
@@ -265,9 +277,11 @@ export class Indexer {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
     this.local.remove(path);
-    if (!this.mayHaveLocalModel(file)) return;
-    const text = await this.app.vault.cachedRead(file);
-    if (this.localRevision.get(path) === revision) this.local.set(path, parseLocalModel(text));
+    if (this.mayHaveLocalModel(file)) {
+      const text = await this.app.vault.cachedRead(file);
+      if (this.localRevision.get(path) === revision) this.local.set(path, parseLocalModel(text));
+    }
+    this.bumpRevision();
   }
 
   /** Builds the index; a second call while building returns the same promise. */
@@ -299,6 +313,7 @@ export class Indexer {
     this.local = local;
     this.fingerprints.clear();
     for (const [path, fp] of fingerprints) this.fingerprints.set(path, fp);
+    this.bumpRevision();
     // Apply what changed while building. A large backlog (first-time caching, a big pull)
     // is cheaper as one more chunked build after things go quiet than as one long loop.
     const backlog = this.dirty.size;
@@ -318,6 +333,7 @@ export class Indexer {
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
     this.applyLocal(path, f instanceof TFile ? f : null);
+    this.bumpRevision();
   }
 
   /** Update one governed Local Model region without rebuilding the whole vault. */
