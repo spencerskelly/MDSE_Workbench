@@ -10,11 +10,11 @@ import { bodyOf, propertyRows, relationshipRows, type PropertyRow } from "../cor
 import { coerceValue, parseListInput, propertyEditor } from "../core/edit";
 import type { NoteRecord } from "../core/model";
 import { parseLocalModel, type LinkRef, type LocalRecord } from "../core/localmodel";
-import type { LocalRecordPatch } from "../core/localmodel-edit";
+import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker } from "./ui";
+import { ConfirmModal, ElementPicker, LocalPartCreateModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -222,6 +222,10 @@ export class NoteDetailPanel extends Component {
         await this.refreshLocal(file, record.localId, true);
       };
     }
+    if (this.editing) {
+      const addPart = head.createEl("button", { text: "Add part occurrence…", cls: "mdse-detail-btn" });
+      addPart.onclick = () => this.createPartOccurrence(file);
+    }
     const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
     owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
     const occurrence = head.createEl("button", { text: "Open occurrence", cls: "mdse-detail-btn" });
@@ -316,6 +320,27 @@ export class NoteDetailPanel extends Component {
         : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data.",
     });
     root.scrollTop = 0;
+  }
+
+  private createPartOccurrence(file: TFile): void {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+      const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
+      const localId = nextLocalId("part", ownerUid);
+      new LocalPartCreateModal(
+        this.app,
+        file.basename,
+        localId,
+        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (transactionId) => editor.applyLocalCreate(transactionId),
+        (transactionId) => { editor.cancelLocalCreate(transactionId); },
+        (createdId) => { void this.refreshLocal(file, createdId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot create occurrence: ${(e as Error).message}`, 12000);
+    }
   }
 
   private async saveLocalPatch(file: TFile, record: LocalRecord, patch: LocalRecordPatch): Promise<void> {
