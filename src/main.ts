@@ -69,6 +69,7 @@ export default class MdseWorkbench extends Plugin {
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
   private lastCacheWriteError: string | null = null;
+  private lastWarmRestore: string | null = null;
   private lastStartupWaitMs: number | null = null;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
   private lastChange = Date.now();
@@ -342,6 +343,7 @@ export default class MdseWorkbench extends Plugin {
 
         if (initialMode !== "full") {
           indexer.installRestored(restored, cache.header.createdAt);
+          this.lastWarmRestore = initialPlan.changed.length ? `restored; ${initialPlan.changed.length} changed path(s) to reconcile` : "restored; cache matched current file fingerprints";
           indexer.enableLiveChanges();
           this.setRuntimeStatus("indexing", initialPlan.changed.length ? `reconciling ${initialPlan.changed.length} changed` : "validating cached state");
           stats = await indexer.reconcileStablePaths(initialPlan.changed);
@@ -361,7 +363,7 @@ export default class MdseWorkbench extends Plugin {
           }
         }
       } catch (e) {
-        this.lastCacheWriteError = `warm restore not used: ${(e as Error).message}`;
+        this.lastWarmRestore = `not used: ${(e as Error).message}`;
         stats = null;
       }
     }
@@ -478,7 +480,8 @@ export default class MdseWorkbench extends Plugin {
       ["relationships.yaml", schema.relationshipsVersion],
       ["element-types.yaml", schema.elementTypesVersion],
       ["Editing", editingBlocked(schema) ? "off (schema too old)" : "on", editingBlocked(schema)],
-      ["Semantic cache mode", "save-only (warm restore disabled)"],
+      ["Semantic cache mode", this.settings.warmCachePreview ? "warm restore preview enabled" : "save-only"],
+      ["Warm restore", this.lastWarmRestore ?? "not attempted"],
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
       ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
     ];
