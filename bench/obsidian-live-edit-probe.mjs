@@ -90,7 +90,7 @@ for (let attempt = 0; attempt < 480; attempt++) {
               "",
               "<!-- MDSE:LOCAL-MODEL END -->",
               "",
-            ].join("\n");
+            ].join("\\n");
             await app.vault.create(added, targetText);
             await settleSource("add");
             await waitFor(() => note(added), 10000, "added note indexed");
@@ -103,7 +103,7 @@ for (let attempt = 0; attempt < 480; attempt++) {
             // remain authoritative after the edit cancels/requeues background work.
             const editBg = await ensureBackgroundActive("edit");
             const file1 = app.vault.getAbstractFileByPath(added);
-            const edited = targetText.replace("status: Draft", "status: Active\nperforms:\n  - \"[[Live Function]]\"").replace("#### Nested occurrence", "#### Nested occurrence edited");
+            const edited = targetText.replace("status: Draft", "status: Active\\nperforms:\\n  - \\"[[Live Function]]\\"").replace("#### Nested occurrence", "#### Nested occurrence edited");
             await app.vault.modify(file1, edited);
             await settleSource("edit");
             await waitFor(() => edges(added).some((e) => e.field === "performs" && e.to === fn), 10000, "edited relationship indexed");
