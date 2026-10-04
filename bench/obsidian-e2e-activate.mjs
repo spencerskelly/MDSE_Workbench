@@ -2,6 +2,7 @@ import CDP from "chrome-remote-interface";
 
 const expectedVaultPath = process.argv[2];
 const port = Number(process.argv[3] ?? 9223);
+const extraPluginId = process.argv[4] ?? "";
 if (!expectedVaultPath) throw new Error("vault path required");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -37,9 +38,13 @@ for (let attempt = 0; attempt < 180; attempt++) {
           else app.metadataCache.on("resolved", () => { void record("resolved-event"); });
           await app.plugins.setEnable(true);
           await app.plugins.enablePlugin("mdse-workbench");
+          const extraPluginId = ${JSON.stringify(extraPluginId)};
+          if (extraPluginId) await app.plugins.enablePlugin(extraPluginId);
           return {
             restrictedModeOff: app.plugins.isEnabled(),
             pluginEnabled: app.plugins.enabledPlugins.has("mdse-workbench"),
+            extraPluginId,
+            extraPluginEnabled: !extraPluginId || app.plugins.enabledPlugins.has(extraPluginId),
             resolvedCount
           };
         })()`,
@@ -49,7 +54,7 @@ for (let attempt = 0; attempt < 180; attempt++) {
       await client.close();
       const value = activated.result.value;
       console.log("Cold-run controlled plugin activation:", value);
-      if (value?.restrictedModeOff && value?.pluginEnabled) process.exit(0);
+      if (value?.restrictedModeOff && value?.pluginEnabled && value?.extraPluginEnabled) process.exit(0);
       // The renderer can become reachable before Restricted Mode/plugin activation has fully
       // settled. Treat that as transient and retry rather than failing the measured run.
     } catch {}
