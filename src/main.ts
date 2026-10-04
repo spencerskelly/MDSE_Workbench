@@ -8,6 +8,7 @@ import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
+import { formatCacheBytes } from "./core/cache-size";
 import { scheduleStartupHandoff } from "./core/startup-handoff";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreCoreSemanticState, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readCoreCacheGeneration, readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
@@ -23,7 +24,7 @@ import { nodeAt, parseTranslate, undefinedName, type CanvasNodeJson } from "./co
 import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
 import { analyzeLocalModel, writeFindingsReport } from "./obsidian/localmodel";
-import { clearWorkbenchCache, ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from "./obsidian/cache";
+import { clearWorkbenchCache, ObsidianCacheStorage, WORKBENCH_CACHE_ROOT, workbenchCacheSizeBytes } from "./obsidian/cache";
 import { AssuranceManager, type AssuranceSnapshot } from "./obsidian/assurance";
 
 /** Quiet time with no cache activity before the first index build starts. */
@@ -905,6 +906,7 @@ export default class MdseWorkbench extends Plugin {
     const f = assurance.model;
     const dirtyBuckets = cacheDirtyBucketsForPaths(this.indexer!.cacheDirtyPathsSnapshot());
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+    const cacheSizeBytes = await workbenchCacheSizeBytes(this.app);
     const rows: Array<[string, string, boolean?]> = [
       ["Index mode", s.mode],
       ["Markdown files", String(s.files)],
@@ -944,6 +946,7 @@ export default class MdseWorkbench extends Plugin {
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
       ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
       ["Semantic cache persistence", this.cacheWriteTask ? "writing" : this.indexer!.revision === this.lastCachedRevision ? "current" : "pending/coalesced"],
+      ["Semantic cache size", cacheSizeBytes === null ? "unavailable" : formatCacheBytes(cacheSizeBytes)],
       ["Cache dirty paths", String(this.indexer!.cacheDirtyPathCount)],
       ["Cache dirty buckets", `${dirtyBuckets.notes.length} note · ${dirtyBuckets.localRegions.length} local · ${dirtyBuckets.fingerprints.length} fingerprint`],
     ];
