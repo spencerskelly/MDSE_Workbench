@@ -4,7 +4,7 @@
  */
 import { App, getLinkpath, TFile } from "obsidian";
 import { ModelIndex, type NoteRecord } from "../core/model";
-import type { FileFingerprint } from "../core/cache";
+import type { FileFingerprint, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel } from "../core/localmodel";
 import type { Schema } from "../core/schema";
 
@@ -16,6 +16,7 @@ const BURST_REBUILD = 300;
 const QUIET_MS = 3000;
 
 export interface BuildStats {
+  mode: "full" | "restored" | "reconciled";
   files: number;
   notes: number;
   elements: number;
@@ -66,6 +67,32 @@ export class Indexer {
     this.schema = schema;
   }
 
+  /**
+   * Install already-validated disposable cache state. This does not read or write model files.
+   * Runtime callers must perform cache compatibility checks before calling it.
+   */
+  installRestored(state: RestoredSemanticState, createdAt: number): BuildStats {
+    if (this.running) throw new Error("Cannot install restored state while indexing is active.");
+    this.index = state.index;
+    this.local = state.local;
+    this.fingerprints.clear();
+    for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
+    this.dirty.clear();
+    this.burst = 0;
+    this.stats = this.makeStats("restored", 0, createdAt);
+    return this.stats;
+  }
+
+  /**
+   * Reparse content-changed files when the Markdown path set is known to be unchanged.
+   * Added/deleted/renamed paths are deliberately outside this API because they can change
+   * resolution of links authored in otherwise unchanged notes (W-344).
+   */
+  reconcileStablePaths(paths: readonly string[]): Promise<BuildStats> {
+    if (!this.running) this.running = this.doReconcileStable(paths).finally(() => (this.running = null));
+    return this.running;
+  }
+
   record(file: TFile): NoteRecord | null {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter;
@@ -113,6 +140,70 @@ export class Indexer {
     return Object.keys(cache.blocks ?? {}).some((id) => LOCAL_BLOCK_PREFIX.test(id));
   }
 
+  private makeStats(mode: BuildStats["mode"], ms: number, builtAt: number): BuildStats {
+    let elements = 0;
+    for (const r of this.index.notes.values()) if (this.index.isElement(r)) elements++;
+    return {
+      mode,
+      files: this.fingerprints.size,
+      notes: this.index.size,
+      elements,
+      links: this.index.edgeCount(),
+      ms,
+      builtAt,
+    };
+  }
+
+  private async doReconcileStable(paths: readonly string[]): Promise<BuildStats> {
+    const t0 = performance.now();
+    const unique = [...new Set(paths)].sort();
+    for (let i = 0; i < unique.length; i++) {
+      const path = unique[i];
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (!(f instanceof TFile) || f.extension !== "md") {
+        throw new Error(`Stable-path reconciliation found missing Markdown file ${path}; full rebuild required.`);
+      }
+      await this.applyAwaited(path, f);
+      if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+    }
+
+    // Changes arriving during reconciliation are replayed once. A very large concurrent burst
+    // falls back to the existing proven full rebuild scheduler.
+    const backlog = [...this.dirty];
+    this.dirty.clear();
+    if (backlog.length > CHUNK) this.scheduleRebuild();
+    else {
+      for (let i = 0; i < backlog.length; i++) {
+        const path = backlog[i];
+        const f = this.app.vault.getAbstractFileByPath(path);
+        if (!(f instanceof TFile) || f.extension !== "md") {
+          this.scheduleRebuild();
+          break;
+        }
+        await this.applyAwaited(path, f);
+        if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+      }
+    }
+
+    this.stats = this.makeStats("reconciled", Math.round(performance.now() - t0), Date.now());
+    return this.stats;
+  }
+
+  /** Awaited variant used by controlled startup reconciliation. */
+  private async applyAwaited(path: string, file: TFile): Promise<void> {
+    this.fingerprints.set(path, { mtime: file.stat.mtime, size: file.stat.size });
+    const rec = this.record(file);
+    if (rec) this.index.upsert(rec);
+    else this.index.remove(path);
+
+    const revision = (this.localRevision.get(path) ?? 0) + 1;
+    this.localRevision.set(path, revision);
+    this.local.remove(path);
+    if (!this.mayHaveLocalModel(file)) return;
+    const text = await this.app.vault.cachedRead(file);
+    if (this.localRevision.get(path) === revision) this.local.set(path, parseLocalModel(text));
+  }
+
   /** Builds the index; a second call while building returns the same promise. */
   build(): Promise<BuildStats> {
     if (!this.running) this.running = this.doBuild().finally(() => (this.running = null));
@@ -149,16 +240,7 @@ export class Indexer {
     this.dirty.clear();
     if (backlog > CHUNK) this.scheduleRebuild();
     this.burst = 0;
-    let elements = 0;
-    for (const r of index.notes.values()) if (index.isElement(r)) elements++;
-    this.stats = {
-      files: files.length,
-      notes: index.size,
-      elements,
-      links: index.edgeCount(),
-      ms: Math.round(performance.now() - t0),
-      builtAt: Date.now(),
-    };
+    this.stats = this.makeStats("full", Math.round(performance.now() - t0), Date.now());
     return this.stats;
   }
 
