@@ -1,0 +1,231 @@
+name: Integrated occurrence-view acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/integration-view-capability.yml"
+      - "bench/obsidian-view-capability-probe.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  view-capability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NOTE_COUNT: "12000"
+      OBSIDIAN_VERSION: "1.13.7"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Verify exact accepted Workbench candidate bytes
+        run: |
+          sha256sum -c artifact-sha256.txt
+          npm ci
+          npm install --no-save chrome-remote-interface
+
+      - name: Install Obsidian desktop and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          curl -L --retry 3 -o "$RUNNER_TEMP/obsidian.deb" \
+            "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian_${OBSIDIAN_VERSION}_amd64.deb"
+          sudo apt-get install -y "$RUNNER_TEMP/obsidian.deb"
+
+      - name: Prepare disposable occurrence-view vault
+        run: |
+          VAULT="$RUNNER_TEMP/mdse-view-capability"
+          echo "VAULT=$VAULT" >> "$GITHUB_ENV"
+          rm -rf "$VAULT"
+          mkdir -p "$VAULT/.obsidian/plugins/mdse-workbench" "$VAULT/Acceptance"
+
+          cp -R vault/99_System "$VAULT/99_System"
+          npm run bench:generate -- "$NOTE_COUNT" "$VAULT/IntegrationData"
+          cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/mdse-workbench/"
+          printf '%s\n' '["mdse-workbench"]' > "$VAULT/.obsidian/community-plugins.json"
+
+          cat > "$VAULT/.vault.yaml" <<'EOF'
+          vault_uid: 20261004210000000viewcapability
+          vault_name: MDSE View Capability Acceptance
+          default_branch: main
+          EOF
+
+          cat > "$VAULT/Acceptance/Fixture Object.md" <<'EOF'
+          ---
+          type: Object
+          id: ACCEPT-OBJ
+          uid: 20261004210000001acceptfixture
+          status: Draft
+          hasPart:
+            - "[[Fixture Child]]"
+          hasPort:
+            - "[[Fixture Port]]"
+          performs:
+            - "[[Fixture Function]]"
+          hasDesign:
+            - "[[Fixture Design]]"
+          ---
+          # Fixture Object
+
+          ## Local Model
+          <!-- MDSE:LOCAL-MODEL START schema=0.2 -->
+
+          ### Part Occurrences
+
+          #### Fixture Child occurrence
+          - definition: [[Fixture Child]]
+          ^part-20261004210000002acceptfixture
+
+          ### Local Interfaces
+
+          #### Fixture Boundary
+          - definition: [[Fixture Port]]
+          ^ep-20261004210000003acceptfixture
+
+          <!-- MDSE:LOCAL-MODEL END -->
+          EOF
+
+          cat > "$VAULT/Acceptance/Fixture Child.md" <<'EOF'
+          ---
+          type: Object
+          id: ACCEPT-CHILD
+          uid: 20261004210000004acceptfixture
+          status: Draft
+          ---
+          # Fixture Child
+          EOF
+
+          cat > "$VAULT/Acceptance/Fixture Port.md" <<'EOF'
+          ---
+          type: Port
+          id: ACCEPT-PORT
+          uid: 20261004210000005acceptfixture
+          status: Draft
+          ---
+          # Fixture Port
+          EOF
+
+          cat > "$VAULT/Acceptance/Fixture Function.md" <<'EOF'
+          ---
+          type: Function
+          id: ACCEPT-FN
+          uid: 20261004210000006acceptfixture
+          status: Draft
+          satisfies:
+            - "[[Fixture Requirement]]"
+          ---
+          # Fixture Function
+          EOF
+
+          cat > "$VAULT/Acceptance/Fixture Design.md" <<'EOF'
+          ---
+          type: Design
+          id: ACCEPT-DES
+          uid: 20261004210000007acceptfixture
+          status: Draft
+          satisfies:
+            - "[[Fixture Requirement]]"
+          ---
+          # Fixture Design
+          EOF
+
+          cat > "$VAULT/Acceptance/Fixture Requirement.md" <<'EOF'
+          ---
+          type: Requirement
+          id: ACCEPT-REQ
+          uid: 20261004210000008acceptfixture
+          status: Draft
+          appliesTo:
+            - "[[Fixture Object#^part-20261004210000002acceptfixture]]"
+          ---
+          # Fixture Requirement
+          EOF
+
+      - name: Register disposable vault
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-view-capability
+        run: |
+          mkdir -p "$XDG_CONFIG_HOME/obsidian"
+          export VAULT
+          node -e 'const fs=require("fs"),p=require("path");const out=p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json");fs.writeFileSync(out,JSON.stringify({vaults:{viewcapability:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
+
+      - name: Run real-Obsidian occurrence-view capability acceptance
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-view-capability
+        run: |
+          export VAULT NOTE_COUNT
+          rm -rf "$VAULT/.obsidian/plugins/mdse-workbench/cache"
+          rm -f "$VAULT/.mdse_integration_result.json" "$VAULT/.mdse_integration_metadata.json" "$VAULT/.mdse_integration_readable.json"
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.NOTE_COUNT)+6,label:"view-capability"},null,2))'
+
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9241 >"$RUNNER_TEMP/view-capability-obsidian.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9241 >"$RUNNER_TEMP/view-capability-activate.log" 2>&1
+            node bench/obsidian-view-capability-probe.mjs "$VAULT" 9241 | tee view-capability-acceptance.json
+          '
+
+      - name: Validate acceptance result
+        run: |
+          node <<'NODE'
+          const fs=require("fs");
+          const r=JSON.parse(fs.readFileSync("view-capability-acceptance.json","utf8"));
+          const fail=(m)=>{throw new Error(m)};
+          if(!r.accepted) fail("probe did not accept");
+          const byId=Object.fromEntries(r.tests.map((t)=>[t.id,t]));
+          for(const id of ["explore-functional","explore-design"]) {
+            if(byId[id]?.class!=="core-only" || !byId[id].completedWhileOccurrenceBlocked || byId[id].hydrationCalls.length) {
+              fail(id+" did not remain occurrence-independent");
+            }
+          }
+          const expected={
+            "explore-internal":"owners",
+            "explore-structure":"owners",
+            "explore-interfaces":"global",
+            "explore-where-used":"global",
+            "explore-requirements":"owners",
+          };
+          for(const [id,kind] of Object.entries(expected)) {
+            const t=byId[id];
+            if(t?.class!=="occurrence-aware") fail(id+" missing occurrence-aware result");
+            if(t.expectedKind!==kind) fail(id+" expected "+kind+" gate");
+            if(t.publishedBeforeOccurrenceReady) fail(id+" published before occurrence readiness");
+            if(!t.markerPresent) fail(id+" omitted local occurrence content");
+          }
+          console.log("Integrated occurrence-view acceptance passed:", JSON.stringify(r,null,2));
+          NODE
+
+      - name: Write acceptance summary
+        if: always()
+        run: |
+          if [ -f view-capability-acceptance.json ]; then
+            node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const r=require("./view-capability-acceptance.json");
+          console.log("## Integrated occurrence-view capability acceptance");
+          console.log("");
+          console.log("| View | Capability class | Gate | Published early | Local marker |");
+          console.log("|---|---|---|---|---|");
+          for(const t of r.tests) {
+            console.log("| "+t.id+" | "+t.class+" | "+(t.expectedKind||"none")+" | "+(t.publishedBeforeOccurrenceReady?"yes":"no")+" | "+(t.markerPresent===undefined?"n/a":t.markerPresent?"yes":"no")+" |");
+          }
+          NODE
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: view-capability-evidence
+          path: |
+            view-capability-acceptance.json
+            ${{ runner.temp }}/view-capability-obsidian.log
+            ${{ runner.temp }}/view-capability-activate.log
+          if-no-files-found: warn
