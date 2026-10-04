@@ -63,6 +63,7 @@ The cache must:
 - record relationship/element schema versions **and** a deterministic signature of the parsed schema semantics, so an accidental rule change without a version bump cannot silently reuse stale state;
 - retain cheap file fingerprints sufficient to identify changed files: semantic-cache v3 uses Obsidian FileStats ctime + mtime + size, with optional stronger content hashes available for future edge cases;
 - be sharded or otherwise bounded rather than one fragile monolithic file at large model sizes;
+- use stable path-hash bucket identities so unrelated path insertions do not reshuffle the entire persisted cache and future dirty-bucket persistence can update only affected buckets;
 - use two bounded A/B commit slots with generation tokens: shards are written first, the slot manifest last, and the opposite slot remains a complete fallback if a write is interrupted;
 - order committed cache slots with a monotonic local sequence number rather than wall-clock time, so clock rollback cannot make an older generation appear newer;
 - be safe to delete at any time;
@@ -278,3 +279,15 @@ The next gate is runtime acceptance in Obsidian using `docs/Testing/RTA Startup 
 Workbench now carries a monotonic in-session semantic revision. Review recomputes whole-index plus Local Model assurance only when that revision changes, unless the engineer explicitly forces **Refresh**. The same revision is used to coalesce disposable semantic-cache persistence: unchanged semantic state is not rewritten, cache writes wait for quiet time and a minimum interval, and a semantic change during a write causes a later generation instead of blocking editing.
 
 This is the first RTA-4 step. Dependency-scoped immediate validation and a fuller assurance freshness surface remain to be implemented.
+
+
+## W-351 stable-bucket persistence foundation
+
+Sequential sorted cache shards were replaced before promotion. They were simple, but inserting or renaming a path could shift many later records into different shard files and make incremental persistence inherently noisy.
+
+Cache container v3 now uses deterministic path-hash buckets for:
+- note semantic records;
+- Local Model regions;
+- file fingerprints.
+
+The manifest contains only bounded bucket metadata rather than the full fingerprint table. Bucket identity remains stable when unrelated files are added. The current A/B writer still writes a complete inactive slot for the strongest recovery behavior while acceptance testing is underway. The stable bucket contract is the prerequisite for a later dirty-bucket writer; that optimization must preserve the same manifest-last and fail-closed recovery guarantees.
