@@ -26,16 +26,12 @@ export function mayHaveRegion(app: App, file: TFile): boolean {
   return Object.keys(cache.blocks ?? {}).some((id) => BLOCK_PREFIX.test(id));
 }
 
-export async function scanLocalModel(app: App, index: ModelIndex): Promise<LocalScan> {
+export function analyzeLocalModel(
+  index: ModelIndex,
+  local: LocalModelIndex,
+  resolve: (target: string, from: string) => string | undefined,
+): LocalScan {
   const t0 = performance.now();
-  const local = new LocalModelIndex();
-  let n = 0;
-  for (const file of app.vault.getMarkdownFiles()) {
-    if (!mayHaveRegion(app, file)) continue;
-    local.set(file.path, parseLocalModel(await app.vault.cachedRead(file)));
-    if (++n % 100 === 0) await new Promise((r) => window.setTimeout(r, 0));
-  }
-  const resolve = (target: string, from: string) => app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
   const findings = validateLocalModels({ index, local, resolve });
   const byKind: Record<string, number> = {};
   let records = 0;
@@ -46,6 +42,22 @@ export async function scanLocalModel(app: App, index: ModelIndex): Promise<Local
     }
   }
   return { local, findings, notesWithRegion: local.regions.size, records, byKind, ms: Math.round(performance.now() - t0) };
+}
+
+/**
+ * Recovery/independent reread path. Normal Workbench checks should use the already-maintained
+ * shared LocalModelIndex through analyzeLocalModel rather than reparsing the whole vault.
+ */
+export async function scanLocalModel(app: App, index: ModelIndex): Promise<LocalScan> {
+  const local = new LocalModelIndex();
+  let n = 0;
+  for (const file of app.vault.getMarkdownFiles()) {
+    if (!mayHaveRegion(app, file)) continue;
+    local.set(file.path, parseLocalModel(await app.vault.cachedRead(file)));
+    if (++n % 100 === 0) await new Promise((r) => window.setTimeout(r, 0));
+  }
+  const resolve = (target: string, from: string) => app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+  return analyzeLocalModel(index, local, resolve);
 }
 
 /** Writes `Local Model Findings.md` into the views folder and returns the file. */
