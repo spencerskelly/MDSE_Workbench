@@ -56,6 +56,9 @@ export class Indexer {
   private hydrationEpoch = 0;
   private hydrationTask: Promise<void> | null = null;
   private hydrationRemaining = 0;
+  /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
+  private relationshipResolveTimer: number | null = null;
+  private relationshipResolveTask: Promise<void> | null = null;
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -85,12 +88,14 @@ export class Indexer {
     this.liveChanges = true;
   }
 
-  /** Wait until cold-build Local Model hydration and every incremental body read have settled. */
+  /** Wait until all asynchronous semantic work that can affect queries has settled. */
   async whenLocalSettled(): Promise<void> {
-    while (this.hydrationTask || this.pendingLocalReads.size) {
+    while (this.hydrationTask || this.pendingLocalReads.size || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work: Promise<unknown>[] = [...this.pendingLocalReads];
       if (this.hydrationTask) work.push(this.hydrationTask);
+      if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
       if (work.length) await Promise.all(work);
+      else await new Promise((r) => window.setTimeout(r, 50));
     }
   }
 
@@ -257,8 +262,9 @@ export class Indexer {
    * Re-resolve relationship links from cached authored evidence after the note path set changes.
    * This is CPU/metadata work only: unchanged Markdown files and Local Model bodies are not read.
    */
-  private async reResolveAllRelationships(): Promise<void> {
+  private async reResolveAllRelationships(): Promise<number> {
     const notes = [...this.index.notes.values()];
+    let changed = 0;
     for (let i = 0; i < notes.length; i++) {
       const rec = notes[i];
       if (!rec.authoredLinks) throw new Error(`Cached note ${rec.path} has no authored-link evidence; full rebuild required.`);
@@ -268,16 +274,41 @@ export class Indexer {
         this.schema,
         (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path,
       );
-      this.index.upsert({
-        ...rec,
-        fields: resolved.fields,
-        unresolved: resolved.unresolved,
-        broken: resolved.broken,
-        repeat: resolved.repeat,
-        localRefs: resolved.localRefs,
-      });
+      if (!sameResolvedEvidence(rec, resolved)) {
+        this.index.upsert({
+          ...rec,
+          fields: resolved.fields,
+          unresolved: resolved.unresolved,
+          broken: resolved.broken,
+          repeat: resolved.repeat,
+          localRefs: resolved.localRefs,
+        });
+        changed++;
+      }
       if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
     }
+    if (changed) this.bumpRevision();
+    return changed;
+  }
+
+  /**
+   * Debounce live add/delete/rename events, then re-resolve authored links from metadata only.
+   * This keeps an open vault semantically correct without rereading unchanged Markdown bodies.
+   */
+  private scheduleRelationshipReresolution(): void {
+    if (!this.liveChanges) return;
+    if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
+    this.relationshipResolveTimer = window.setTimeout(() => {
+      this.relationshipResolveTimer = null;
+      if (this.rebuildPending || this.running || !this.stats) return;
+      let task: Promise<void>;
+      task = this.reResolveAllRelationships()
+        .then(() => undefined)
+        .finally(() => {
+          if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
+        });
+      this.relationshipResolveTask = task;
+    }, 500);
   }
 
   /** Awaited variant used by controlled startup reconciliation. */
@@ -419,7 +450,10 @@ export class Indexer {
       this.dirty.add(path);
       return;
     }
+    const existed = this.fingerprints.has(path);
     this.apply(path);
+    const existsNow = this.fingerprints.has(path);
+    if (!existed && existsNow) this.scheduleRelationshipReresolution();
     const now = Date.now();
     if (now - this.burstStarted > 10000) {
       this.burstStarted = now;
@@ -429,7 +463,9 @@ export class Indexer {
   }
 
   removed(path: string): void {
+    const existed = this.fingerprints.has(path);
     this.changed(path);
+    if (existed) this.scheduleRelationshipReresolution();
   }
 
   scheduleRebuild(): void {
@@ -442,8 +478,51 @@ export class Indexer {
 
   dispose(): void {
     if (this.timer !== null) window.clearTimeout(this.timer);
+    if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
+    this.relationshipResolveTimer = null;
+    this.relationshipResolveTask = null;
     this.hydrationEpoch++;
     this.hydrationTask = null;
     this.hydrationRemaining = 0;
   }
+}
+
+
+function sameResolvedEvidence(
+  rec: NoteRecord,
+  next: ReturnType<typeof resolveAuthoredRelationshipLinks>,
+): boolean {
+  if (rec.unresolved !== next.unresolved) return false;
+  if (!sameMapOfStrings(rec.fields, next.fields)) return false;
+  if (!sameBroken(rec.broken ?? [], next.broken)) return false;
+  if (!sameNumberMap(rec.repeat, next.repeat)) return false;
+  if (!sameLocalRefs(rec.localRefs ?? [], next.localRefs ?? [])) return false;
+  return true;
+}
+
+function sameMapOfStrings(a: ReadonlyMap<string, string[]>, b: ReadonlyMap<string, string[]>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, av] of a) {
+    const bv = b.get(k);
+    if (!bv || av.length !== bv.length || av.some((v, i) => v !== bv[i])) return false;
+  }
+  return true;
+}
+
+function sameBroken(a: Array<{ field: string; link: string }>, b: Array<{ field: string; link: string }>): boolean {
+  return a.length === b.length && a.every((v, i) => v.field === b[i].field && v.link === b[i].link);
+}
+
+function sameNumberMap(a?: ReadonlyMap<string, number>, b?: ReadonlyMap<string, number>): boolean {
+  if (!a?.size && !b?.size) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
+}
+
+function sameLocalRefs(
+  a: Array<{ field: string; path: string; localId: string }>,
+  b: Array<{ field: string; path: string; localId: string }>,
+): boolean {
+  return a.length === b.length && a.every((v, i) => v.field === b[i].field && v.path === b[i].path && v.localId === b[i].localId);
 }
