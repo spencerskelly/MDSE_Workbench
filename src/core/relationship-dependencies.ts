@@ -17,6 +17,11 @@ export function shouldUseFullRelationshipReresolution(candidateCount: number): b
   return candidateCount > TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES;
 }
 
+export interface RelationshipDependencyConsistency {
+  complete: boolean;
+  issues: string[];
+}
+
 export class ReversePathDependencyIndex {
   private readonly byTarget = new Map<string, Set<string>>();
   private readonly byAuthoredKey = new Map<string, Set<string>>();
@@ -96,6 +101,49 @@ export class ReversePathDependencyIndex {
 
   get sourceCount(): number {
     return new Set([...this.bySource.keys(), ...this.authoredBySource.keys()]).size;
+  }
+
+  /**
+   * Fail-closed consistency check for the derived reverse dependency surface.
+   *
+   * The index is only safe for targeted invalidation when every canonical source-side entry
+   * is mirrored by the matching reverse entry and every reverse entry points back to canonical
+   * source-side evidence. Any mismatch means the derived accelerator may be incomplete.
+   */
+  consistency(): RelationshipDependencyConsistency {
+    const issues: string[] = [];
+
+    for (const [source, targets] of this.bySource) {
+      for (const target of targets) {
+        if (!(this.byTarget.get(target)?.has(source) ?? false)) {
+          issues.push(`missing reverse target entry: ${source} -> ${target}`);
+        }
+      }
+    }
+    for (const [target, sources] of this.byTarget) {
+      for (const source of sources) {
+        if (!(this.bySource.get(source)?.has(target) ?? false)) {
+          issues.push(`orphan reverse target entry: ${target} <- ${source}`);
+        }
+      }
+    }
+
+    for (const [source, keys] of this.authoredBySource) {
+      for (const key of keys) {
+        if (!(this.byAuthoredKey.get(key)?.has(source) ?? false)) {
+          issues.push(`missing reverse authored entry: ${source} -> ${key}`);
+        }
+      }
+    }
+    for (const [key, sources] of this.byAuthoredKey) {
+      for (const source of sources) {
+        if (!(this.authoredBySource.get(source)?.has(key) ?? false)) {
+          issues.push(`orphan reverse authored entry: ${key} <- ${source}`);
+        }
+      }
+    }
+
+    return { complete: issues.length === 0, issues };
   }
 }
 
