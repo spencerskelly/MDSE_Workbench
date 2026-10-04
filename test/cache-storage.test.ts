@@ -54,8 +54,8 @@ function sampleCache(createdAt = 123) {
       index,
       local,
       new Map([
-        ["A.md", { mtime: 10, size: 100 }],
-        ["B.md", { mtime: 11, size: 20 }],
+        ["A.md", { ctime: 9, mtime: 10, size: 100 }],
+        ["B.md", { ctime: 10, mtime: 11, size: 20 }],
       ]),
       schema,
       scope,
