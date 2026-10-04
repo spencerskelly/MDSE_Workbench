@@ -91,6 +91,8 @@ export default class MdseWorkbench extends Plugin {
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
   private lastCacheWriteError: string | null = null;
+  private lastCoreError: string | null = null;
+  private lastOccurrenceError: string | null = null;
   private lastCachedRevision: number | null = null;
   private lastWarmRestore: string | null = null;
   private assurance: AssuranceManager | null = null;
@@ -242,6 +244,8 @@ export default class MdseWorkbench extends Plugin {
     return summarizeRuntimeHealth({
       ready: this.isReady(),
       building: !!indexer?.building,
+      coreError: this.lastCoreError,
+      occurrenceError: this.lastOccurrenceError,
       localPending: indexer?.localHydrationPending ?? 0,
       livePending: indexer?.liveUpdatePending ?? 0,
       localReadErrors: indexer?.localReadErrorCount ?? 0,
@@ -369,12 +373,13 @@ export default class MdseWorkbench extends Plugin {
       void indexer.whenLocalSettled()
         .then(() => {
           if (this.unloaded || this.indexer !== indexer) return;
+          this.lastOccurrenceError = null;
           this.refreshRuntimeHealth();
           this.scheduleSemanticCacheWrite();
         })
         .catch((e) => {
           if (this.unloaded || this.indexer !== indexer) return;
-          this.lastCacheWriteError = `background occurrence processing failed: ${(e as Error).message}`;
+          this.lastOccurrenceError = (e as Error).message || String(e);
           this.refreshRuntimeHealth();
         });
     }, LOCAL_BACKGROUND_DELAY_MS);
@@ -492,6 +497,7 @@ export default class MdseWorkbench extends Plugin {
       await this.startPromise;
     } catch (e) {
       const message = (e as Error).message || String(e);
+      this.lastCoreError = message;
       this.setRuntimeStatus("error", "core model unavailable");
       new Notice(`MDSE Workbench: core model startup failed. Obsidian remains usable. ${message} Use “Rebuild index” after correcting the issue.`, 12000);
     } finally {
@@ -505,6 +511,7 @@ export default class MdseWorkbench extends Plugin {
 
   /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
   private async runStart(rebuild: boolean): Promise<void> {
+    this.lastCoreError = null;
     this.setRuntimeStatus("starting");
     try {
       this.schema = await this.loadSchema();
