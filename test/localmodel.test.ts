@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fixtureSchema, indexOf, note } from "./helpers";
 import {
-  LocalModelIndex, parseLinks, parseLocalModel, refForLink, refKey, renderFindingsReport, specializationCandidates, validateLocalModels, localRef, noteRef,
+  LocalModelIndex, localModelSourceFingerprint, parseLinks, parseLocalModel, refForLink, refKey, renderFindingsReport, specializationCandidates, validateLocalModels, localRef, noteRef,
 } from "../src/core/localmodel";
 import { addLink, linkTarget, removeLink } from "../src/core/frontmatter";
 import type { NoteRecord } from "../src/core/model";
