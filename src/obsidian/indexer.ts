@@ -110,6 +110,10 @@ export class Indexer {
     return this.hydrationRemaining;
   }
 
+  get localHydrationDemanded(): boolean {
+    return this.hydrationDemanded && (this.hydrationTask !== null || this.deferredHydrationPaths.length > 0);
+  }
+
   get liveUpdatePending(): number {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
   }
