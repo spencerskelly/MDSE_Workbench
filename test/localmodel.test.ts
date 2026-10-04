@@ -313,3 +313,58 @@ test("Local Model fingerprint includes duplicate markers that affect validation"
   assert.notEqual(localModelSourceFingerprint(valid), localModelSourceFingerprint(duplicate));
   assert.equal(parseLocalModel(duplicate)?.sourceFingerprint, localModelSourceFingerprint(duplicate));
 });
+
+
+test("malformed Local Model region is quarantined without contaminating usable owners", () => {
+  const goodId = "part-20261003170000002skellyspencer";
+  const badId = "part-20261003170000003skellyspencer";
+  const good = parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### Good",
+    "- definition: [[Board]]",
+    "^" + goodId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+  const bad = parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=9.9 -->",
+    "### Part Occurrences",
+    "#### Bad",
+    "- definition: [[Board]]",
+    "^" + badId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n"));
+
+  const local = new LocalModelIndex();
+  local.set("Good.md", good);
+  local.set("Bad.md", bad);
+
+  assert.equal(local.isQuarantined("Bad.md"), true);
+  assert.deepEqual(local.quarantinedPaths(), ["Bad.md"]);
+  assert.equal(local.recordsOf("Bad.md").length, 0);
+  assert.equal(local.find(badId).length, 0, "quarantined IDs must not enter the shared lookup");
+  assert.equal(local.recordsOf("Good.md").length, 1);
+  assert.equal(local.find(goodId).length, 1, "unrelated usable owner remains indexed");
+});
+
+test("removing a quarantined region leaves unrelated occurrence identity intact", () => {
+  const goodId = "part-20261003170000004skellyspencer";
+  const local = new LocalModelIndex();
+  local.set("Good.md", parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### Good",
+    "- definition: [[Board]]",
+    "^" + goodId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+  local.set("Bad.md", parseLocalModel([
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n")));
+
+  local.remove("Bad.md");
+  assert.equal(local.find(goodId).length, 1);
+  assert.deepEqual(local.quarantinedPaths(), []);
+});
