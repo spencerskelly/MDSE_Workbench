@@ -668,18 +668,26 @@ export class Indexer {
 
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.removeLocalRegion(path);
     if (this.mayHaveLocalModel(file)) {
       try {
         const text = await this.app.vault.cachedRead(file);
         if (this.localRevision.get(path) === revision) {
+          // Atomic region swap: preserve the existing authored occurrence IDs until the
+          // replacement parse is ready, then replace the derived region in one operation.
           this.setLocalRegion(path, parseLocalModel(text));
           this.localReadErrors.delete(path);
         }
       } catch (e) {
-        if (this.localRevision.get(path) === revision) this.localReadErrors.set(path, (e as Error).message);
+        if (this.localRevision.get(path) === revision) {
+          // A failed refresh cannot leave stale occurrence semantics published.
+          this.removeLocalRegion(path);
+          this.localReadErrors.set(path, (e as Error).message);
+        }
       }
-    } else this.localReadErrors.delete(path);
+    } else {
+      this.removeLocalRegion(path);
+      this.localReadErrors.delete(path);
+    }
     this.bumpRevision(path);
   }
 
@@ -831,8 +839,8 @@ export class Indexer {
   private applyLocal(path: string, file: TFile | null): void {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.removeLocalRegion(path);
     if (!file || !this.mayHaveLocalModel(file)) {
+      this.removeLocalRegion(path);
       this.localReadErrors.delete(path);
       return;
     }
@@ -849,6 +857,7 @@ export class Indexer {
       })
       .catch((e) => {
         if (this.localRevision.get(path) !== revision) return;
+        this.removeLocalRegion(path);
         this.localReadErrors.set(path, (e as Error).message);
         this.bumpRevision(path);
       })
