@@ -9,6 +9,7 @@ import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { BACKGROUND_MAX_DEFERRAL_MS, BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
 import { CacheMutationGate } from "./core/cache-mutation";
+import { TransactionManager } from "./core/transaction";
 import { canPublishCoreReady } from "./core/core-readiness";
 import { recoverWithColdBuild } from "./core/startup-recovery";
 import { formatCacheBytes } from "./core/cache-size";
@@ -93,6 +94,8 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
+  /** One semantic history stack for every Workbench model writer (WB-114). */
+  private readonly transactions = new TransactionManager();
   detail: NoteDetailPanel | null = null;
   private statusEl: HTMLElement | null = null;
   private cancelStartupHandoff: (() => void) | null = null;
@@ -228,6 +231,7 @@ export default class MdseWorkbench extends Plugin {
       checkCallback: (checking) => this.withActive(checking, (f) => this.pickTargetThenRelate(f.path)),
     });
     this.addCommand({ id: "undo", name: "Undo last Workbench edit", callback: () => this.undo() });
+    this.addCommand({ id: "redo", name: "Redo last Workbench edit", callback: () => this.redo() });
     this.addCommand({
       id: "probe-canvas",
       name: "Check Canvas support (Phase 0 probe)",
@@ -829,7 +833,7 @@ export default class MdseWorkbench extends Plugin {
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed("backgroundHydration", this.indexer));
-      this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
+      this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index, this.transactions);
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
         // Assurance ranks below background occurrence hydration. It waits for occurrence work
@@ -1418,6 +1422,12 @@ export default class MdseWorkbench extends Plugin {
     this.markForegroundActivity();
     if (!this.writer) return;
     new Notice(await this.writer.undo(), 15000);
+  }
+
+  async redo(): Promise<void> {
+    this.markForegroundActivity();
+    if (!this.writer) return;
+    new Notice(await this.writer.redo(), 15000);
   }
 }
 
