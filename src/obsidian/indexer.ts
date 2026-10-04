@@ -76,7 +76,8 @@ export class Indexer {
   private readonly pendingLocalReads = new Set<Promise<void>>();
   private readonly requestedLocalReads = new Set<Promise<void>>();
   private readonly requestedHydrationPaths = new Set<string>();
-  private readonly requestedHydrationFlights = new SingleFlightByKey<string, void>();
+  /** Shared owner body reads across background and requested occurrence hydration. */
+  private readonly occurrenceReadFlights = new SingleFlightByKey<string, { text: string; readStartedAt: number; readFinishedAt: number }>();
   /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
   private semanticRevision = 0;
   /** Paths whose derived cache buckets no longer match the last committed cache generation. */
@@ -313,6 +314,15 @@ export class Indexer {
     this.backgroundIdle = check;
   }
 
+  private occurrenceBody(path: string, file: TFile): Promise<{ text: string; readStartedAt: number; readFinishedAt: number }> {
+    return this.occurrenceReadFlights.run(path, async () => {
+      const readStartedAt = performance.now();
+      const text = await this.app.vault.cachedRead(file);
+      const readFinishedAt = performance.now();
+      return { text, readStartedAt, readFinishedAt };
+    });
+  }
+
   /**
    * Invalidate in-flight occurrence hydration immediately when source semantics change.
    * Unfinished bulk owners return to the deferred queue. Epoch/revision guards prevent reads
@@ -395,14 +405,12 @@ export class Indexer {
         if (epoch !== this.hydrationEpoch) break;
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
-        const task = this.requestedHydrationFlights.run(path, async () => {
-          const revision = (this.localRevision.get(path) ?? 0) + 1;
-          this.localRevision.set(path, revision);
-          this.requestedHydrationPaths.add(path);
+        const revision = (this.localRevision.get(path) ?? 0) + 1;
+        this.localRevision.set(path, revision);
+        this.requestedHydrationPaths.add(path);
+        const task = (async () => {
           try {
-            const readStartedAt = performance.now();
-            const text = await this.app.vault.cachedRead(file);
-            const readFinishedAt = performance.now();
+            const { text, readStartedAt, readFinishedAt } = await this.occurrenceBody(path, file);
             if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
             this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
@@ -414,7 +422,7 @@ export class Indexer {
           } finally {
             this.requestedHydrationPaths.delete(path);
           }
-        });
+        })();
         this.requestedLocalReads.add(task);
         try {
           await task;
@@ -564,7 +572,7 @@ export class Indexer {
     this.hydrationTask = null;
     this.hydrationDemanded = false;
     this.requestedLocalReads.clear();
-    this.requestedHydrationFlights.clear();
+    this.occurrenceReadFlights.clear();
     this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
     this.hydrationCosts.clear();
@@ -954,7 +962,10 @@ export class Indexer {
       const hydrationBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < files.length; i++) {
         if (epoch !== this.hydrationEpoch) return;
-        while (!this.hydrationDemanded && (!this.backgroundIdle() || this.liveUpdatePending > 0)) {
+        while (
+          !this.hydrationDemanded &&
+          (!this.backgroundIdle() || this.liveUpdatePending > 0 || this.requestedLocalReads.size > 0)
+        ) {
           await new Promise((r) => window.setTimeout(r, 250));
           if (epoch !== this.hydrationEpoch) return;
         }
@@ -964,9 +975,7 @@ export class Indexer {
         const revision = (this.localRevision.get(path) ?? 0) + 1;
         this.localRevision.set(path, revision);
         try {
-          const readStartedAt = performance.now();
-          const text = await this.app.vault.cachedRead(file);
-          const readFinishedAt = performance.now();
+          const { text, readStartedAt, readFinishedAt } = await this.occurrenceBody(path, file);
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
             this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
