@@ -450,6 +450,7 @@ var LocalModelIndex = class {
     this.remove(path);
     if (!region) return;
     this.regions.set(path, region);
+    if (!region.structured) return;
     for (const r of region.records) {
       if (!r.localId) continue;
       const l = this.ids.get(r.localId) ?? [];
@@ -471,6 +472,13 @@ var LocalModelIndex = class {
   }
   find(localId) {
     return this.ids.get(localId) ?? [];
+  }
+  isQuarantined(path) {
+    const region = this.regions.get(path);
+    return !!region && !region.structured;
+  }
+  quarantinedPaths() {
+    return [...this.regions.entries()].filter(([, region]) => !region.structured).map(([path]) => path).sort();
   }
   recordsOf(path, kind) {
     const r = this.regions.get(path);
