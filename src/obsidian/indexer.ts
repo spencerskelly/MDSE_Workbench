@@ -3,9 +3,10 @@
  * WB-087). Builds in chunks so Obsidian stays responsive (WB-081).
  */
 import { App, getLinkpath, TFile } from "obsidian";
-import { ModelIndex, type NoteRecord } from "../core/model";
+import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../core/model";
 import type { FileFingerprint, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel } from "../core/localmodel";
+import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
 import type { Schema } from "../core/schema";
 
 const CHUNK = 500;
@@ -116,38 +117,35 @@ export class Indexer {
     const cache = this.app.metadataCache.getFileCache(file);
     const fm = cache?.frontmatter;
     if (!fm) return null;
-    const fields = new Map<string, string[]>();
-    let unresolved = 0;
-    const broken: Array<{ field: string; link: string }> = [];
-    const repeat = new Map<string, number>();
-    const localRefs: Array<{ field: string; path: string; localId: string }> = [];
+    const authoredLinks: AuthoredRelationshipLink[] = [];
     for (const fl of cache.frontmatterLinks ?? []) {
       const field = fl.key.split(".")[0];
       if (!this.schema.byField.has(field) && !this.schema.byInverse.has(field)) continue;
-      const dest = this.app.metadataCache.getFirstLinkpathDest(getLinkpath(fl.link), file.path);
-      if (!dest) {
-        unresolved++;
-        broken.push({ field, link: fl.link });
-        continue;
-      }
-      const hash = fl.link.indexOf("#^");
-      if (hash >= 0) {
-        // A block-targeted relationship semantically points at the local occurrence, not at its owning note.
-        // Keep it out of note-to-note edges; occurrence-aware views resolve it through localRefs (WB-106).
-        localRefs.push({ field, path: dest.path, localId: fl.link.slice(hash + 2).split("|")[0].trim() });
-        continue;
-      }
-      let list = fields.get(field);
-      if (!list) fields.set(field, (list = []));
-      if (!list.includes(dest.path)) list.push(dest.path);
-      else repeat.set(`${field}|${dest.path}`, (repeat.get(`${field}|${dest.path}`) ?? 1) + 1);
+      authoredLinks.push({ field, link: fl.link, linkpath: getLinkpath(fl.link) });
     }
+    const resolved = resolveAuthoredRelationshipLinks(
+      authoredLinks,
+      file.path,
+      this.schema,
+      (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path,
+    );
     const str = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : String(v));
     const abstract = fm.abstract === true ? true : fm.abstract === false ? false : undefined;
     const abstractInvalid = fm.abstract !== undefined && fm.abstract !== null && fm.abstract !== "" && abstract === undefined;
     return {
-      path: file.path, name: file.basename, type: str(fm.type), id: str(fm.id), uid: str(fm.uid), fields, unresolved, broken,
-      repeat: repeat.size ? repeat : undefined, abstract, abstractInvalid: abstractInvalid || undefined, localRefs: localRefs.length ? localRefs : undefined,
+      path: file.path,
+      name: file.basename,
+      type: str(fm.type),
+      id: str(fm.id),
+      uid: str(fm.uid),
+      authoredLinks,
+      fields: resolved.fields,
+      unresolved: resolved.unresolved,
+      broken: resolved.broken,
+      repeat: resolved.repeat,
+      abstract,
+      abstractInvalid: abstractInvalid || undefined,
+      localRefs: resolved.localRefs,
     };
   }
 
