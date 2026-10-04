@@ -416,3 +416,121 @@ test("cancelled endpoint creation leaves source and semantic history untouched",
   assert.equal(store.text, before);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithCleanEndpoint(): string {
+  const endpointId = "ep-20261004235700000skellyspencer";
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### Service Port",
+    "- definition: [[CAN Port]]",
+    "^" + endpointId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("clean endpoint deletion stages, applies, and joins shared undo/redo history", async () => {
+  const endpointId = "ep-20261004235700000skellyspencer";
+  const original = noteWithCleanEndpoint();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  assert.equal(staged.plan.kind, "endpoint");
+  assert.equal(staged.plan.impacts.length, 0);
+  assert.equal(staged.externalImpacts.length, 0);
+  assert.equal(store.text, original);
+
+  await service.applyLocalDelete(staged.transaction.id);
+  assert.doesNotMatch(store.text, /#### Service Port/);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.delete");
+  assert.equal(transactions.history().at(-1)?.changes[0].refs[0].kind, "local");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.doesNotMatch(store.text, /#### Service Port/);
+});
+
+test("same-note connection dependency blocks endpoint deletion", async () => {
+  const endpointId = "ep-20261004235800000skellyspencer";
+  const otherId = "ep-20261004235800001skellyspencer";
+  const connectionId = "conn-20261004235800002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + otherId,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointId + "|J1]]",
+    "- endpointB: [[#^" + otherId + "|J2]]",
+    "^" + connectionId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+  const store = new MemoryStore(text);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  assert.ok(staged.plan.impacts.some((impact) => impact.sourceKind === "connection" && impact.field === "endpointA"));
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  assert.match(store.text, /#### J1/);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalDelete(staged.transaction.id);
+});
+
+test("indexed external reference blocks endpoint deletion and is rechecked at Apply", async () => {
+  const endpointId = "ep-20261004235700000skellyspencer";
+  const store = new MemoryStore(noteWithCleanEndpoint());
+  const transactions = new TransactionManager();
+  let external: Array<{ path: string; field: string }> = [];
+  const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  assert.equal(staged.externalImpacts.length, 0);
+  external = [{ path: "Requirements/REQ-ENDPOINT.md", field: "appliesTo" }];
+
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  const review = service.reviewLocalDelete(staged.transaction.id);
+  assert.deepEqual(review.externalImpacts, [{ path: "Requirements/REQ-ENDPOINT.md", field: "appliesTo" }]);
+  assert.match(store.text, /#### Service Port/);
+  service.cancelLocalDelete(staged.transaction.id);
+});
+
+test("cancelled endpoint deletion leaves source and history untouched", async () => {
+  const endpointId = "ep-20261004235700000skellyspencer";
+  const original = noteWithCleanEndpoint();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  service.cancelLocalDelete(staged.transaction.id);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
