@@ -8,6 +8,7 @@ import {
   serializeSemanticState,
   shardSemanticCache,
   joinSemanticCache,
+  planReconciliation,
   type FileFingerprint,
 } from "../src/core/cache";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
@@ -194,4 +195,27 @@ test("invalid shard sizing and empty generation are refused before anything can 
   const cache = serializeSemanticState(index, local, fingerprints, schema, "0.1.17");
   assert.throws(() => shardSemanticCache(cache, "", 10, 10), /generation/);
   assert.throws(() => shardSemanticCache(cache, "g", 0, 10), /positive integers/);
+});
+
+
+test("warm-start reconciliation identifies unchanged, changed, added and deleted files deterministically", () => {
+  const cached = new Map([
+    ["A.md", { mtime: 1, size: 10 }],
+    ["B.md", { mtime: 2, size: 20, hash: "same" }],
+    ["C.md", { mtime: 3, size: 30 }],
+    ["Gone.md", { mtime: 4, size: 40 }],
+  ]);
+  const current = new Map([
+    ["A.md", { mtime: 1, size: 10 }],
+    ["B.md", { mtime: 2, size: 20, hash: "different" }],
+    ["C.md", { mtime: 99, size: 30 }],
+    ["New.md", { mtime: 5, size: 50 }],
+  ]);
+
+  assert.deepEqual(planReconciliation(cached, current), {
+    unchanged: ["A.md"],
+    changed: ["B.md", "C.md"],
+    added: ["New.md"],
+    deleted: ["Gone.md"],
+  });
 });
