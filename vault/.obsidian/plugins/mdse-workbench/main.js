@@ -2091,6 +2091,9 @@ function withLocalInternal(index, local, resolve, base3, profile = INTERNAL_PROF
   const internal = buildInternalView(index, local, ownerPath, resolve);
   return { ...base3, ...m, specialCanvas: internal.canvas };
 }
+function profileNeedsLocalOccurrences(profile) {
+  return ["Internal", "Structure", "Interfaces", "Where Used", "Requirements"].includes(profile.name);
+}
 function withLocalOccurrences(index, local, resolve, base3, profile) {
   switch (profile.name) {
     case "Internal":
@@ -2347,6 +2350,8 @@ var Indexer = class {
     /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
     this.hydrationEpoch = 0;
     this.hydrationTask = null;
+    this.deferredHydrationFiles = [];
+    this.deferredHydrationEpoch = 0;
     this.hydrationRemaining = 0;
     this.hydrationStartedAt = null;
     this.lastHydrationMsValue = null;
@@ -2373,7 +2378,7 @@ var Indexer = class {
     return this.semanticRevision;
   }
   get localHydrationPending() {
-    return this.hydrationRemaining;
+    return this.hydrationRemaining + this.deferredHydrationFiles.length;
   }
   get liveUpdatePending() {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
@@ -2412,8 +2417,17 @@ var Indexer = class {
   enableLiveChanges() {
     this.liveChanges = true;
   }
-  /** Wait until all asynchronous semantic work that can affect queries has settled. */
+  /** Start deferred occurrence parsing when an occurrence-aware consumer actually needs it. */
+  beginDeferredLocalHydration() {
+    if (this.hydrationTask || !this.deferredHydrationFiles.length) return;
+    const files = this.deferredHydrationFiles;
+    const epoch = this.deferredHydrationEpoch;
+    this.deferredHydrationFiles = [];
+    this.startLocalHydration(files, epoch);
+  }
+  /** Wait until all asynchronous semantic work that can affect occurrence-aware queries has settled. */
   async whenLocalSettled() {
+    this.beginDeferredLocalHydration();
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work = [...this.pendingLocalReads];
       if (this.liveApplyTask) work.push(this.liveApplyTask);
@@ -2442,6 +2456,8 @@ var Indexer = class {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
     this.hydrationEpoch++;
     this.hydrationTask = null;
+    this.deferredHydrationFiles = [];
+    this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
     this.hydrationStartedAt = null;
     this.lastHydrationMsValue = 0;
@@ -2756,7 +2772,11 @@ var Indexer = class {
       this.cacheDirtyPaths.add(path);
     }
     this.bumpRevision();
-    this.startLocalHydration(localCandidates, epoch);
+    this.deferredHydrationFiles = localCandidates;
+    this.deferredHydrationEpoch = epoch;
+    this.hydrationRemaining = 0;
+    this.lastHydrationCandidatesValue = localCandidates.length;
+    this.lastHydrationMsValue = null;
     const backlog = this.dirty.size;
     if (backlog <= CHUNK) for (const path of this.dirty) this.apply(path);
     this.dirty.clear();
@@ -2877,6 +2897,8 @@ var Indexer = class {
     this.relationshipResolvePending = false;
     this.hydrationEpoch++;
     this.hydrationTask = null;
+    this.deferredHydrationFiles = [];
+    this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
   }
 };
@@ -4439,7 +4461,9 @@ var AssuranceManager = class {
 
 // src/main.ts
 var QUIET_START_MS = 8e3;
-var CACHE_QUIET_MS = 2e3;
+var CORE_AFTER_METADATA_DELAY_MS = 1e3;
+var LOCAL_BACKGROUND_DELAY_MS = 3e3;
+var CACHE_QUIET_MS = 8e3;
 var MIN_CACHE_WRITE_INTERVAL_MS = 3e4;
 var DEFAULTS = {
   relationshipsPath: "99_System/03_Schemas/relationships.yaml",
@@ -4465,6 +4489,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.detail = null;
     this.statusEl = null;
     this.healthRefreshTimer = null;
+    this.localBackgroundTimer = null;
     this.cacheWriteTimer = null;
     this.lastCacheWriteAt = null;
     this.lastCacheWriteMs = null;
@@ -4590,6 +4615,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.unloaded = true;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
       if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
+      if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     });
     this.app.workspace.onLayoutReady(() => void this.start(false));
   }
@@ -4654,7 +4680,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
    */
   async whenVaultQuiet() {
     while (!this.unloaded) {
-      if (this.metadataResolved) return;
+      if (this.metadataResolved) {
+        await new Promise((r) => window.setTimeout(r, CORE_AFTER_METADATA_DELAY_MS));
+        return;
+      }
       if (Date.now() - this.lastChange >= QUIET_START_MS) return;
       await new Promise((r) => window.setTimeout(r, 250));
     }
@@ -4663,7 +4692,6 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     await this.saveData({ settings: this.settings, views: this.views, runtimeHistory: this.runtimeHistory });
   }
   async recordRuntimeSample(indexer, stats) {
-    await indexer.whenLocalSettled();
     if (this.unloaded || this.indexer !== indexer || indexer.stats?.builtAt !== stats.builtAt) return;
     this.runtimeHistory.push({
       at: Date.now(),
@@ -4689,6 +4717,27 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       "Local-only performance evidence; this history is stored in the git-ignored Workbench data.json.",
       "Use it to compare cold/full, warm/restored and reconciled startup behavior across candidate builds."
     ]).open();
+  }
+  /**
+   * Stability-first capability staging: the core note graph is usable before occurrence bodies.
+   * Local Model hydration starts later in the background, or immediately if an occurrence-aware
+   * command/Review explicitly asks for it.
+   */
+  scheduleBackgroundLocalHydration() {
+    if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
+    const indexer = this.indexer;
+    if (!indexer || !this.isReady() || !indexer.localHydrationPending) return;
+    this.localBackgroundTimer = window.setTimeout(() => {
+      this.localBackgroundTimer = null;
+      if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
+      indexer.beginDeferredLocalHydration();
+      this.scheduleRuntimeHealthRefresh();
+      void indexer.whenLocalSettled().then(() => {
+        if (this.unloaded || this.indexer !== indexer) return;
+        this.refreshRuntimeHealth();
+        this.scheduleSemanticCacheWrite();
+      });
+    }, LOCAL_BACKGROUND_DELAY_MS);
   }
   /**
    * RTA-2 save-only cache path. Runtime restore is intentionally not enabled yet.
@@ -4911,18 +4960,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const localPending = indexer.localHydrationPending;
     this.setRuntimeStatus(
       "ready",
-      `${stats.elements} elements \xB7 ${stats.mode}${localPending ? ` \xB7 ${localPending} Local Model pending` : ""}`
+      `${stats.elements} elements \xB7 ${stats.mode}${localPending ? ` \xB7 occurrence features loading later` : ""}`
     );
-    if (localPending) {
-      void indexer.whenLocalSettled().then(() => {
-        if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
-        this.refreshRuntimeHealth();
-        this.scheduleSemanticCacheWrite();
-      });
-    } else {
-      this.refreshRuntimeHealth();
-      this.scheduleSemanticCacheWrite();
-    }
+    this.refreshRuntimeHealth();
+    if (localPending) this.scheduleBackgroundLocalHydration();
+    else this.scheduleSemanticCacheWrite();
     void this.recordRuntimeSample(indexer, stats);
     if (rebuild || schema.warnings.length) {
       new import_obsidian8.Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1e3).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
@@ -5082,7 +5124,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   async explore(starts, profile = STRUCTURE_PROFILE) {
     if (!this.ready()) return;
     const indexer = this.indexer;
-    await indexer.whenLocalSettled();
+    if (profileNeedsLocalOccurrences(profile)) {
+      this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements \xB7 loading occurrence data for ${profile.name}`);
+      await indexer.whenLocalSettled();
+      this.refreshRuntimeHealth();
+    }
     const index = indexer.index;
     const t0 = performance.now();
     if (profile.startTypes) {
