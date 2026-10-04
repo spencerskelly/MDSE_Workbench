@@ -131,6 +131,10 @@ test("cache compatibility is exact for format and semantic parser/schema inputs"
   wrongElements.header.elementTypesVersion = "999";
   assert.match(cacheCompatibilityProblem(wrongElements, expected) ?? "", /element-types schema/);
 
+  const wrongSemantics = structuredClone(cache);
+  wrongSemantics.header.schemaSignature = "deadbeef";
+  assert.match(cacheCompatibilityProblem(wrongSemantics, expected) ?? "", /schema semantics/);
+
   const wrongLocal = structuredClone(cache);
   wrongLocal.header.localModelReadableVersions = ["0.2"];
   assert.match(cacheCompatibilityProblem(wrongLocal, expected) ?? "", /Local Model reader contract/);
