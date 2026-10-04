@@ -203,6 +203,6 @@ test("generates governed Local Model IDs from UTC timestamp and owner author suf
 test("refuses Local Model ID generation when the owner UID has no governed author suffix", () => {
   assert.throws(
     () => nextLocalId("part", "bad-owner-uid", new Date("2026-10-04T23:30:45.123Z")),
-    /author suffix/,
+    /governed 30-character identity/,
   );
 });
