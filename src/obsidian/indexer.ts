@@ -62,7 +62,7 @@ export class Indexer {
   /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
   private hydrationEpoch = 0;
   private hydrationTask: Promise<void> | null = null;
-  private deferredHydrationFiles: TFile[] = [];
+  private deferredHydrationPaths: string[] = [];
   private deferredHydrationEpoch = 0;
   private hydrationRemaining = 0;
   private hydrationStartedAt: number | null = null;
@@ -96,11 +96,11 @@ export class Indexer {
   }
 
   get localHydrationPending(): number {
-    return this.hydrationRemaining + this.deferredHydrationFiles.length;
+    return this.hydrationRemaining + this.deferredHydrationPaths.length;
   }
 
   get localHydrationQueued(): number {
-    return this.deferredHydrationFiles.length;
+    return this.deferredHydrationPaths.length;
   }
 
   get localHydrationActive(): number {
@@ -158,10 +158,15 @@ export class Indexer {
 
   /** Start deferred occurrence parsing when an occurrence-aware consumer actually needs it. */
   beginDeferredLocalHydration(): void {
-    if (this.hydrationTask || !this.deferredHydrationFiles.length) return;
-    const files = this.deferredHydrationFiles;
+    if (this.hydrationTask || !this.deferredHydrationPaths.length) return;
+    const paths = this.deferredHydrationPaths;
     const epoch = this.deferredHydrationEpoch;
-    this.deferredHydrationFiles = [];
+    this.deferredHydrationPaths = [];
+    // Deferred queues store paths, not TFile objects, so rename/delete activity cannot leave
+    // stale file handles waiting in memory. Resolve against the vault at the moment work begins.
+    const files = paths
+      .map((path) => this.app.vault.getAbstractFileByPath(path))
+      .filter((f): f is TFile => f instanceof TFile && f.extension === "md");
     this.startLocalHydration(files, epoch);
   }
 
@@ -199,7 +204,7 @@ export class Indexer {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
     this.hydrationEpoch++;
     this.hydrationTask = null;
-    this.deferredHydrationFiles = [];
+    this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
     this.hydrationStartedAt = null;
@@ -551,7 +556,7 @@ export class Indexer {
     this.bumpRevision();
     // Core graph readiness comes first. Governed Local Model bodies are deferred until either
     // an occurrence-aware consumer asks for them or the plugin starts background hydration later.
-    this.deferredHydrationFiles = localCandidates;
+    this.deferredHydrationPaths = localCandidates.map((file) => file.path);
     this.deferredHydrationEpoch = epoch;
     this.hydrationRemaining = 0;
     this.lastHydrationCandidatesValue = localCandidates.length;
@@ -693,7 +698,7 @@ export class Indexer {
     this.relationshipResolvePending = false;
     this.hydrationEpoch++;
     this.hydrationTask = null;
-    this.deferredHydrationFiles = [];
+    this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
   }
