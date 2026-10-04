@@ -2581,6 +2581,13 @@ var ReversePathDependencyIndex = class {
     }
     return [...out].sort();
   }
+  /**
+   * Per-path candidate fan-out used for runtime measurement. This is deliberately diagnostic:
+   * it does not choose targeted vs full reconciliation and does not alter dependency semantics.
+   */
+  candidateFanOutForPathChanges(paths) {
+    return [...new Set(paths)].sort().map((path) => ({ path, candidates: this.candidatesForPathChanges([path]).length }));
+  }
   targetsOf(sourcePath) {
     return [...this.bySource.get(sourcePath) ?? []].sort();
   }
@@ -2753,6 +2760,7 @@ var QUIET_MS = 3e3;
 var LIVE_DEBOUNCE_MS = 250;
 var WORK_SLICE_MS = UI_WORK_SLICE_BUDGET_MS;
 var yieldToUi = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+var RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT = 20;
 var Indexer = class {
   constructor(app, schema) {
     this.app = app;
@@ -2813,6 +2821,8 @@ var Indexer = class {
     this.relationshipResolveTask = null;
     this.relationshipResolvePending = false;
     this.relationshipPathChanges = /* @__PURE__ */ new Set();
+    /** Bounded in-memory evidence for path-set relationship invalidation fan-out (stability Step 33). */
+    this.relationshipReresolutionHistoryValue = [];
     this.index = new ModelIndex(schema);
   }
   get building() {
@@ -2867,6 +2877,17 @@ var Indexer = class {
   }
   get lastLocalHydrationCandidates() {
     return this.lastHydrationCandidatesValue;
+  }
+  get relationshipReresolutionHistory() {
+    return this.relationshipReresolutionHistoryValue.map((sample) => ({
+      ...sample,
+      changedPaths: [...sample.changedPaths],
+      fanOut: sample.fanOut.map((row) => ({ ...row }))
+    }));
+  }
+  get lastRelationshipReresolution() {
+    const sample = this.relationshipReresolutionHistoryValue[this.relationshipReresolutionHistoryValue.length - 1];
+    return sample ? { ...sample, changedPaths: [...sample.changedPaths], fanOut: sample.fanOut.map((row) => ({ ...row })) } : null;
   }
   get localHydrationCostSummary() {
     return summarizeHydrationCosts(this.hydrationCosts.values());
@@ -3358,10 +3379,27 @@ var Indexer = class {
     if (this.relationshipResolveTask) return;
     this.relationshipResolvePending = false;
     let task;
-    const changedPaths = [...this.relationshipPathChanges];
+    const changedPaths = [...this.relationshipPathChanges].sort();
     this.relationshipPathChanges.clear();
+    const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
-    task = this.reResolveRelationships(candidates).then(() => void 0).finally(() => {
+    const startedAt = performance.now();
+    task = this.reResolveRelationships(candidates).then((changedSourceCount) => {
+      this.relationshipReresolutionHistoryValue.push({
+        at: Date.now(),
+        changedPaths,
+        fanOut,
+        candidateCount: candidates.length,
+        changedSourceCount,
+        elapsedMs: performance.now() - startedAt
+      });
+      if (this.relationshipReresolutionHistoryValue.length > RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT) {
+        this.relationshipReresolutionHistoryValue.splice(
+          0,
+          this.relationshipReresolutionHistoryValue.length - RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT
+        );
+      }
+    }).finally(() => {
       if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
       if (this.relationshipResolvePending) this.scheduleRelationshipReresolution();
     });
