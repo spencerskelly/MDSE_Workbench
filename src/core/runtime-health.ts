@@ -10,6 +10,7 @@ export interface RuntimeHealthInput {
   ready: boolean;
   building: boolean;
   localPending: number;
+  livePending: number;
   localReadErrors: number;
   schemaWarnings: number;
   cacheWriteError: string | null;
@@ -46,7 +47,7 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
 
   const rows: Array<[string, string, boolean?]> = [];
   const hardAttention = input.localReadErrors > 0 || !!input.cacheWriteError || input.schemaWarnings > 0;
-  rows.push(["Model service", "ready"]);
+  rows.push(["Model service", input.livePending ? `${input.livePending} live update(s) pending` : "ready"]);
   rows.push([
     "Local Model",
     input.localReadErrors
@@ -85,11 +86,14 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
     };
   }
 
-  if (input.localPending > 0) {
+  const pending = input.livePending + input.localPending;
+  if (pending > 0) {
     return {
       level: "syncing",
-      label: `Workbench · syncing ${input.localPending}`,
-      detail: "Core model is ready while Local Model hydration finishes in the background.",
+      label: `Workbench · syncing ${pending}`,
+      detail: input.livePending
+        ? "Core model is usable while coalesced live edits and Local Model hydration finish."
+        : "Core model is ready while Local Model hydration finishes in the background.",
       rows,
     };
   }
