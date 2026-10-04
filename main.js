@@ -2149,6 +2149,8 @@ var Indexer = class {
     this.timer = null;
     /** Prevents a slower cachedRead from overwriting a newer Local Model edit. */
     this.localRevision = /* @__PURE__ */ new Map();
+    /** Body reads started by incremental Local Model updates; consumers can wait for semantic consistency. */
+    this.pendingLocalReads = /* @__PURE__ */ new Set();
     this.index = new ModelIndex(schema);
   }
   get building() {
@@ -2156,6 +2158,12 @@ var Indexer = class {
   }
   enableLiveChanges() {
     this.liveChanges = true;
+  }
+  /** Wait until every Local Model body read scheduled so far (and any chained during the wait) has settled. */
+  async whenLocalSettled() {
+    while (this.pendingLocalReads.size) {
+      await Promise.all([...this.pendingLocalReads]);
+    }
   }
   /** Current Markdown path/mtime/size evidence without parsing note bodies. */
   currentFingerprints() {
@@ -2348,10 +2356,12 @@ var Indexer = class {
     this.localRevision.set(path, revision);
     this.local.remove(path);
     if (!file || !this.mayHaveLocalModel(file)) return;
-    void this.app.vault.cachedRead(file).then((text) => {
+    let task;
+    task = this.app.vault.cachedRead(file).then((text) => {
       if (this.localRevision.get(path) !== revision) return;
       this.local.set(path, parseLocalModel(text));
-    });
+    }).finally(() => this.pendingLocalReads.delete(task));
+    this.pendingLocalReads.add(task);
   }
   /** One file changed or was created. Cheap; never starts a build directly. */
   changed(path) {
@@ -4033,6 +4043,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (!schema || !indexer || indexer.building || !indexer.stats) return;
     const t0 = performance.now();
     try {
+      await indexer.whenLocalSettled();
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
       const cache = serializeSemanticState(
@@ -4252,6 +4263,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const notice = new import_obsidian8.Notice("MDSE Workbench: checking Local Model\u2026", 0);
     try {
       const indexer = this.indexer;
+      await indexer.whenLocalSettled();
       const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
       const scan = analyzeLocalModel(indexer.index, indexer.local, resolve);
       const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
@@ -4323,7 +4335,9 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   async explore(starts, profile = STRUCTURE_PROFILE) {
     if (!this.ready()) return;
-    const index = this.indexer.index;
+    const indexer = this.indexer;
+    await indexer.whenLocalSettled();
+    const index = indexer.index;
     const t0 = performance.now();
     if (profile.startTypes) {
       const type = index.notes.get(starts[0])?.type ?? "";
@@ -4334,7 +4348,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
     const baseView = traverse(index, starts, profile);
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
-    const view = withLocalOccurrences(index, this.indexer.local, resolve, baseView, profile);
+    const view = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
       new import_obsidian8.Notice(`Nothing to show: this note has no links the ${profile.name} view follows (${[...new Set(profile.steps.map((s) => s.field))].join(", ")}).`);
       return;
@@ -4426,6 +4440,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   async checkView() {
     if (!this.ready()) return;
+    const indexer = this.indexer;
+    await indexer.whenLocalSettled();
     const f = this.app.workspace.getActiveFile();
     const meta = f ? this.views[f.path] : void 0;
     if (!f || !meta) {
@@ -4433,10 +4449,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
-    const index = this.indexer.index;
+    const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
-    const current = withLocalOccurrences(index, this.indexer.local, resolve, baseView, profile);
+    const current = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     const now = signature(current);
     if (now === meta.signature) new import_obsidian8.Notice("This view is current.");
     else
