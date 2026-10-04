@@ -413,6 +413,7 @@ export default class MdseWorkbench extends Plugin {
     this.lastFindingsMs = Math.round(performance.now() - t0);
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     const rows: Array<[string, string, boolean?]> = [
+      ["Index mode", s.mode],
       ["Markdown files", String(s.files)],
       ["Notes with properties", String(s.notes)],
       ["Model notes", String(s.elements)],
