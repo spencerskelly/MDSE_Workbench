@@ -907,6 +907,7 @@ export default class MdseWorkbench extends Plugin {
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     const cacheSizeBytes = await workbenchCacheSizeBytes(this.app);
     const relationshipReconciliation = this.indexer!.lastRelationshipReresolution;
+    const relationshipDependencySize = this.indexer!.relationshipDependencySize;
     const rows: Array<[string, string, boolean?]> = [
       ["Index mode", s.mode],
       ["Markdown files", String(s.files)],
@@ -917,6 +918,8 @@ export default class MdseWorkbench extends Plugin {
         ? `${relationshipReconciliation.mode} · ${relationshipReconciliation.candidateCount} candidate(s) · ${relationshipReconciliation.elapsedMs.toFixed(1)} ms`
         : "not measured"],
       ["Relationship sources changed", relationshipReconciliation ? String(relationshipReconciliation.changedSourceCount) : "not measured"],
+      ["Reverse relationship index", `${relationshipDependencySize.sources} source(s) · ${relationshipDependencySize.resolvedTargetKeys + relationshipDependencySize.authoredKeys} key(s) · ${relationshipDependencySize.storedMemberships} stored membership(s)`],
+      ["Reverse relationship associations", `${relationshipDependencySize.resolvedAssociations} resolved · ${relationshipDependencySize.authoredAssociations} authored-key`],
       ["Local Model hydration", this.indexer!.localHydrationPending ? `${this.indexer!.localHydrationPending} note(s) pending` : "settled"],
       ["Local Model read errors", String(this.indexer!.localReadErrorCount), this.indexer!.localReadErrorCount > 0],
       ["Hydration cost / Object", (() => {
