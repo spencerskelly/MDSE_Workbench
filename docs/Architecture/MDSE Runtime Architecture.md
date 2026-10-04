@@ -334,3 +334,16 @@ Workbench now treats readiness as a capability boundary rather than one all-or-n
 - **Persistence ready:** semantic-cache writes remain later background work and never define engineering authority.
 
 Cold-start runtime evidence no longer forces Local Model hydration simply to record a startup sample. Functional, Design, Verification, Scenario, Behavior, Failure/risk and Evidence views do not wait on Local Model hydration because their current semantics do not consume occurrence records.
+
+
+## Stability-first startup refinements — W-355 to W-358
+
+The startup policy now explicitly favors vault responsiveness over minimum feature latency.
+
+- Heavy MDSE tasks are staggered into separate lanes: Obsidian/UI, Workbench core, occurrence hydration, cache persistence, then Bootstrap full verification.
+- Long Workbench loops use elapsed-time cooperative slices rather than fixed item counts, so slower hardware yields more often.
+- Deferred occurrence work is activity-aware and waits while the engineer is actively editing unless an occurrence-aware command explicitly requests it.
+- Runtime-health observation is side-effect free and cannot start deferred work.
+- Core startup, background occurrence processing, cache persistence and global assurance each have separate fault boundaries. A failure in one derived subsystem must not be presented as successful verification and must not destabilize ordinary Obsidian use.
+
+The resulting design intentionally accepts that some MDSE capabilities may become ready seconds after the vault itself is usable.
