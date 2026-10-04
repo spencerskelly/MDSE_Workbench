@@ -106,3 +106,43 @@ test("targeted relationship re-resolution uses the defined candidate threshold",
     true,
   );
 });
+
+
+test("targeted candidates conservatively cover ambiguous basenames", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("A/Source.md", ["A/Controller.md"], ["Controller"]);
+  index.set("B/Source.md", ["B/Controller.md"], ["Controller"]);
+
+  assert.deepEqual(
+    index.candidatesForPathChanges(["A/Controller.md"]),
+    ["A/Source.md", "B/Source.md"],
+  );
+});
+
+test("folder-qualified authored links remain candidates for their exact path and basename changes", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", ["A/Controller.md"], ["A/Controller"]);
+
+  assert.deepEqual(index.candidatesForPathChanges(["A/Controller.md"]), ["Source.md"]);
+  assert.deepEqual(index.candidatesForPathChanges(["Controller.md"]), ["Source.md"]);
+});
+
+test("aliases and fragments cannot hide an authored dependency candidate", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Alias.md", [], ["Folder/Target|Friendly name"]);
+  index.set("Heading.md", [], ["Folder/Target#Heading"]);
+  index.set("Block.md", [], ["Folder/Target#^block-id"]);
+
+  assert.deepEqual(
+    index.candidatesForPathChanges(["Folder/Target.md"]),
+    ["Alias.md", "Block.md", "Heading.md"],
+  );
+});
+
+test("candidate matching normalizes case, separators, leading slash, and md extension", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", [], ["\\Folder\\Controller.MD"]);
+
+  assert.deepEqual(index.candidatesForPathChanges(["folder/controller.md"]), ["Source.md"]);
+  assert.deepEqual(index.candidatesForPathChanges(["/FOLDER/CONTROLLER.MD"]), ["Source.md"]);
+});
