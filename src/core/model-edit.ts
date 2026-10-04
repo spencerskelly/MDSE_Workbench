@@ -1,5 +1,5 @@
 import { localRef, type ModelRef } from "./localmodel";
-import { planLocalRecordCreate, planLocalRecordPatch, type LocalRecordPatch, type NewLocalRecord, type PlannedLocalEdit } from "./localmodel-edit";
+import { planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch, type LocalDeleteImpact, type LocalRecordPatch, type NewLocalRecord, type PlannedLocalDelete, type PlannedLocalEdit } from "./localmodel-edit";
 import { TransactionManager, type AppliedEdit, type EditTransaction } from "./transaction";
 
 export interface TextDocumentStore {
@@ -24,6 +24,25 @@ interface PendingLocalCreate {
   label: string;
 }
 
+export interface ExternalLocalDeleteImpact {
+  path: string;
+  field: string;
+}
+
+export interface StagedLocalDelete {
+  transaction: EditTransaction;
+  plan: PlannedLocalDelete;
+  path: string;
+  externalImpacts: ExternalLocalDeleteImpact[];
+}
+
+interface PendingLocalDelete {
+  path: string;
+  plan: PlannedLocalDelete;
+  label: string;
+  ownerUid: string;
+}
+
 /**
  * WB-114 atomic Local Model editor.
  *
@@ -34,11 +53,13 @@ interface PendingLocalCreate {
 export class ModelEditService {
   private sequence = 0;
   private readonly pendingCreates = new Map<string, PendingLocalCreate>();
+  private readonly pendingDeletes = new Map<string, PendingLocalDelete>();
 
   constructor(
     private readonly store: TextDocumentStore,
     private readonly ownerUid: (path: string) => string | null,
     private readonly transactions: TransactionManager,
+    private readonly externalLocalDeleteImpacts: (ownerPath: string, localId: string) => ExternalLocalDeleteImpact[] = () => [],
   ) {}
 
   async patchLocalRecord(path: string, localId: string, patch: LocalRecordPatch): Promise<LocalPatchResult> {
@@ -144,6 +165,78 @@ export class ModelEditService {
   private requirePendingCreate(transactionId: string): PendingLocalCreate {
     const pending = this.pendingCreates.get(transactionId);
     if (!pending) throw new Error(`Structural Local Model transaction ${transactionId} does not exist.`);
+    return pending;
+  }
+
+  async stageLocalRecordDelete(path: string, localId: string): Promise<StagedLocalDelete> {
+    const before = await this.store.read(path);
+    const plan = planLocalRecordDelete(before, localId);
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+
+    const txId = `local-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `delete part ${plan.identifier}`;
+    this.transactions.begin(txId, label, "structural");
+    const transaction = this.transactions.add(txId, {
+      id: txId + "-delete",
+      label,
+      changes: [{
+        kind: "local.delete",
+        summary: label,
+        refs: [localRef(uid, plan.kind, plan.localId)],
+        metadata: { path, localId: plan.localId, localKind: plan.kind },
+      }],
+    });
+    this.pendingDeletes.set(txId, { path, plan, label, ownerUid: uid });
+    return {
+      transaction,
+      plan,
+      path,
+      externalImpacts: this.externalLocalDeleteImpacts(path, localId),
+    };
+  }
+
+  reviewLocalDelete(transactionId: string): StagedLocalDelete {
+    const pending = this.requirePendingDelete(transactionId);
+    return {
+      transaction: this.transactions.review(transactionId),
+      plan: pending.plan,
+      path: pending.path,
+      externalImpacts: this.externalLocalDeleteImpacts(pending.path, pending.plan.localId),
+    };
+  }
+
+  async applyLocalDelete(transactionId: string): Promise<void> {
+    const pending = this.requirePendingDelete(transactionId);
+    const external = this.externalLocalDeleteImpacts(pending.path, pending.plan.localId);
+    const blockingCount = pending.plan.impacts.length + external.length;
+    if (blockingCount) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blockingCount} dependent model reference${blockingCount === 1 ? "" : "s"} still target this occurrence.`,
+      );
+    }
+    const blockingFindings = pending.plan.findings.filter((finding) => finding.severity === "error");
+    if (blockingFindings.length) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blockingFindings.length} blocking Local Model finding${blockingFindings.length === 1 ? "" : "s"}.`,
+      );
+    }
+    await this.transactions.apply(transactionId, {
+      apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label),
+    });
+    this.pendingDeletes.delete(transactionId);
+  }
+
+  cancelLocalDelete(transactionId: string): EditTransaction {
+    this.requirePendingDelete(transactionId);
+    const cancelled = this.transactions.cancel(transactionId);
+    this.pendingDeletes.delete(transactionId);
+    return cancelled;
+  }
+
+  private requirePendingDelete(transactionId: string): PendingLocalDelete {
+    const pending = this.pendingDeletes.get(transactionId);
+    if (!pending) throw new Error(`Structural Local Model delete transaction ${transactionId} does not exist.`);
     return pending;
   }
 
