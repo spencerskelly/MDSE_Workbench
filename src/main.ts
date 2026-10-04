@@ -954,19 +954,44 @@ export default class MdseWorkbench extends Plugin {
     new ViewPicker(this.app, fits, rec?.name ?? "this note", (p) => void this.explore([path], p)).open();
   }
 
+  /**
+   * Exact Local Model owners knowable from the core graph alone.
+   * null means the profile needs a vault-wide occurrence search to remain complete.
+   */
+  private occurrenceOwnerPaths(profile: ViewProfile, starts: readonly string[], baseDepths: ReadonlyMap<string, number>): string[] | null {
+    const index = (this.indexer as Indexer).index;
+    switch (profile.name) {
+      case "Internal": {
+        const owner = starts[0];
+        return owner && index.notes.get(owner)?.type === "Object" ? [owner] : [];
+      }
+      case "Structure":
+        return [...baseDepths.entries()]
+          .filter(([path, depth]) => depth < profile.depth && index.notes.get(path)?.type === "Object")
+          .map(([path]) => path)
+          .sort();
+      case "Requirements": {
+        const owners = new Set<string>();
+        for (const requirementPath of starts) {
+          if (index.notes.get(requirementPath)?.type !== "Requirement") continue;
+          for (const ref of index.notes.get(requirementPath)?.localRefs ?? []) if (ref.field === "appliesTo") owners.add(ref.path);
+        }
+        return [...owners].sort();
+      }
+      // Interfaces may follow cross-owner local topology and definition starts; Where Used is
+      // inherently an inverse search across every hydrated owner. Keep both complete for now.
+      case "Interfaces":
+      case "Where Used":
+        return null;
+      default:
+        return [];
+    }
+  }
+
   async explore(starts: string[], profile: ViewProfile = STRUCTURE_PROFILE): Promise<void> {
     this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer as Indexer;
-    await indexer.whenSourceSettled();
-    if (profileNeedsLocalOccurrences(profile)) {
-      this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements · loading occurrence data for ${profile.name}`);
-      await indexer.whenLocalSettled();
-      void this.markOccurrenceReady(indexer);
-      this.refreshRuntimeHealth();
-    }
-    // Source files may have changed while occurrence hydration was running; cross the source
-    // barrier again so traversal never writes a derived canvas from a half-reconciled revision.
     await indexer.whenSourceSettled();
     const index = indexer.index;
     const t0 = performance.now();
@@ -978,6 +1003,20 @@ export default class MdseWorkbench extends Plugin {
       }
     }
     const baseView = traverse(index, starts, profile);
+    if (profileNeedsLocalOccurrences(profile)) {
+      this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements · loading occurrence data for ${profile.name}`);
+      const owners = this.occurrenceOwnerPaths(profile, starts, baseView.depthOf);
+      if (owners === null) {
+        await indexer.whenLocalSettled();
+        void this.markOccurrenceReady(indexer);
+      } else {
+        await indexer.hydrateLocalOwners(owners);
+      }
+      this.refreshRuntimeHealth();
+    }
+    // Source files may have changed while occurrence hydration was running; cross the source
+    // barrier again so traversal never writes a derived canvas from a half-reconciled revision.
+    await indexer.whenSourceSettled();
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
     const view = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
@@ -1090,13 +1129,18 @@ export default class MdseWorkbench extends Plugin {
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
     await indexer.whenSourceSettled();
-    if (profileNeedsLocalOccurrences(profile)) {
-      await indexer.whenLocalSettled();
-      void this.markOccurrenceReady(indexer);
-    }
-    await indexer.whenSourceSettled();
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
+    if (profileNeedsLocalOccurrences(profile)) {
+      const owners = this.occurrenceOwnerPaths(profile, meta.starts, baseView.depthOf);
+      if (owners === null) {
+        await indexer.whenLocalSettled();
+        void this.markOccurrenceReady(indexer);
+      } else {
+        await indexer.hydrateLocalOwners(owners);
+      }
+    }
+    await indexer.whenSourceSettled();
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
     const current = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     const now = signature(current);
