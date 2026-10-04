@@ -58,11 +58,12 @@ Workbench will maintain a local cache under its plugin data area. It is never co
 
 The cache must:
 
-- have an explicit cache-format version;
-- record compatible Workbench/parser and schema versions;
+- have explicit storage-format and semantic-parser contract versions;
+- bind to the initialized `vault_uid`;
+- record relationship/element schema versions **and** a deterministic signature of the parsed schema semantics, so an accidental rule change without a version bump cannot silently reuse stale state;
 - retain file fingerprints sufficient to identify changed files;
-- support atomic replacement so interrupted shutdown cannot corrupt the only usable state;
 - be sharded or otherwise bounded rather than one fragile monolithic file at large model sizes;
+- use two bounded A/B commit slots with generation tokens: shards are written first, the slot manifest last, and the opposite slot remains a complete fallback if a write is interrupted;
 - be safe to delete at any time;
 - never cause model files to be rewritten during restoration.
 
@@ -76,12 +77,14 @@ On warm startup:
 
 1. restore compatible derived state;
 2. compare current files to cached fingerprints;
-3. remove deleted paths;
-4. parse only new/changed files;
+3. if the Markdown path set is unchanged, parse only changed files in bounded batches;
+4. if any Markdown path was added/deleted/renamed, use the proven full rebuild until the cache retains sufficient authored-link information to safely re-resolve unchanged wikilinks;
 5. update affected forward/reverse relationships and Local Model references;
 6. yield between bounded work batches so Obsidian remains responsive.
 
-A large Git pull may produce a large reconciliation queue, but it must not force the UI to wait for a single unbroken full-vault loop.
+This conservative path-set rule is intentional: Workbench currently caches resolved relationship targets. A new/deleted/renamed note can change how an unchanged wikilink resolves. Correctness wins over an unsafe incremental shortcut. A later cache revision may retain authored link evidence and safely narrow that fallback.
+
+A large Git pull may therefore choose a full chunked rebuild, but it must not force the UI to wait for a single unbroken processing loop.
 
 ## Validation strategy
 
@@ -247,10 +250,16 @@ Targets are acceptance budgets, not promises until measured on the real model.
 
 RTA-1 is implemented at source level: Workbench exposes explicit startup/indexing/ready status and retains the current chunked full rebuild as the safe fallback.
 
-RTA-2 foundation is now implemented at source/test-contract level but is **not yet enabled at runtime**:
-- `src/core/cache.ts` defines cache format v1, strict schema/parser compatibility, deterministic serialization/restoration, bounded note/Local Model shards, corruption refusal and file-fingerprint reconciliation planning;
-- `src/core/cache-storage.ts` defines manifest-last generation persistence so a partially written next generation never becomes authoritative;
-- `test/cache.test.ts` and `test/cache-storage.test.ts` cover JSON round-trip, schema invalidation, malformed data, sharding, mixed/partial generations, deterministic reconciliation and manifest-last behavior;
-- generated Base Vaults now ignore `.obsidian/plugins/mdse-workbench/cache/`.
+RTA-2 foundation is now implemented through the save-only runtime boundary:
+- `src/core/cache.ts` defines cache format v1 plus semantic-parser contract v1, vault binding, parsed-schema semantic signatures, deterministic serialization/restoration, bounded note/Local Model shards, corruption refusal, file-fingerprint reconciliation planning and the conservative reconciliation-mode policy;
+- `src/core/cache-storage.ts` uses two fixed A/B slots with unique generation tokens. Each target slot writes shards first and its manifest last; a partial/torn target slot cannot displace the opposite complete slot, and disk usage is bounded;
+- `src/obsidian/cache.ts` is the thin Obsidian storage adapter;
+- Workbench now writes the cache **after it is already Ready**, after a short quiet period. Cache-write failure is diagnostic only and cannot make the model unavailable;
+- **MDSE Workbench: Inspect semantic cache** performs a read-only restore/compatibility/reconciliation check without allowing startup to trust the cache yet;
+- the indexer now discards pre-build metadata-event backlog at the start of a full build because that state is already captured by the build, preventing a redundant second whole-vault rebuild after Obsidian's startup metadata burst;
+- diagnostics report startup quiet-wait time, index time and cache-write time;
+- generated Base Vaults ignore `.obsidian/plugins/mdse-workbench/cache/`.
 
-The next step is to run/typecheck this foundation in the standalone Workbench build, then add the thin Obsidian storage adapter and wire **save-only cache generation first**. Warm restore remains disabled until that write path is proven, so no startup behavior depends on unvalidated cached data.
+RTA-5 has also begun safely in Bootstrap 0.3.1: safe activation repair and its immediately following release check now reuse one in-session integrity scan instead of hashing every locked plugin file twice. Persistent cross-start hash reuse is still deferred because it must not weaken W-322/W-331 integrity.
+
+Warm restore remains disabled until the standalone Workbench source passes its test/typecheck/build gate and the save-only cache is inspected in a real vault. The next code step is the restored-index/install + stable-path incremental reconciliation service behind a disabled/controlled gate, then runtime testing before promotion.
