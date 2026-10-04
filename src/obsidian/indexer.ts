@@ -5,7 +5,7 @@
 import { App, getLinkpath, TFile } from "obsidian";
 import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../core/model";
 import type { FileFingerprint, ReconciliationPlan, RestoredSemanticState } from "../core/cache";
-import { LocalModelIndex, parseLocalModel } from "../core/localmodel";
+import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
 import type { Schema } from "../core/schema";
 
@@ -59,6 +59,8 @@ export class Indexer {
   private hydrationStartedAt: number | null = null;
   private lastHydrationMsValue: number | null = null;
   private lastHydrationCandidatesValue = 0;
+  /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
+  private readonly localReadErrors = new Map<string, string>();
   /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
   private relationshipResolveTimer: number | null = null;
   private relationshipResolveTask: Promise<void> | null = null;
@@ -90,6 +92,21 @@ export class Indexer {
 
   get lastLocalHydrationCandidates(): number {
     return this.lastHydrationCandidatesValue;
+  }
+
+  get localReadErrorCount(): number {
+    return this.localReadErrors.size;
+  }
+
+  localReadFindings(): LocalFinding[] {
+    return [...this.localReadErrors.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([path, message]) => ({
+        code: "local.read-failed",
+        severity: "error" as const,
+        message: `Could not read this note's Local Model body: ${message}`,
+        path,
+      }));
   }
 
   private bumpRevision(): void {
@@ -136,6 +153,7 @@ export class Indexer {
     this.hydrationStartedAt = null;
     this.lastHydrationMsValue = 0;
     this.lastHydrationCandidatesValue = 0;
+    this.localReadErrors.clear();
     this.index = state.index;
     this.local = state.local;
     this.fingerprints.clear();
@@ -232,6 +250,7 @@ export class Indexer {
     for (const path of deleted) {
       this.index.remove(path);
       this.local.remove(path);
+      this.localReadErrors.delete(path);
       this.fingerprints.delete(path);
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
       this.bumpRevision();
@@ -361,9 +380,16 @@ export class Indexer {
     this.localRevision.set(path, revision);
     this.local.remove(path);
     if (this.mayHaveLocalModel(file)) {
-      const text = await this.app.vault.cachedRead(file);
-      if (this.localRevision.get(path) === revision) this.local.set(path, parseLocalModel(text));
-    }
+      try {
+        const text = await this.app.vault.cachedRead(file);
+        if (this.localRevision.get(path) === revision) {
+          this.local.set(path, parseLocalModel(text));
+          this.localReadErrors.delete(path);
+        }
+      } catch (e) {
+        if (this.localRevision.get(path) === revision) this.localReadErrors.set(path, (e as Error).message);
+      }
+    } else this.localReadErrors.delete(path);
     this.bumpRevision();
   }
 
@@ -394,6 +420,12 @@ export class Indexer {
           const text = await this.app.vault.cachedRead(file);
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
             this.local.set(path, parseLocalModel(text));
+            this.localReadErrors.delete(path);
+            changed = true;
+          }
+        } catch (e) {
+          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+            this.localReadErrors.set(path, (e as Error).message);
             changed = true;
           }
         } finally {
@@ -428,6 +460,7 @@ export class Indexer {
     // during the build; otherwise Obsidian's first-start metadata burst can trigger a redundant
     // second whole-vault rebuild immediately after the first one (W-343 / RTA-1).
     this.dirty.clear();
+    this.localReadErrors.clear();
     const epoch = ++this.hydrationEpoch;
     const index = new ModelIndex(this.schema);
     const local = new LocalModelIndex();
@@ -475,15 +508,24 @@ export class Indexer {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
     this.local.remove(path);
-    if (!file || !this.mayHaveLocalModel(file)) return;
+    if (!file || !this.mayHaveLocalModel(file)) {
+      this.localReadErrors.delete(path);
+      return;
+    }
     let task: Promise<void>;
     task = this.app.vault.cachedRead(file)
       .then((text) => {
         if (this.localRevision.get(path) !== revision) return;
         this.local.set(path, parseLocalModel(text));
+        this.localReadErrors.delete(path);
         // Local Model body parsing completes after the note/frontmatter apply. Treat that as
         // a second semantic revision so Review/cache consumers cannot mistake pre-parse state
         // for the final semantic state of this edit.
+        this.bumpRevision();
+      })
+      .catch((e) => {
+        if (this.localRevision.get(path) !== revision) return;
+        this.localReadErrors.set(path, (e as Error).message);
         this.bumpRevision();
       })
       .finally(() => this.pendingLocalReads.delete(task));
