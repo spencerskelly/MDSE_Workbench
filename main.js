@@ -297,62 +297,9 @@ function isBlocking(issue) {
   return issue.severity === "error" && issue.blocking !== false;
 }
 
-// src/core/core-readiness.ts
-function canPublishCoreReady(state) {
-  return state.publicationGate && state.schemaLoaded && state.writerReady && state.statsAvailable && !state.sourceReconciliationPending && !state.building;
-}
-
-// src/core/startup-recovery.ts
-async function recoverWithColdBuild(discardProvisionalState, coldBuild) {
-  await discardProvisionalState();
-  return await coldBuild();
-}
-
-// src/core/cache-size.ts
-async function cacheTreeSizeBytes(storage, root) {
-  let total = 0;
-  const pending = [root];
-  while (pending.length) {
-    const folder = pending.pop();
-    const listed = await storage.list(folder);
-    pending.push(...listed.folders);
-    for (const file of listed.files) {
-      const stat = await storage.stat(file);
-      if (stat && Number.isFinite(stat.size) && stat.size >= 0) total += stat.size;
-    }
-  }
-  return total;
-}
-function formatCacheBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes < 0) return "unavailable";
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
-  const kib = bytes / 1024;
-  if (kib < 1024) return `${kib.toFixed(kib < 10 ? 1 : 0)} KiB`;
-  const mib = kib / 1024;
-  if (mib < 1024) return `${mib.toFixed(mib < 10 ? 1 : 0)} MiB`;
-  const gib = mib / 1024;
-  return `${gib.toFixed(gib < 10 ? 2 : 1)} GiB`;
-}
-
-// src/core/startup-handoff.ts
-function scheduleStartupHandoff(schedule, cancel, run) {
-  let active = true;
-  const handle = schedule(() => {
-    if (!active) return;
-    active = false;
-    run();
-  });
-  return {
-    cancel: () => {
-      if (!active) return;
-      active = false;
-      cancel(handle);
-    }
-  };
-}
-
 // src/core/localmodel.ts
 var READABLE_VERSIONS = ["0.1", "0.2"];
+var WRITABLE_VERSION = "0.2";
 var PREFIX = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
 var SECTION = { "part occurrences": "part", "local interfaces": "endpoint", connections: "connection" };
 var FLOW_ROLES = ["transmit", "receive", "exchange", "unspecified"];
@@ -858,6 +805,211 @@ function renderFindingsReport(findings, stats, opts = {}) {
     }
   }
   return lines.join("\n");
+}
+
+// src/core/localmodel-edit.ts
+var FIELD_ORDER = {
+  part: ["definition", "usage", "identifier", "multiplicity"],
+  endpoint: ["definition", "usage", "identifier", "part", "parent", "exposes", "equals", "multiplicity", "kind"],
+  connection: ["endpointA", "endpointB", "definition", "identifier"],
+  flow: ["definition", "identifier", "endpointA", "endpointB"]
+};
+function editableLocalRegion(text) {
+  const region = parseLocalModel(text);
+  if (!region) throw new Error("This note has no governed Local Model region.");
+  if (!region.structured) throw new Error("The Local Model region has structural/schema errors and cannot be edited.");
+  if (region.schemaVersion !== WRITABLE_VERSION) {
+    throw new Error("Local Model schema " + (region.schemaVersion ?? "unknown") + " is read-only. Structured writes require schema " + WRITABLE_VERSION + ".");
+  }
+  return {
+    region,
+    lines: text.split(/\r?\n/),
+    eol: text.includes("\r\n") ? "\r\n" : "\n"
+  };
+}
+function planLocalRecordPatch(text, localId, patch, options = {}) {
+  const editable = editableLocalRegion(text);
+  const record = editable.region.records.find((r) => r.localId === localId);
+  if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
+  const nextHeading = patch.heading === void 0 ? record.identifier : patch.heading.trim();
+  if (!nextHeading) throw new Error("A Local Model record heading cannot be empty.");
+  const fields = new Map(record.fields);
+  for (const [key2, raw] of Object.entries(patch.fields ?? {})) {
+    if (!FIELD_ORDER[record.kind].includes(key2)) throw new Error(key2 + " is not a governed field on a " + record.kind + " record.");
+    if ((record.kind === "connection" || record.kind === "flow") && key2 === "usage") {
+      throw new Error("usage is not valid on a " + record.kind + " record.");
+    }
+    const value = raw === null ? null : raw.trim();
+    if (value === null || value === "" || key2 === "usage" && value === "standard") fields.delete(key2);
+    else fields.set(key2, value);
+  }
+  const range = recordLineRange(editable, record);
+  const rendered = renderRecord(record.kind, nextHeading, record.localId, fields);
+  const nextLines = [...editable.lines.slice(0, range.start), ...rendered, ...editable.lines.slice(range.end)];
+  const after = nextLines.join(editable.eol);
+  const parsed = parseLocalModel(after);
+  if (!parsed?.structured) throw new Error("Planned edit would make the Local Model region structurally unreadable.");
+  const reparsed = parsed.records.find((r) => r.localId === localId);
+  if (!reparsed) throw new Error("Planned edit lost Local Model record ^" + localId + ".");
+  if (reparsed.kind !== record.kind) throw new Error("Planned edit changed ^" + localId + " from " + record.kind + " to " + reparsed.kind + ".");
+  if (!options.allowInvalidTarget) assertTargetValid(parsed, localId);
+  return {
+    before: text,
+    after,
+    changed: after !== text,
+    localId,
+    kind: record.kind,
+    findings: parsed.findings.slice()
+  };
+}
+function recordLineRange(editable, record) {
+  const start = record.line - 1;
+  if (start < 0 || start >= editable.lines.length) throw new Error("Cannot locate ^" + record.localId + " in the source text.");
+  const endMarker = editable.region.endLine ? editable.region.endLine - 1 : editable.lines.length;
+  let end = endMarker;
+  for (let i = start + 1; i < endMarker; i++) {
+    if (/^#{3,5}\s+/.test(editable.lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  while (end > start + 1 && editable.lines[end - 1].trim() === "") end--;
+  return { start, end };
+}
+function renderRecord(kind, heading, localId, fields) {
+  const level = kind === "flow" ? "#####" : "####";
+  const out = [level + " " + heading];
+  const known = new Set(FIELD_ORDER[kind]);
+  for (const key2 of FIELD_ORDER[kind]) {
+    const value = fields.get(key2);
+    if (value !== void 0 && value !== "") out.push("- " + key2 + ": " + value);
+  }
+  for (const [key2, value] of fields) {
+    if (!known.has(key2) && value !== "") out.push("- " + key2 + ": " + value);
+  }
+  out.push("^" + localId);
+  return out;
+}
+function assertTargetValid(region, localId) {
+  const errors = region.findings.filter((finding) => finding.severity === "error" && finding.localId === localId);
+  if (!errors.length) return;
+  throw new Error("Local Model record ^" + localId + " is invalid: " + errors.map((x) => x.message).join(" "));
+}
+
+// src/core/model-edit.ts
+var ModelEditService = class {
+  constructor(store, ownerUid, transactions) {
+    this.store = store;
+    this.ownerUid = ownerUid;
+    this.transactions = transactions;
+    this.sequence = 0;
+  }
+  async patchLocalRecord(path, localId, patch) {
+    const before = await this.store.read(path);
+    const plan = planLocalRecordPatch(before, localId, patch);
+    if (!plan.changed) return { changed: false, plan };
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    const ref = localRef(uid, plan.kind, localId);
+    const label = `edit ${plan.kind} ${localId}`;
+    const txId = `local-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    this.transactions.begin(txId, label, "atomic");
+    this.transactions.add(txId, {
+      id: txId + "-patch",
+      label,
+      changes: [{
+        kind: "local.patch",
+        summary: label,
+        refs: [ref],
+        metadata: { path, localId, localKind: plan.kind }
+      }]
+    });
+    try {
+      await this.transactions.apply(txId, {
+        apply: async () => this.applyGuarded(path, plan.before, plan.after, label)
+      });
+    } catch (error) {
+      try {
+        this.transactions.cancel(txId);
+      } catch {
+      }
+      throw error;
+    }
+    return { changed: true, plan };
+  }
+  async applyGuarded(path, before, after, label) {
+    const current = await this.store.read(path);
+    if (current !== before) {
+      throw new Error(`${path} changed while "${label}" was being prepared. Reopen the context and try again.`);
+    }
+    await this.store.write(path, after);
+    return {
+      undo: async () => {
+        const latest = await this.store.read(path);
+        if (latest !== after) throw new Error(`${path} changed after "${label}".`);
+        await this.store.write(path, before);
+      },
+      redo: async () => {
+        const latest = await this.store.read(path);
+        if (latest !== before) throw new Error(`${path} changed after undoing "${label}".`);
+        await this.store.write(path, after);
+      }
+    };
+  }
+};
+
+// src/core/core-readiness.ts
+function canPublishCoreReady(state) {
+  return state.publicationGate && state.schemaLoaded && state.writerReady && state.statsAvailable && !state.sourceReconciliationPending && !state.building;
+}
+
+// src/core/startup-recovery.ts
+async function recoverWithColdBuild(discardProvisionalState, coldBuild) {
+  await discardProvisionalState();
+  return await coldBuild();
+}
+
+// src/core/cache-size.ts
+async function cacheTreeSizeBytes(storage, root) {
+  let total = 0;
+  const pending = [root];
+  while (pending.length) {
+    const folder = pending.pop();
+    const listed = await storage.list(folder);
+    pending.push(...listed.folders);
+    for (const file of listed.files) {
+      const stat = await storage.stat(file);
+      if (stat && Number.isFinite(stat.size) && stat.size >= 0) total += stat.size;
+    }
+  }
+  return total;
+}
+function formatCacheBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unavailable";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024) return `${kib.toFixed(kib < 10 ? 1 : 0)} KiB`;
+  const mib = kib / 1024;
+  if (mib < 1024) return `${mib.toFixed(mib < 10 ? 1 : 0)} MiB`;
+  const gib = mib / 1024;
+  return `${gib.toFixed(gib < 10 ? 2 : 1)} GiB`;
+}
+
+// src/core/startup-handoff.ts
+function scheduleStartupHandoff(schedule, cancel, run) {
+  let active = true;
+  const handle = schedule(() => {
+    if (!active) return;
+    active = false;
+    run();
+  });
+  return {
+    cancel: () => {
+      if (!active) return;
+      active = false;
+      cancel(handle);
+    }
+  };
 }
 
 // src/core/rules.ts
@@ -5522,6 +5674,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
+    this.modelEditor = null;
     /** One semantic history stack for every Workbench model writer (WB-114). */
     this.transactions = new TransactionManager();
     this.detail = null;
@@ -6179,6 +6332,19 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.indexer = new Indexer(this.app, schema);
       this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed("backgroundHydration", this.indexer));
       this.writer = new RelationshipWriter(this.app, () => this.schema, () => this.indexer.index, this.transactions);
+      const localFile = (path) => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof import_obsidian8.TFile)) throw new Error(path + " no longer exists.");
+        return file;
+      };
+      this.modelEditor = new ModelEditService(
+        {
+          read: (path) => this.app.vault.read(localFile(path)),
+          write: (path, text) => this.app.vault.modify(localFile(path), text)
+        },
+        (path) => this.indexer.index.notes.get(path)?.uid ?? null,
+        this.transactions
+      );
       this.assurance = new AssuranceManager({
         revision: () => this.indexer.revision,
         // Assurance ranks below background occurrence hydration. It waits for occurrence work
