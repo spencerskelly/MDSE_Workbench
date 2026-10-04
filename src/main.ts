@@ -95,7 +95,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context-edit service used by occurrence details; structural edits remain staged separately. */
+  /** Context edits apply atomically; structural Local Model edits remain staged until explicit Apply. */
   modelEditor: ModelEditService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
