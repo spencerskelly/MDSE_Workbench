@@ -94,6 +94,10 @@ export class Indexer {
     return this.hydrationRemaining;
   }
 
+  get liveUpdatePending(): number {
+    return this.livePending.size + (this.liveApplyTask ? 1 : 0);
+  }
+
   get lastLocalHydrationMs(): number | null {
     return this.lastHydrationMsValue;
   }
