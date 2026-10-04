@@ -318,8 +318,10 @@ export default class MdseWorkbench extends Plugin {
       await this.whenVaultQuiet();
       this.lastStartupWaitMs = Math.round(performance.now() - waitStarted);
       if (this.unloaded) return;
+      this.indexer.enableLiveChanges();
     } else {
       this.indexer.setSchema(schema);
+      this.indexer.enableLiveChanges();
     }
     this.setRuntimeStatus("indexing");
     const stats = await this.indexer.build();
