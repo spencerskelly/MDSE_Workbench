@@ -3,9 +3,9 @@
  * entering the authoritative cold-build path.
  */
 export async function recoverWithColdBuild<T>(
-  discardProvisionalState: () => void,
+  discardProvisionalState: () => void | Promise<void>,
   coldBuild: () => Promise<T>,
 ): Promise<T> {
-  discardProvisionalState();
+  await discardProvisionalState();
   return await coldBuild();
 }
