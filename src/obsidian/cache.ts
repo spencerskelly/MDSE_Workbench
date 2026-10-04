@@ -6,6 +6,7 @@
  */
 import type { App } from "obsidian";
 import type { CacheStorage } from "../core/cache-storage";
+import { cacheTreeSizeBytes } from "../core/cache-size";
 
 export const WORKBENCH_CACHE_ROOT = ".obsidian/plugins/mdse-workbench/cache";
 
@@ -30,4 +31,16 @@ export class ObsidianCacheStorage implements CacheStorage {
 export async function clearWorkbenchCache(app: App): Promise<void> {
   const a = app.vault.adapter;
   if (await a.exists(WORKBENCH_CACHE_ROOT)) await a.rmdir(WORKBENCH_CACHE_ROOT, true);
+}
+
+
+/** Size of the disposable Workbench semantic cache on disk, for explicit diagnostics only. */
+export async function workbenchCacheSizeBytes(app: App): Promise<number | null> {
+  const adapter = app.vault.adapter;
+  if (!(await adapter.exists(WORKBENCH_CACHE_ROOT))) return 0;
+  try {
+    return await cacheTreeSizeBytes(adapter, WORKBENCH_CACHE_ROOT);
+  } catch {
+    return null;
+  }
 }
