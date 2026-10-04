@@ -2607,6 +2607,60 @@ var ReversePathDependencyIndex = class {
   get sourceCount() {
     return (/* @__PURE__ */ new Set([...this.bySource.keys(), ...this.authoredBySource.keys()])).size;
   }
+  /**
+   * Fail-closed consistency check for the derived reverse dependency surface.
+   *
+   * The index is only safe for targeted invalidation when every canonical source-side entry
+   * is mirrored by the matching reverse entry and every reverse entry points back to canonical
+   * source-side evidence. Any mismatch means the derived accelerator may be incomplete.
+   */
+  consistency(expected = []) {
+    const issues = [];
+    for (const [source, targets] of this.bySource) {
+      for (const target of targets) {
+        if (!(this.byTarget.get(target)?.has(source) ?? false)) {
+          issues.push(`missing reverse target entry: ${source} -> ${target}`);
+        }
+      }
+    }
+    for (const [target, sources] of this.byTarget) {
+      for (const source of sources) {
+        if (!(this.bySource.get(source)?.has(target) ?? false)) {
+          issues.push(`orphan reverse target entry: ${target} <- ${source}`);
+        }
+      }
+    }
+    for (const [source, keys] of this.authoredBySource) {
+      for (const key2 of keys) {
+        if (!(this.byAuthoredKey.get(key2)?.has(source) ?? false)) {
+          issues.push(`missing reverse authored entry: ${source} -> ${key2}`);
+        }
+      }
+    }
+    for (const [key2, sources] of this.byAuthoredKey) {
+      for (const source of sources) {
+        if (!(this.authoredBySource.get(source)?.has(key2) ?? false)) {
+          issues.push(`orphan reverse authored entry: ${key2} <- ${source}`);
+        }
+      }
+    }
+    for (const row of expected) {
+      const expectedTargets = new Set([...row.targetPaths].filter((path) => path && path !== row.sourcePath));
+      const actualTargets = this.bySource.get(row.sourcePath) ?? /* @__PURE__ */ new Set();
+      if (!sameSet(expectedTargets, actualTargets)) {
+        issues.push(`target evidence mismatch for ${row.sourcePath}`);
+      }
+      const expectedAuthored = /* @__PURE__ */ new Set();
+      for (const linkpath of row.authoredLinkpaths ?? []) {
+        for (const key2 of linkpathKeys(linkpath)) expectedAuthored.add(key2);
+      }
+      const actualAuthored = this.authoredBySource.get(row.sourcePath) ?? /* @__PURE__ */ new Set();
+      if (!sameSet(expectedAuthored, actualAuthored)) {
+        issues.push(`authored evidence mismatch for ${row.sourcePath}`);
+      }
+    }
+    return { complete: issues.length === 0, issues };
+  }
 };
 function addReverse(index, key2, sourcePath) {
   let sources = index.get(key2);
@@ -2630,6 +2684,11 @@ function linkpathKeys(value) {
   const slash = clean.lastIndexOf("/");
   const base3 = slash >= 0 ? clean.slice(slash + 1) : clean;
   return base3 === clean ? [clean] : [clean, base3];
+}
+function sameSet(a, b) {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
 }
 
 // src/core/cooperative.ts
@@ -3113,6 +3172,23 @@ var Indexer = class {
     this.relationshipDependencies.clear();
     for (const rec of this.index.notes.values()) this.syncRelationshipDependency(rec, rec.path);
   }
+  relationshipDependencyConsistency() {
+    const expected = [];
+    for (const rec of this.index.notes.values()) {
+      if (!rec.authoredLinks) {
+        return {
+          complete: false,
+          issues: [`missing authored relationship evidence for ${rec.path}`]
+        };
+      }
+      expected.push({
+        sourcePath: rec.path,
+        targetPaths: this.relationshipTargets(rec),
+        authoredLinkpaths: rec.authoredLinks.map((link) => link.linkpath)
+      });
+    }
+    return this.relationshipDependencies.consistency(expected);
+  }
   /**
    * Install only the core semantic cache. Local Model regions remain deferred and are discovered
    * from Obsidian metadata without reading note bodies.
@@ -3292,6 +3368,10 @@ var Indexer = class {
       await reconcileBudget.checkpoint(yieldToUi);
     }
     if (plan.added.length || plan.deleted.length) {
+      const consistency = this.relationshipDependencyConsistency();
+      if (!consistency.complete) {
+        throw new Error(`Relationship dependency evidence is incomplete or inconsistent; full rebuild required: ${consistency.issues[0] ?? "unknown mismatch"}`);
+      }
       const changedPaths = [...plan.added, ...plan.deleted];
       const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
       await this.reResolveRelationships(
@@ -3389,6 +3469,11 @@ var Indexer = class {
     let task;
     const changedPaths = [...this.relationshipPathChanges].sort();
     this.relationshipPathChanges.clear();
+    const consistency = this.relationshipDependencyConsistency();
+    if (!consistency.complete) {
+      this.scheduleRebuild();
+      return;
+    }
     const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
     const startedAt = performance.now();
