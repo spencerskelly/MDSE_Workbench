@@ -34,6 +34,7 @@ class MemoryStorage implements CacheStorage {
 
 function sampleCache(createdAt = 123) {
   const schema = fixtureSchema();
+  const scope = { vaultUid: "20261003190000001skellyspencer" };
   const index = new ModelIndex(schema);
   index.upsert({ ...note("A.md", "Object", { dependsOn: ["B.md"] }), uid: "20261003180000001skellyspencer" });
   index.upsert({ ...note("B.md", "Object"), uid: "20261003180000002skellyspencer" });
@@ -57,6 +58,7 @@ function sampleCache(createdAt = 123) {
         ["B.md", { mtime: 11, size: 20 }],
       ]),
       schema,
+      scope,
       "0.1.17",
       createdAt,
     ),
