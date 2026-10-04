@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { summarizeRuntimeHealth, type RuntimeHealthInput } from "../src/core/runtime-health";
+import { editingBlockedReason } from "../src/core/edit-availability";
+import { fixtureSchema } from "./helpers";
 
 const base = (patch: Partial<RuntimeHealthInput> = {}): RuntimeHealthInput => ({
   ready: true,
@@ -156,4 +158,61 @@ test("assurance pending, ready and failed are independent capability states", ()
   }));
   assert.equal(failed.capabilities.assurance.state, "failed");
   assert.equal(failed.capabilities.core.state, "ready");
+});
+
+
+test("injected occurrence failure leaves core, schema, cache and editing available", () => {
+  const h = summarizeRuntimeHealth(base({
+    occurrenceError: "injected occurrence failure",
+    assurance: { current: true, findings: 0, computedAt: 1 },
+  }));
+
+  assert.equal(h.capabilities.occurrence.state, "failed");
+  assert.equal(h.capabilities.core.state, "ready");
+  assert.equal(h.capabilities.schema.state, "ready");
+  assert.equal(h.capabilities.cache.state, "ready");
+  assert.equal(h.capabilities.assurance.state, "ready");
+  assert.equal(editingBlockedReason(true, fixtureSchema()), null);
+});
+
+test("injected cache failure leaves core, occurrence, schema, assurance and editing available", () => {
+  const h = summarizeRuntimeHealth(base({
+    cacheWriteError: "injected cache failure",
+    cacheCurrent: false,
+    assurance: { current: true, findings: 0, computedAt: 1 },
+  }));
+
+  assert.equal(h.capabilities.cache.state, "failed");
+  assert.equal(h.capabilities.core.state, "ready");
+  assert.equal(h.capabilities.occurrence.state, "ready");
+  assert.equal(h.capabilities.schema.state, "ready");
+  assert.equal(h.capabilities.assurance.state, "ready");
+  assert.equal(editingBlockedReason(true, fixtureSchema()), null);
+});
+
+test("injected assurance failure leaves core, occurrence, cache, schema and editing available", () => {
+  const h = summarizeRuntimeHealth(base({
+    assurance: {
+      current: true,
+      findings: 0,
+      computedAt: 1,
+      error: "injected assurance failure",
+    },
+  }));
+
+  assert.equal(h.capabilities.assurance.state, "failed");
+  assert.equal(h.capabilities.core.state, "ready");
+  assert.equal(h.capabilities.occurrence.state, "ready");
+  assert.equal(h.capabilities.cache.state, "ready");
+  assert.equal(h.capabilities.schema.state, "ready");
+  assert.equal(editingBlockedReason(true, fixtureSchema()), null);
+});
+
+test("editing gate fails closed only for authoritative core or schema conditions", () => {
+  const schema = fixtureSchema();
+  assert.match(editingBlockedReason(false, schema) ?? "", /still indexing/);
+  assert.match(editingBlockedReason(true, null) ?? "", /schema is not available/);
+
+  const oldSchema = { ...schema, relationshipsVersion: "0" };
+  assert.match(editingBlockedReason(true, oldSchema) ?? "", /schema is older/);
 });
