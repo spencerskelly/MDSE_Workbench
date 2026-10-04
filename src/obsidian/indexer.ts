@@ -52,6 +52,10 @@ export class Indexer {
   private readonly pendingLocalReads = new Set<Promise<void>>();
   /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
   private semanticRevision = 0;
+  /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
+  private hydrationEpoch = 0;
+  private hydrationTask: Promise<void> | null = null;
+  private hydrationRemaining = 0;
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -69,6 +73,10 @@ export class Indexer {
     return this.semanticRevision;
   }
 
+  get localHydrationPending(): number {
+    return this.hydrationRemaining;
+  }
+
   private bumpRevision(): void {
     this.semanticRevision++;
   }
@@ -77,10 +85,12 @@ export class Indexer {
     this.liveChanges = true;
   }
 
-  /** Wait until every Local Model body read scheduled so far (and any chained during the wait) has settled. */
+  /** Wait until cold-build Local Model hydration and every incremental body read have settled. */
   async whenLocalSettled(): Promise<void> {
-    while (this.pendingLocalReads.size) {
-      await Promise.all([...this.pendingLocalReads]);
+    while (this.hydrationTask || this.pendingLocalReads.size) {
+      const work: Promise<unknown>[] = [...this.pendingLocalReads];
+      if (this.hydrationTask) work.push(this.hydrationTask);
+      if (work.length) await Promise.all(work);
     }
   }
 
@@ -103,6 +113,9 @@ export class Indexer {
    */
   installRestored(state: RestoredSemanticState, createdAt: number): BuildStats {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
+    this.hydrationEpoch++;
+    this.hydrationTask = null;
+    this.hydrationRemaining = 0;
     this.index = state.index;
     this.local = state.local;
     this.fingerprints.clear();
@@ -284,6 +297,46 @@ export class Indexer {
     this.bumpRevision();
   }
 
+  /**
+   * Parse only notes prefiltered by Obsidian metadata as Local Model candidates. This runs after
+   * the core note graph is already usable. Occurrence-aware consumers call whenLocalSettled().
+   */
+  private startLocalHydration(files: TFile[], epoch: number): void {
+    this.hydrationRemaining = files.length;
+    if (!files.length) {
+      this.hydrationTask = null;
+      return;
+    }
+    let task: Promise<void>;
+    task = (async () => {
+      let changed = false;
+      for (let i = 0; i < files.length; i++) {
+        if (epoch !== this.hydrationEpoch) return;
+        const file = files[i];
+        const path = file.path;
+        const revision = (this.localRevision.get(path) ?? 0) + 1;
+        this.localRevision.set(path, revision);
+        try {
+          const text = await this.app.vault.cachedRead(file);
+          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+            this.local.set(path, parseLocalModel(text));
+            changed = true;
+          }
+        } finally {
+          if (epoch === this.hydrationEpoch) this.hydrationRemaining = Math.max(0, files.length - i - 1);
+        }
+        if (i % 50 === 49) await new Promise((r) => window.setTimeout(r, 0));
+      }
+      if (changed && epoch === this.hydrationEpoch) this.bumpRevision();
+    })().finally(() => {
+      if (this.hydrationTask === task) {
+        this.hydrationTask = null;
+        this.hydrationRemaining = 0;
+      }
+    });
+    this.hydrationTask = task;
+  }
+
   /** Builds the index; a second call while building returns the same promise. */
   build(): Promise<BuildStats> {
     if (!this.running) this.running = this.doBuild().finally(() => (this.running = null));
@@ -297,16 +350,18 @@ export class Indexer {
     // during the build; otherwise Obsidian's first-start metadata burst can trigger a redundant
     // second whole-vault rebuild immediately after the first one (W-343 / RTA-1).
     this.dirty.clear();
+    const epoch = ++this.hydrationEpoch;
     const index = new ModelIndex(this.schema);
     const local = new LocalModelIndex();
     const files = this.app.vault.getMarkdownFiles();
+    const localCandidates: TFile[] = [];
     const fingerprints = new Map<string, FileFingerprint>();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       fingerprints.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
       const rec = this.record(file);
       if (rec) index.upsert(rec);
-      if (this.mayHaveLocalModel(file)) local.set(file.path, parseLocalModel(await this.app.vault.cachedRead(file)));
+      if (this.mayHaveLocalModel(file)) localCandidates.push(file);
       if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
     }
     this.index = index;
@@ -314,6 +369,7 @@ export class Indexer {
     this.fingerprints.clear();
     for (const [path, fp] of fingerprints) this.fingerprints.set(path, fp);
     this.bumpRevision();
+    this.startLocalHydration(localCandidates, epoch);
     // Apply what changed while building. A large backlog (first-time caching, a big pull)
     // is cheaper as one more chunked build after things go quiet than as one long loop.
     const backlog = this.dirty.size;
@@ -386,5 +442,8 @@ export class Indexer {
 
   dispose(): void {
     if (this.timer !== null) window.clearTimeout(this.timer);
+    this.hydrationEpoch++;
+    this.hydrationTask = null;
+    this.hydrationRemaining = 0;
   }
 }
