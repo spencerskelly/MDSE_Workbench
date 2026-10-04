@@ -5,6 +5,7 @@
  */
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
+import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
@@ -105,6 +106,8 @@ export default class MdseWorkbench extends Plugin {
     this.runtimeHistory = Array.isArray(stored.runtimeHistory) ? stored.runtimeHistory.slice(-20) : [];
     this.addSettingTab(new WorkbenchSettings(this.app, this));
     this.statusEl = this.addStatusBarItem();
+    this.statusEl.addClass("mod-clickable");
+    this.registerDomEvent(this.statusEl, "click", () => this.showRuntimeHealth());
     this.setRuntimeStatus("starting");
     this.detail = new NoteDetailPanel(this.app, {
       schema: () => this.schema,
@@ -119,6 +122,7 @@ export default class MdseWorkbench extends Plugin {
     this.registerDetailClicks();
 
     this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => void this.diagnostics() });
+    this.addCommand({ id: "runtime-health", name: "Show runtime health", callback: () => this.showRuntimeHealth() });
     this.addCommand({ id: "runtime-history", name: "Show runtime history", callback: () => this.showRuntimeHistory() });
     this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
     this.addCommand({ id: "clear-semantic-cache", name: "Clear semantic cache", callback: () => this.confirmClearSemanticCache() });
@@ -225,6 +229,44 @@ export default class MdseWorkbench extends Plugin {
     this.statusEl.setAttr("aria-label", "MDSE Workbench runtime status");
   }
 
+  /** Cheap health summary from already-known state. Never runs global assurance. */
+  private runtimeHealth() {
+    const indexer = this.indexer;
+    const cachedAssurance = this.assurance?.peek() ?? null;
+    return summarizeRuntimeHealth({
+      ready: this.isReady(),
+      building: !!indexer?.building,
+      localPending: indexer?.localHydrationPending ?? 0,
+      localReadErrors: indexer?.localReadErrorCount ?? 0,
+      schemaWarnings: this.schema?.warnings.length ?? 0,
+      cacheWriteError: this.lastCacheWriteError,
+      cacheCurrent: !!indexer && indexer.revision === this.lastCachedRevision,
+      assurance: cachedAssurance
+        ? {
+            current: cachedAssurance.revision === indexer?.revision && !cachedAssurance.stale,
+            findings: cachedAssurance.all.length,
+            computedAt: cachedAssurance.computedAt,
+          }
+        : null,
+    });
+  }
+
+  private refreshRuntimeHealth(): void {
+    if (!this.statusEl || !this.isReady()) return;
+    const health = this.runtimeHealth();
+    this.statusEl.setText(health.label);
+    this.statusEl.setAttr("aria-label", `MDSE Workbench runtime health: ${health.detail}`);
+  }
+
+  private showRuntimeHealth(): void {
+    const health = this.runtimeHealth();
+    new ReportModal(this.app, "MDSE Workbench runtime health", health.rows, [
+      health.detail,
+      "This view is lightweight: it reports already-known runtime state and does not trigger a whole-model assurance scan.",
+      "Engineering findings are not treated as a runtime failure; open Review when you want the current global assurance results.",
+    ]).open();
+  }
+
   /**
    * Prefer Obsidian's own metadata/link-resolution completion signal over a fixed startup delay.
    * The quiet timer remains a conservative fallback for versions/environments that do not emit it
@@ -311,6 +353,7 @@ export default class MdseWorkbench extends Plugin {
       }
       if (indexer.localReadErrorCount) {
         this.lastCacheWriteError = `cache not updated: ${indexer.localReadErrorCount} Local Model read error(s)`;
+        this.refreshRuntimeHealth();
         return;
       }
       const revision = indexer.revision;
@@ -339,10 +382,12 @@ export default class MdseWorkbench extends Plugin {
         this.lastCachedRevision = revision;
         indexer.markCacheCommitted(revision);
       } else this.scheduleSemanticCacheWrite();
+      this.refreshRuntimeHealth();
     } catch (e) {
       // Cache is disposable. Failure is diagnostic only and never makes the model unavailable.
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = (e as Error).message;
+      this.refreshRuntimeHealth();
     }
   }
 
@@ -521,11 +566,13 @@ export default class MdseWorkbench extends Plugin {
     if (localPending) {
       void indexer.whenLocalSettled().then(() => {
         if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
-        const current = indexer.stats;
-        if (current) this.setRuntimeStatus("ready", `${current.elements} elements · ${current.mode}`);
+        this.refreshRuntimeHealth();
         this.scheduleSemanticCacheWrite();
       });
-    } else this.scheduleSemanticCacheWrite();
+    } else {
+      this.refreshRuntimeHealth();
+      this.scheduleSemanticCacheWrite();
+    }
     void this.recordRuntimeSample(indexer, stats);
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
@@ -558,6 +605,7 @@ export default class MdseWorkbench extends Plugin {
       this.lastCacheWriteError = null;
       this.lastCachedRevision = null;
       this.lastWarmRestore = "cache cleared; next startup will rebuild from the vault";
+      this.refreshRuntimeHealth();
       new Notice("MDSE Workbench: semantic cache cleared. Model files were not changed.");
     } catch (e) {
       new Notice(`MDSE Workbench: could not clear semantic cache: ${(e as Error).message}`, 12000);
@@ -640,7 +688,9 @@ export default class MdseWorkbench extends Plugin {
 
   private async getAssurance(force = false): Promise<AssuranceSnapshot> {
     if (!this.assurance || !this.indexer || !this.schema) throw new Error("Workbench assurance is not ready.");
-    return this.assurance.get(force);
+    const snapshot = await this.assurance.get(force);
+    this.refreshRuntimeHealth();
+    return snapshot;
   }
 
   async diagnostics(): Promise<void> {
