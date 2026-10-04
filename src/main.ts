@@ -48,10 +48,24 @@ const DEFAULTS: Settings = {
   warmCachePreview: false,
 };
 
+interface RuntimeSample {
+  at: number;
+  mode: "full" | "restored" | "reconciled";
+  files: number;
+  elements: number;
+  coreMs: number;
+  startupWaitMs: number | null;
+  localHydrationMs: number | null;
+  localCandidates: number;
+  warmRestore: string | null;
+}
+
 interface Stored {
   settings: Settings;
   /** Generated canvas path → signature at generation, for stale-view checks (WB-035). */
   views: Record<string, { starts: string[]; profile: string; signature: string; at: number }>;
+  /** Local-only bounded performance evidence; plugin data.json is git-ignored. */
+  runtimeHistory?: RuntimeSample[];
 }
 
 function localCardTarget(text: string | undefined): { target: string; localId: string } | null {
@@ -62,6 +76,7 @@ function localCardTarget(text: string | undefined): { target: string; localId: s
 export default class MdseWorkbench extends Plugin {
   settings: Settings = { ...DEFAULTS };
   views: Stored["views"] = {};
+  private runtimeHistory: RuntimeSample[] = [];
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
@@ -87,6 +102,7 @@ export default class MdseWorkbench extends Plugin {
     const stored = ((await this.loadData()) ?? {}) as Partial<Stored>;
     this.settings = { ...DEFAULTS, ...(stored.settings ?? {}) };
     this.views = stored.views ?? {};
+    this.runtimeHistory = Array.isArray(stored.runtimeHistory) ? stored.runtimeHistory.slice(-20) : [];
     this.addSettingTab(new WorkbenchSettings(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.setRuntimeStatus("starting");
@@ -103,6 +119,7 @@ export default class MdseWorkbench extends Plugin {
     this.registerDetailClicks();
 
     this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => void this.diagnostics() });
+    this.addCommand({ id: "runtime-history", name: "Show runtime history", callback: () => this.showRuntimeHistory() });
     this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
     this.addCommand({ id: "clear-semantic-cache", name: "Clear semantic cache", callback: () => this.confirmClearSemanticCache() });
     this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
@@ -222,7 +239,39 @@ export default class MdseWorkbench extends Plugin {
   }
 
   async saveAll(): Promise<void> {
-    await this.saveData({ settings: this.settings, views: this.views } satisfies Stored);
+    await this.saveData({ settings: this.settings, views: this.views, runtimeHistory: this.runtimeHistory } satisfies Stored);
+  }
+
+  private async recordRuntimeSample(indexer: Indexer, stats: NonNullable<Indexer["stats"]>): Promise<void> {
+    await indexer.whenLocalSettled();
+    if (this.unloaded || this.indexer !== indexer || indexer.stats?.builtAt !== stats.builtAt) return;
+    this.runtimeHistory.push({
+      at: Date.now(),
+      mode: stats.mode,
+      files: stats.files,
+      elements: stats.elements,
+      coreMs: stats.ms,
+      startupWaitMs: this.lastStartupWaitMs,
+      localHydrationMs: indexer.lastLocalHydrationMs,
+      localCandidates: indexer.lastLocalHydrationCandidates,
+      warmRestore: this.lastWarmRestore,
+    });
+    this.runtimeHistory = this.runtimeHistory.slice(-20);
+    await this.saveAll();
+  }
+
+  private showRuntimeHistory(): void {
+    const recent = this.runtimeHistory.slice(-10).reverse();
+    const rows: Array<[string, string]> = recent.length
+      ? recent.map((s) => [
+          new Date(s.at).toLocaleString(),
+          `${s.mode} · core ${(s.coreMs / 1000).toFixed(2)} s · Local ${s.localHydrationMs === null ? "n/a" : (s.localHydrationMs / 1000).toFixed(2) + " s"} (${s.localCandidates}) · wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1000).toFixed(2) + " s"}`,
+        ])
+      : [["Runtime history", "No completed startup samples yet."]];
+    new ReportModal(this.app, "MDSE Workbench runtime history", rows, [
+      "Local-only performance evidence; this history is stored in the git-ignored Workbench data.json.",
+      "Use it to compare cold/full, warm/restored and reconciled startup behavior across candidate builds.",
+    ]).open();
   }
 
   /**
@@ -468,6 +517,7 @@ export default class MdseWorkbench extends Plugin {
         this.scheduleSemanticCacheWrite();
       });
     } else this.scheduleSemanticCacheWrite();
+    void this.recordRuntimeSample(indexer, stats);
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
     }
