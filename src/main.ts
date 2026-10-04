@@ -237,6 +237,7 @@ export default class MdseWorkbench extends Plugin {
       ready: this.isReady(),
       building: !!indexer?.building,
       localPending: indexer?.localHydrationPending ?? 0,
+      livePending: indexer?.liveUpdatePending ?? 0,
       localReadErrors: indexer?.localReadErrorCount ?? 0,
       schemaWarnings: this.schema?.warnings.length ?? 0,
       cacheWriteError: this.lastCacheWriteError,
