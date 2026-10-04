@@ -78,6 +78,8 @@ export interface LocalFinding {
 }
 
 export interface LocalRegion {
+  /** Fingerprint of only the Local Model semantic slice, independent from unrelated note text. */
+  sourceFingerprint: string;
   /** The schema= value of the START marker, or null when absent. */
   schemaVersion: string | null;
   startLine: number | null;
@@ -154,6 +156,24 @@ const ALLOWED_FIELDS: Record<LocalKind, string[]> = {
   flow: ["definition", "identifier", "endpointA", "endpointB"],
 };
 
+/** Stable FNV-1a fingerprint of the text that can affect Local Model parsing/validation. */
+export function localModelSourceFingerprint(text: string): string | null {
+  const lines = text.split(/\r?\n/);
+  const markerLines: number[] = [];
+  lines.forEach((line, i) => {
+    const trimmed = line.trim();
+    if (START.test(trimmed) || END.test(trimmed)) markerLines.push(i);
+  });
+  if (!markerLines.length) return null;
+  const slice = lines.slice(markerLines[0], markerLines[markerLines.length - 1] + 1).join("\n");
+  let h = 2166136261;
+  for (let i = 0; i < slice.length; i++) {
+    h ^= slice.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
 /**
  * Parses the governed region of one note. Returns null when the note has no marker at all.
  * At most one region per note (WB-106); extra or broken markers are findings and switch structured use off.
@@ -170,6 +190,7 @@ export function parseLocalModel(text: string): LocalRegion | null {
   if (!starts.length && !ends.length) return null;
 
   const region: LocalRegion = {
+    sourceFingerprint: localModelSourceFingerprint(text) as string,
     schemaVersion: starts[0]?.version ?? null, startLine: starts[0] ? starts[0].i + 1 : null,
     endLine: ends[0] !== undefined ? ends[0] + 1 : null, records: [], findings: [], structured: true,
   };
