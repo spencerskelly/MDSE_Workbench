@@ -373,7 +373,7 @@ export default class MdseWorkbench extends Plugin {
         this.scheduleBackgroundLocalHydration();
         return;
       }
-      indexer.beginDeferredLocalHydration();
+      indexer.beginDeferredLocalHydration(true);
       this.scheduleRuntimeHealthRefresh();
       void indexer.whenLocalSettled()
         .then(() => {
@@ -533,6 +533,7 @@ export default class MdseWorkbench extends Plugin {
     const firstStart = !this.indexer;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
+      this.indexer.setBackgroundIdleCheck(() => Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS);
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
