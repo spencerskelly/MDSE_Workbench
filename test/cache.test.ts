@@ -4,6 +4,8 @@ import {
   CACHE_FORMAT_VERSION,
   cacheCompatibilityProblem,
   expectedCompatibility,
+  restoreCoreSemanticState,
+  restoreLocalSemanticState,
   restoreSemanticState,
   serializeSemanticState,
   shardSemanticCache,
@@ -322,4 +324,54 @@ test("stable cache bucket planning changes only buckets addressed by changed pat
   assert.equal(one.notes.length, 1);
   assert.equal(one.localRegions.length, 1);
   assert.equal(one.fingerprints.length, 1);
+});
+
+
+test("all restore surfaces reject incompatible schema before deserializing payloads", () => {
+  const { index, local, fingerprints } = state();
+  const base = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
+
+  const mutations: Array<[string, (cache: any) => void, RegExp]> = [
+    ["format", (cache) => { cache.header.formatVersion++; }, /cache format/],
+    ["semantic contract", (cache) => { cache.header.semanticVersion++; }, /semantic cache contract/],
+    ["relationships schema", (cache) => { cache.header.relationshipsVersion = "999"; }, /relationships schema/],
+    ["element-types schema", (cache) => { cache.header.elementTypesVersion = "999"; }, /element-types schema/],
+    ["schema signature", (cache) => { cache.header.schemaSignature = "deadbeef"; }, /schema semantics/],
+    ["Local Model reader", (cache) => { cache.header.localModelReadableVersions = ["9.9"]; }, /Local Model reader contract/],
+  ];
+
+  for (const [name, mutate, expected] of mutations) {
+    const bad = structuredClone(base);
+    mutate(bad);
+    // If compatibility were checked too late, these malformed payloads would fail for the wrong reason.
+    bad.notes = [{ nonsense: true }];
+    bad.fingerprints = { "A.md": { mtime: "not-a-number" } };
+    bad.localRegions = [["A.md", { nonsense: true }]];
+
+    assert.throws(
+      () => restoreCoreSemanticState(bad, schema, scope),
+      (error: unknown) => error instanceof Error && /Incompatible semantic cache/.test(error.message) && expected.test(error.message),
+      name + " must reject before core payload deserialization",
+    );
+    assert.throws(
+      () => restoreLocalSemanticState(bad, schema, scope),
+      (error: unknown) => error instanceof Error && /Incompatible semantic cache/.test(error.message) && expected.test(error.message),
+      name + " must reject before Local Model payload deserialization",
+    );
+    assert.throws(
+      () => restoreSemanticState(bad, schema, scope),
+      (error: unknown) => error instanceof Error && /Incompatible semantic cache/.test(error.message) && expected.test(error.message),
+      name + " must reject before full payload deserialization",
+    );
+  }
+});
+
+test("vault identity mismatch rejects every restore surface before state installation", () => {
+  const { index, local, fingerprints } = state();
+  const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
+  cache.header.vaultUid = "different-vault";
+
+  assert.throws(() => restoreCoreSemanticState(cache, schema, scope), /Incompatible semantic cache: vault identity/);
+  assert.throws(() => restoreLocalSemanticState(cache, schema, scope), /Incompatible semantic cache: vault identity/);
+  assert.throws(() => restoreSemanticState(cache, schema, scope), /Incompatible semantic cache: vault identity/);
 });
