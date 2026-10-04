@@ -222,8 +222,43 @@ function serializeRegion(r: LocalRegion): CachedLocalRegion {
     startLine: r.startLine,
     endLine: r.endLine,
     structured: r.structured,
-    findings: r.findings.map((x) => ({ ...x })),
-    records: r.records.map((x) => ({ ...x, fields: [...x.fields.entries()] })),
+    findings: r.findings.map(serializeFinding),
+    records: r.records.map(serializeLocalRecord),
+  };
+}
+
+function serializeLocalRecord(r: LocalRecord): CachedLocalRecord {
+  return {
+    ...r,
+    fields: [...r.fields.entries()],
+    definition: serializeLink(r.definition),
+    part: serializeLink(r.part),
+    parent: serializeLink(r.parent),
+    exposes: r.exposes.map((x) => serializeLink(x) as LinkRef),
+    equals: r.equals.map((x) => serializeLink(x) as LinkRef),
+    endpointA: serializeLink(r.endpointA),
+    endpointB: serializeLink(r.endpointB),
+  };
+}
+
+function serializeLink(link: LinkRef | null): LinkRef | null {
+  if (!link) return null;
+  return {
+    text: link.text,
+    target: link.target,
+    blockId: link.blockId,
+    ...(link.alias !== undefined ? { alias: link.alias } : {}),
+  };
+}
+
+function serializeFinding(f: LocalFinding): LocalFinding {
+  return {
+    code: f.code,
+    severity: f.severity,
+    message: f.message,
+    ...(f.path !== undefined ? { path: f.path } : {}),
+    ...(f.localId !== undefined ? { localId: f.localId } : {}),
+    ...(f.line !== undefined ? { line: f.line } : {}),
   };
 }
 
