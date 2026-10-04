@@ -707,6 +707,11 @@ export function withLocalInternal(index: ModelIndex, local: LocalModelIndex, res
 }
 
 
+/** True only for views whose semantics include governed Local Model occurrences. */
+export function profileNeedsLocalOccurrences(profile: ViewProfile): boolean {
+  return ["Internal", "Structure", "Interfaces", "Where Used", "Requirements"].includes(profile.name);
+}
+
 export function withLocalOccurrences(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile): ViewResult {
   switch (profile.name) {
     case "Internal": return withLocalInternal(index, local, resolve, base, profile);
