@@ -5553,6 +5553,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.backgroundPendingSince = /* @__PURE__ */ new Map();
     /** Latched once Obsidian says its metadata/link-resolution pass is complete. */
     this.metadataResolved = false;
+    /** Disposable integration-vault probe; absent in normal vaults. */
+    this.integrationProbe = null;
+    this.integrationPluginLoadedAt = null;
+    this.integrationMetadataResolvedAt = null;
     this.unloaded = false;
   }
   async onload() {
@@ -5560,6 +5564,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.settings = { ...DEFAULTS, ...stored.settings ?? {} };
     this.views = stored.views ?? {};
     this.runtimeHistory = Array.isArray(stored.runtimeHistory) ? stored.runtimeHistory.slice(-20) : [];
+    await this.loadIntegrationProbe();
     this.addSettingTab(new WorkbenchSettings(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("mod-clickable");
@@ -5674,6 +5679,9 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.registerEvent(this.app.metadataCache.on("changed", () => this.markForegroundActivity()));
     this.registerEvent(this.app.metadataCache.on("resolved", () => {
       this.metadataResolved = true;
+      if (this.integrationProbe && this.integrationMetadataResolvedAt === null) {
+        this.integrationMetadataResolvedAt = Date.now();
+      }
       this.indexer?.linkResolutionSettled();
     }));
     this.register(() => {
@@ -5695,6 +5703,44 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       );
       this.cancelStartupHandoff = handoff.cancel;
     });
+  }
+  async loadIntegrationProbe() {
+    try {
+      const raw = await this.app.vault.adapter.read(".mdse_integration_probe.json");
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.launchStartedAt !== "number") return;
+      this.integrationProbe = {
+        launchStartedAt: parsed.launchStartedAt,
+        noteCount: typeof parsed.noteCount === "number" ? parsed.noteCount : void 0,
+        label: typeof parsed.label === "string" ? parsed.label : void 0
+      };
+      this.integrationPluginLoadedAt = Date.now();
+    } catch {
+    }
+  }
+  async writeIntegrationColdResult(stats) {
+    const probe = this.integrationProbe;
+    if (!probe) return;
+    const coreReadyAt = Date.now();
+    const result = {
+      label: probe.label ?? "cold-integration",
+      noteCount: probe.noteCount ?? stats.files,
+      launchStartedAt: probe.launchStartedAt,
+      pluginLoadedAt: this.integrationPluginLoadedAt,
+      metadataResolvedAt: this.integrationMetadataResolvedAt,
+      coreReadyAt,
+      launchToPluginMs: this.integrationPluginLoadedAt === null ? null : this.integrationPluginLoadedAt - probe.launchStartedAt,
+      launchToMetadataResolvedMs: this.integrationMetadataResolvedAt === null ? null : this.integrationMetadataResolvedAt - probe.launchStartedAt,
+      launchToCoreReadyMs: coreReadyAt - probe.launchStartedAt,
+      pluginToCoreReadyMs: this.integrationPluginLoadedAt === null ? null : coreReadyAt - this.integrationPluginLoadedAt,
+      workbenchCoreWorkMs: stats.ms,
+      files: stats.files,
+      elements: stats.elements,
+      links: stats.links,
+      mode: stats.mode,
+      measuredAt: new Date(coreReadyAt).toISOString()
+    };
+    await this.app.vault.adapter.write(".mdse_integration_result.json", JSON.stringify(result, null, 2) + "\n");
   }
   setRuntimeStatus(state, detail = "") {
     if (!this.statusEl) return;
@@ -6171,6 +6217,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       `${stats.elements} elements \xB7 ${stats.mode}${localPending ? ` \xB7 occurrence features loading later` : ""}`
     );
     this.refreshRuntimeHealth();
+    await this.writeIntegrationColdResult(stats);
     if (localPending) this.scheduleBackgroundLocalHydration();
     else this.scheduleSemanticCacheWrite();
     void this.recordRuntimeSample(indexer, stats);
