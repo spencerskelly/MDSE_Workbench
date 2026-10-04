@@ -34,6 +34,10 @@ export class AssuranceManager {
 
   constructor(private readonly source: AssuranceSource) {}
 
+  get active(): boolean {
+    return this.running !== null;
+  }
+
   peek(): AssuranceSnapshot | null {
     const s = this.cached;
     return s && s.revision === this.source.revision() ? s : null;
