@@ -1043,45 +1043,71 @@ function pairsNumber(v, label) {
   }
   return out;
 }
-var CACHE_MANIFEST_VERSION = 2;
-function shardSemanticCache(cache, generation, notesPerShard = 2e3, regionsPerShard = 500) {
+var CACHE_MANIFEST_VERSION = 3;
+function shardSemanticCache(cache, generation, noteBuckets = 32, localBuckets = 16, fingerprintBuckets = 32) {
   if (!generation.trim()) throw new Error("Cache generation must not be empty.");
-  if (!Number.isInteger(notesPerShard) || notesPerShard < 1 || !Number.isInteger(regionsPerShard) || regionsPerShard < 1) {
-    throw new Error("Cache shard sizes must be positive integers.");
+  for (const [label, n] of [["note", noteBuckets], ["Local Model", localBuckets], ["fingerprint", fingerprintBuckets]]) {
+    if (!Number.isInteger(n) || n < 1 || n > 256) throw new Error(`${label} cache bucket count must be an integer from 1 to 256.`);
   }
-  const noteShards = [];
-  for (let i = 0; i < cache.notes.length; i += notesPerShard) {
-    noteShards.push({ generation, index: noteShards.length, notes: cache.notes.slice(i, i + notesPerShard) });
-  }
-  const localShards = [];
-  for (let i = 0; i < cache.localRegions.length; i += regionsPerShard) {
-    localShards.push({ generation, index: localShards.length, localRegions: cache.localRegions.slice(i, i + regionsPerShard) });
-  }
+  const noteShards = Array.from({ length: noteBuckets }, (_, index) => ({ generation, index, notes: [] }));
+  for (const rec of cache.notes) noteShards[cacheBucketForPath(rec.path, noteBuckets)].notes.push(rec);
+  for (const shard of noteShards) shard.notes.sort((a, b) => a.path.localeCompare(b.path));
+  const localShards = Array.from({ length: localBuckets }, (_, index) => ({ generation, index, localRegions: [] }));
+  for (const entry of cache.localRegions) localShards[cacheBucketForPath(entry[0], localBuckets)].localRegions.push(entry);
+  for (const shard of localShards) shard.localRegions.sort((a, b) => a[0].localeCompare(b[0]));
+  const fingerprintShards = Array.from({ length: fingerprintBuckets }, (_, index) => ({ generation, index, fingerprints: [] }));
+  for (const entry of Object.entries(cache.fingerprints)) fingerprintShards[cacheBucketForPath(entry[0], fingerprintBuckets)].fingerprints.push(entry);
+  for (const shard of fingerprintShards) shard.fingerprints.sort((a, b) => a[0].localeCompare(b[0]));
   return {
     manifest: {
       manifestVersion: CACHE_MANIFEST_VERSION,
       sequence: 0,
       generation,
       header: cache.header,
-      fingerprints: { ...cache.fingerprints },
+      fingerprints: { count: fingerprintShards.length, total: Object.keys(cache.fingerprints).length },
       notes: { count: noteShards.length, total: cache.notes.length },
       localRegions: { count: localShards.length, total: cache.localRegions.length }
     },
+    fingerprintShards,
     noteShards,
     localShards
   };
 }
-function joinSemanticCache(manifest, noteShards, localShards) {
+function joinSemanticCache(manifest, fingerprintShards, noteShards, localShards) {
   if (!isDiskManifest(manifest)) throw new Error("Malformed semantic cache manifest.");
   if (manifest.manifestVersion !== CACHE_MANIFEST_VERSION) throw new Error(`Unsupported cache manifest version ${manifest.manifestVersion}.`);
+  const fingerprints = joinFingerprintShards(manifest, fingerprintShards);
   const notes = joinNoteShards(manifest, noteShards);
   const localRegions = joinLocalShards(manifest, localShards);
   return {
     header: manifest.header,
-    fingerprints: { ...manifest.fingerprints },
+    fingerprints,
     notes,
     localRegions
   };
+}
+function joinFingerprintShards(manifest, shards) {
+  if (shards.length !== manifest.fingerprints.count) throw new Error("Semantic cache fingerprint shard count mismatch.");
+  const ordered = new Array(shards.length);
+  for (const raw of shards) {
+    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.fingerprints)) {
+      throw new Error("Malformed semantic cache fingerprint shard.");
+    }
+    if (ordered[raw.index]) throw new Error("Duplicate semantic cache fingerprint shard index.");
+    ordered[raw.index] = raw;
+  }
+  const out = {};
+  let total = 0;
+  for (const shard of ordered) {
+    for (const entry of shard.fingerprints) {
+      if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" || !isFingerprint(entry[1])) throw new Error("Malformed semantic cache fingerprint entry.");
+      if (out[entry[0]]) throw new Error(`Duplicate semantic cache fingerprint path ${entry[0]}.`);
+      out[entry[0]] = { ...entry[1] };
+      total++;
+    }
+  }
+  if (total !== manifest.fingerprints.total) throw new Error("Semantic cache fingerprint total mismatch.");
+  return out;
 }
 function joinNoteShards(manifest, shards) {
   if (shards.length !== manifest.notes.count) throw new Error("Semantic cache note shard count mismatch.");
@@ -1093,7 +1119,7 @@ function joinNoteShards(manifest, shards) {
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache note shard index.");
     ordered[raw.index] = raw;
   }
-  const notes = ordered.flatMap((s) => s.notes);
+  const notes = ordered.flatMap((s) => s.notes).sort((a, b) => a.path.localeCompare(b.path));
   if (notes.length !== manifest.notes.total) throw new Error("Semantic cache note total mismatch.");
   return notes;
 }
@@ -1107,13 +1133,34 @@ function joinLocalShards(manifest, shards) {
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache Local Model shard index.");
     ordered[raw.index] = raw;
   }
-  const regions = ordered.flatMap((s) => s.localRegions);
+  const regions = ordered.flatMap((s) => s.localRegions).sort((a, b) => a[0].localeCompare(b[0]));
   if (regions.length !== manifest.localRegions.total) throw new Error("Semantic cache Local Model total mismatch.");
   return regions;
 }
+function cacheBucketForPath(path, count) {
+  if (!Number.isInteger(count) || count < 1) throw new Error("Cache bucket count must be a positive integer.");
+  let h = 2166136261;
+  for (let i = 0; i < path.length; i++) {
+    h ^= path.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % count;
+}
+function cacheDirtyBucketsForPaths(paths, noteBuckets = 32, localBuckets = 16, fingerprintBuckets = 32) {
+  const fp = /* @__PURE__ */ new Set();
+  const notes = /* @__PURE__ */ new Set();
+  const local = /* @__PURE__ */ new Set();
+  for (const path of paths) {
+    fp.add(cacheBucketForPath(path, fingerprintBuckets));
+    notes.add(cacheBucketForPath(path, noteBuckets));
+    local.add(cacheBucketForPath(path, localBuckets));
+  }
+  const sorted = (s) => [...s].sort((a, b) => a - b);
+  return { fingerprints: sorted(fp), notes: sorted(notes), localRegions: sorted(local) };
+}
 function isDiskManifest(v) {
-  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0 || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
-  return isShardSet(v.notes) && isShardSet(v.localRegions);
+  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0 || typeof v.generation !== "string" || !isObject(v.header)) return false;
+  return isShardSet(v.fingerprints) && isShardSet(v.notes) && isShardSet(v.localRegions);
 }
 function isShardSet(v) {
   return isObject(v) && Number.isInteger(v.count) && Number.isInteger(v.total) && v.count >= 0 && v.total >= 0;
@@ -1158,7 +1205,7 @@ function cacheSlotPaths(root) {
 async function writeSemanticCacheGeneration(storage, root, cache, generation, options = {}) {
   assertGeneration(generation);
   const clean = cleanRoot(root);
-  const sharded = shardSemanticCache(cache, generation, options.notesPerShard, options.regionsPerShard);
+  const sharded = shardSemanticCache(cache, generation, options.noteBuckets, options.localBuckets, options.fingerprintBuckets);
   await storage.mkdir(clean);
   await storage.mkdir(`${clean}/slots`);
   const manifests = await readManifestSlots(storage, clean);
@@ -1169,6 +1216,9 @@ async function writeSemanticCacheGeneration(storage, root, cache, generation, op
   const slot = chooseWriteSlot(manifests);
   const slotRoot = cacheSlotPaths(clean)[slot];
   await storage.mkdir(slotRoot);
+  for (const shard of sharded.fingerprintShards) {
+    await storage.write(`${slotRoot}/fingerprints-${pad(shard.index)}.json`, JSON.stringify(shard));
+  }
   for (const shard of sharded.noteShards) {
     await storage.write(`${slotRoot}/notes-${pad(shard.index)}.json`, JSON.stringify(shard));
   }
@@ -1198,6 +1248,10 @@ async function readSemanticCacheGeneration(storage, root) {
 async function readSlot(storage, clean, slot, manifest) {
   assertGeneration(manifest.generation);
   const slotRoot = cacheSlotPaths(clean)[slot];
+  const fingerprintShards = [];
+  for (let i = 0; i < manifest.fingerprints.count; i++) {
+    fingerprintShards.push(JSON.parse(await storage.read(`${slotRoot}/fingerprints-${pad(i)}.json`)));
+  }
   const noteShards = [];
   for (let i = 0; i < manifest.notes.count; i++) {
     noteShards.push(JSON.parse(await storage.read(`${slotRoot}/notes-${pad(i)}.json`)));
@@ -1206,7 +1260,7 @@ async function readSlot(storage, clean, slot, manifest) {
   for (let i = 0; i < manifest.localRegions.count; i++) {
     localShards.push(JSON.parse(await storage.read(`${slotRoot}/local-${pad(i)}.json`)));
   }
-  return joinSemanticCache(manifest, noteShards, localShards);
+  return joinSemanticCache(manifest, fingerprintShards, noteShards, localShards);
 }
 async function readManifestSlots(storage, clean) {
   const paths = cacheManifestPaths(clean);
@@ -1245,9 +1299,10 @@ function isObject2(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 function isManifestShape(v) {
-  if (!isObject2(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0 || typeof v.generation !== "string" || !isObject2(v.header) || !isObject2(v.fingerprints)) return false;
-  if (!isObject2(v.notes) || !isObject2(v.localRegions)) return false;
-  return Number.isInteger(v.notes.count) && v.notes.count >= 0 && Number.isInteger(v.notes.total) && v.notes.total >= 0 && Number.isInteger(v.localRegions.count) && v.localRegions.count >= 0 && Number.isInteger(v.localRegions.total) && v.localRegions.total >= 0 && typeof v.header.createdAt === "number";
+  if (!isObject2(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0 || typeof v.generation !== "string" || !isObject2(v.header)) return false;
+  if (!isObject2(v.fingerprints) || !isObject2(v.notes) || !isObject2(v.localRegions)) return false;
+  const shardSet = (x) => Number.isInteger(x.count) && x.count >= 0 && Number.isInteger(x.total) && x.total >= 0;
+  return shardSet(v.fingerprints) && shardSet(v.notes) && shardSet(v.localRegions) && typeof v.header.createdAt === "number";
 }
 
 // src/core/internal-view.ts
@@ -2206,6 +2261,21 @@ var Indexer = class {
     this.pendingLocalReads = /* @__PURE__ */ new Set();
     /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
     this.semanticRevision = 0;
+    /** Paths whose derived cache buckets no longer match the last committed cache generation. */
+    this.cacheDirtyPaths = /* @__PURE__ */ new Set();
+    /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
+    this.hydrationEpoch = 0;
+    this.hydrationTask = null;
+    this.hydrationRemaining = 0;
+    this.hydrationStartedAt = null;
+    this.lastHydrationMsValue = null;
+    this.lastHydrationCandidatesValue = 0;
+    /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
+    this.localReadErrors = /* @__PURE__ */ new Map();
+    /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
+    this.relationshipResolveTimer = null;
+    this.relationshipResolveTask = null;
+    this.relationshipResolvePending = false;
     this.index = new ModelIndex(schema);
   }
   get building() {
@@ -2217,16 +2287,51 @@ var Indexer = class {
   get revision() {
     return this.semanticRevision;
   }
-  bumpRevision() {
+  get localHydrationPending() {
+    return this.hydrationRemaining;
+  }
+  get lastLocalHydrationMs() {
+    return this.lastHydrationMsValue;
+  }
+  get lastLocalHydrationCandidates() {
+    return this.lastHydrationCandidatesValue;
+  }
+  get localReadErrorCount() {
+    return this.localReadErrors.size;
+  }
+  localReadFindings() {
+    return [...this.localReadErrors.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([path, message]) => ({
+      code: "local.read-failed",
+      severity: "error",
+      message: `Could not read this note's Local Model body: ${message}`,
+      path
+    }));
+  }
+  bumpRevision(path) {
     this.semanticRevision++;
+    if (path) this.cacheDirtyPaths.add(path);
+  }
+  get cacheDirtyPathCount() {
+    return this.cacheDirtyPaths.size;
+  }
+  cacheDirtyPathsSnapshot() {
+    return [...this.cacheDirtyPaths].sort();
+  }
+  /** Clear dirty evidence only if no newer semantic revision appeared during persistence. */
+  markCacheCommitted(revision) {
+    if (this.semanticRevision === revision) this.cacheDirtyPaths.clear();
   }
   enableLiveChanges() {
     this.liveChanges = true;
   }
-  /** Wait until every Local Model body read scheduled so far (and any chained during the wait) has settled. */
+  /** Wait until all asynchronous semantic work that can affect queries has settled. */
   async whenLocalSettled() {
-    while (this.pendingLocalReads.size) {
-      await Promise.all([...this.pendingLocalReads]);
+    while (this.hydrationTask || this.pendingLocalReads.size || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
+      const work = [...this.pendingLocalReads];
+      if (this.hydrationTask) work.push(this.hydrationTask);
+      if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
+      if (work.length) await Promise.all(work);
+      else await new Promise((r) => window.setTimeout(r, 50));
     }
   }
   /** Current Markdown path/mtime/size evidence without parsing note bodies. */
@@ -2246,11 +2351,19 @@ var Indexer = class {
    */
   installRestored(state, createdAt) {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
+    this.hydrationEpoch++;
+    this.hydrationTask = null;
+    this.hydrationRemaining = 0;
+    this.hydrationStartedAt = null;
+    this.lastHydrationMsValue = 0;
+    this.lastHydrationCandidatesValue = 0;
+    this.localReadErrors.clear();
     this.index = state.index;
     this.local = state.local;
     this.fingerprints.clear();
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
+    this.cacheDirtyPaths.clear();
     this.burst = 0;
     this.bumpRevision();
     this.stats = this.makeStats("restored", 0, createdAt);
@@ -2335,9 +2448,10 @@ var Indexer = class {
     for (const path of deleted) {
       this.index.remove(path);
       this.local.remove(path);
+      this.localReadErrors.delete(path);
       this.fingerprints.delete(path);
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
-      this.bumpRevision();
+      this.bumpRevision(path);
     }
     for (let i = 0; i < changedOrAdded.length; i++) {
       const path = changedOrAdded[i];
@@ -2375,6 +2489,7 @@ var Indexer = class {
    */
   async reResolveAllRelationships() {
     const notes = [...this.index.notes.values()];
+    let changed = 0;
     for (let i = 0; i < notes.length; i++) {
       const rec = notes[i];
       if (!rec.authoredLinks) throw new Error(`Cached note ${rec.path} has no authored-link evidence; full rebuild required.`);
@@ -2384,16 +2499,59 @@ var Indexer = class {
         this.schema,
         (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path
       );
-      this.index.upsert({
-        ...rec,
-        fields: resolved.fields,
-        unresolved: resolved.unresolved,
-        broken: resolved.broken,
-        repeat: resolved.repeat,
-        localRefs: resolved.localRefs
-      });
+      if (!sameResolvedEvidence(rec, resolved)) {
+        this.index.upsert({
+          ...rec,
+          fields: resolved.fields,
+          unresolved: resolved.unresolved,
+          broken: resolved.broken,
+          repeat: resolved.repeat,
+          localRefs: resolved.localRefs
+        });
+        this.cacheDirtyPaths.add(rec.path);
+        changed++;
+      }
       if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
     }
+    if (changed) this.bumpRevision();
+    return changed;
+  }
+  /**
+   * Debounce live add/delete/rename events, then re-resolve authored links from metadata only.
+   * This keeps an open vault semantically correct without rereading unchanged Markdown bodies.
+   */
+  scheduleRelationshipReresolution() {
+    if (!this.liveChanges) return;
+    this.relationshipResolvePending = true;
+    if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
+    this.relationshipResolveTimer = window.setTimeout(() => {
+      this.relationshipResolveTimer = null;
+      this.beginRelationshipReresolution();
+    }, 1500);
+  }
+  /** Called by the plugin when Obsidian reports that wikilink resolution has settled. */
+  linkResolutionSettled() {
+    if (!this.relationshipResolvePending) return;
+    if (this.relationshipResolveTimer !== null) {
+      window.clearTimeout(this.relationshipResolveTimer);
+      this.relationshipResolveTimer = null;
+    }
+    this.beginRelationshipReresolution();
+  }
+  beginRelationshipReresolution() {
+    if (!this.relationshipResolvePending) return;
+    if (this.rebuildPending || this.running || !this.stats) {
+      this.scheduleRelationshipReresolution();
+      return;
+    }
+    if (this.relationshipResolveTask) return;
+    this.relationshipResolvePending = false;
+    let task;
+    task = this.reResolveAllRelationships().then(() => void 0).finally(() => {
+      if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
+      if (this.relationshipResolvePending) this.scheduleRelationshipReresolution();
+    });
+    this.relationshipResolveTask = task;
   }
   /** Awaited variant used by controlled startup reconciliation. */
   async applyAwaited(path, file) {
@@ -2405,10 +2563,72 @@ var Indexer = class {
     this.localRevision.set(path, revision);
     this.local.remove(path);
     if (this.mayHaveLocalModel(file)) {
-      const text = await this.app.vault.cachedRead(file);
-      if (this.localRevision.get(path) === revision) this.local.set(path, parseLocalModel(text));
+      try {
+        const text = await this.app.vault.cachedRead(file);
+        if (this.localRevision.get(path) === revision) {
+          this.local.set(path, parseLocalModel(text));
+          this.localReadErrors.delete(path);
+        }
+      } catch (e) {
+        if (this.localRevision.get(path) === revision) this.localReadErrors.set(path, e.message);
+      }
+    } else this.localReadErrors.delete(path);
+    this.bumpRevision(path);
+  }
+  /**
+   * Parse only notes prefiltered by Obsidian metadata as Local Model candidates. This runs after
+   * the core note graph is already usable. Occurrence-aware consumers call whenLocalSettled().
+   */
+  startLocalHydration(files, epoch) {
+    this.hydrationRemaining = files.length;
+    this.lastHydrationCandidatesValue = files.length;
+    this.hydrationStartedAt = performance.now();
+    if (!files.length) {
+      this.hydrationTask = null;
+      this.lastHydrationMsValue = 0;
+      this.hydrationStartedAt = null;
+      return;
     }
-    this.bumpRevision();
+    let task;
+    task = (async () => {
+      let changed = false;
+      for (let i = 0; i < files.length; i++) {
+        if (epoch !== this.hydrationEpoch) return;
+        const file = files[i];
+        const path = file.path;
+        const revision = (this.localRevision.get(path) ?? 0) + 1;
+        this.localRevision.set(path, revision);
+        try {
+          const text = await this.app.vault.cachedRead(file);
+          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+            this.local.set(path, parseLocalModel(text));
+            this.localReadErrors.delete(path);
+            this.cacheDirtyPaths.add(path);
+            changed = true;
+          }
+        } catch (e) {
+          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+            this.localReadErrors.set(path, e.message);
+            this.cacheDirtyPaths.add(path);
+            changed = true;
+          }
+        } finally {
+          if (epoch === this.hydrationEpoch) this.hydrationRemaining = Math.max(0, files.length - i - 1);
+        }
+        if (i % 50 === 49) await new Promise((r) => window.setTimeout(r, 0));
+      }
+      if (changed && epoch === this.hydrationEpoch) this.bumpRevision();
+    })().finally(() => {
+      if (this.hydrationTask === task) {
+        this.hydrationTask = null;
+        this.hydrationRemaining = 0;
+        if (this.hydrationStartedAt !== null) {
+          this.lastHydrationMsValue = Math.round(performance.now() - this.hydrationStartedAt);
+          this.hydrationStartedAt = null;
+        }
+      }
+    });
+    this.hydrationTask = task;
   }
   /** Builds the index; a second call while building returns the same promise. */
   build() {
@@ -2418,23 +2638,31 @@ var Indexer = class {
   async doBuild() {
     const t0 = performance.now();
     this.dirty.clear();
+    this.localReadErrors.clear();
+    const epoch = ++this.hydrationEpoch;
     const index = new ModelIndex(this.schema);
     const local = new LocalModelIndex();
     const files = this.app.vault.getMarkdownFiles();
+    const localCandidates = [];
     const fingerprints = /* @__PURE__ */ new Map();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       fingerprints.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
       const rec = this.record(file);
       if (rec) index.upsert(rec);
-      if (this.mayHaveLocalModel(file)) local.set(file.path, parseLocalModel(await this.app.vault.cachedRead(file)));
+      if (this.mayHaveLocalModel(file)) localCandidates.push(file);
       if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
     }
     this.index = index;
     this.local = local;
     this.fingerprints.clear();
-    for (const [path, fp] of fingerprints) this.fingerprints.set(path, fp);
+    this.cacheDirtyPaths.clear();
+    for (const [path, fp] of fingerprints) {
+      this.fingerprints.set(path, fp);
+      this.cacheDirtyPaths.add(path);
+    }
     this.bumpRevision();
+    this.startLocalHydration(localCandidates, epoch);
     const backlog = this.dirty.size;
     if (backlog <= CHUNK) for (const path of this.dirty) this.apply(path);
     this.dirty.clear();
@@ -2451,18 +2679,27 @@ var Indexer = class {
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
     this.applyLocal(path, f instanceof import_obsidian.TFile ? f : null);
-    this.bumpRevision();
+    this.bumpRevision(path);
   }
   /** Update one governed Local Model region without rebuilding the whole vault. */
   applyLocal(path, file) {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
     this.local.remove(path);
-    if (!file || !this.mayHaveLocalModel(file)) return;
+    if (!file || !this.mayHaveLocalModel(file)) {
+      this.localReadErrors.delete(path);
+      return;
+    }
     let task;
     task = this.app.vault.cachedRead(file).then((text) => {
       if (this.localRevision.get(path) !== revision) return;
       this.local.set(path, parseLocalModel(text));
+      this.localReadErrors.delete(path);
+      this.bumpRevision(path);
+    }).catch((e) => {
+      if (this.localRevision.get(path) !== revision) return;
+      this.localReadErrors.set(path, e.message);
+      this.bumpRevision(path);
     }).finally(() => this.pendingLocalReads.delete(task));
     this.pendingLocalReads.add(task);
   }
@@ -2473,7 +2710,10 @@ var Indexer = class {
       this.dirty.add(path);
       return;
     }
+    const existed = this.fingerprints.has(path);
     this.apply(path);
+    const existsNow = this.fingerprints.has(path);
+    if (!existed && existsNow) this.scheduleRelationshipReresolution();
     const now = Date.now();
     if (now - this.burstStarted > 1e4) {
       this.burstStarted = now;
@@ -2482,7 +2722,9 @@ var Indexer = class {
     if (++this.burst >= BURST_REBUILD) this.scheduleRebuild();
   }
   removed(path) {
+    const existed = this.fingerprints.has(path);
     this.changed(path);
+    if (existed) this.scheduleRelationshipReresolution();
   }
   scheduleRebuild() {
     if (this.timer !== null) window.clearTimeout(this.timer);
@@ -2493,8 +2735,43 @@ var Indexer = class {
   }
   dispose() {
     if (this.timer !== null) window.clearTimeout(this.timer);
+    if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
+    this.relationshipResolveTimer = null;
+    this.relationshipResolveTask = null;
+    this.relationshipResolvePending = false;
+    this.hydrationEpoch++;
+    this.hydrationTask = null;
+    this.hydrationRemaining = 0;
   }
 };
+function sameResolvedEvidence(rec, next) {
+  if (rec.unresolved !== next.unresolved) return false;
+  if (!sameMapOfStrings(rec.fields, next.fields)) return false;
+  if (!sameBroken(rec.broken ?? [], next.broken)) return false;
+  if (!sameNumberMap(rec.repeat, next.repeat)) return false;
+  if (!sameLocalRefs(rec.localRefs ?? [], next.localRefs ?? [])) return false;
+  return true;
+}
+function sameMapOfStrings(a, b) {
+  if (a.size !== b.size) return false;
+  for (const [k, av] of a) {
+    const bv = b.get(k);
+    if (!bv || av.length !== bv.length || av.some((v, i) => v !== bv[i])) return false;
+  }
+  return true;
+}
+function sameBroken(a, b) {
+  return a.length === b.length && a.every((v, i) => v.field === b[i].field && v.link === b[i].link);
+}
+function sameNumberMap(a, b) {
+  if (!a?.size && !b?.size) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
+}
+function sameLocalRefs(a, b) {
+  return a.length === b.length && a.every((v, i) => v.field === b[i].field && v.path === b[i].path && v.localId === b[i].localId);
+}
 
 // src/obsidian/probe.ts
 var import_obsidian2 = require("obsidian");
@@ -3271,7 +3548,6 @@ var ReviewView = class extends import_obsidian5.ItemView {
     this.type = "";
     this.field = "";
     this.timer = null;
-    this.computedRevision = -1;
   }
   getViewType() {
     return REVIEW_VIEW;
@@ -3287,7 +3563,7 @@ var ReviewView = class extends import_obsidian5.ItemView {
     this.registerEvent(this.app.metadataCache.on("changed", () => this.later()));
     this.registerEvent(this.app.vault.on("delete", () => this.later()));
     this.registerEvent(this.app.vault.on("rename", () => this.later()));
-    this.refresh();
+    void this.refresh();
   }
   async onClose() {
     if (this.timer !== null) window.clearTimeout(this.timer);
@@ -3296,24 +3572,22 @@ var ReviewView = class extends import_obsidian5.ItemView {
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = window.setTimeout(() => {
       this.timer = null;
-      this.refresh();
+      void this.refresh();
     }, 1e3);
   }
-  /** Recompute global assurance only when the semantic model revision changed. */
-  refresh(force = false) {
+  /** Consume the shared assurance snapshot; no view owns its own whole-model validation loop. */
+  async refresh(force = false) {
     if (!this.host.ready()) {
       this.contentEl.empty();
       this.contentEl.createEl("p", { text: "Workbench is still indexing. This screen will fill in when it finishes.", cls: "mdse-muted" });
       this.later();
       return;
     }
-    const revision = this.host.revision();
-    if (force || revision !== this.computedRevision) {
-      this.all = toFindings(this.host.index().findings(), this.host.localFindings());
-      this.computedRevision = revision;
-      this.resolved.clear();
-    }
+    const snapshot = await this.host.assurance(force);
+    this.all = snapshot.all;
+    this.resolved.clear();
     this.render();
+    if (snapshot.stale) this.later();
   }
   visible() {
     const list = filterFindings(this.all, this.host.index(), { category: this.category, text: this.text, type: this.type || void 0, field: this.field || void 0 });
@@ -3325,7 +3599,7 @@ var ReviewView = class extends import_obsidian5.ItemView {
     const counts = countByCategory(this.all.filter((f) => !this.resolved.has(f.key)));
     const head = el.createDiv({ cls: "mdse-review-head" });
     head.createEl("h3", { text: "Review" });
-    head.createEl("button", { text: "Refresh" }).onclick = () => this.refresh(true);
+    head.createEl("button", { text: "Refresh" }).onclick = () => void this.refresh(true);
     const cats = el.createDiv({ cls: "mdse-review-cats" });
     for (const c of CATEGORIES) {
       const b = cats.createEl("button", { cls: c.id === this.category ? "mdse-cat is-active" : "mdse-cat" });
@@ -3970,6 +4244,63 @@ async function clearWorkbenchCache(app) {
   if (await a.exists(WORKBENCH_CACHE_ROOT)) await a.rmdir(WORKBENCH_CACHE_ROOT, true);
 }
 
+// src/obsidian/assurance.ts
+var AssuranceManager = class {
+  constructor(source) {
+    this.source = source;
+    this.cached = null;
+    this.running = null;
+  }
+  peek() {
+    const s = this.cached;
+    return s && s.revision === this.source.revision() ? s : null;
+  }
+  async get(force = false) {
+    if (!force) {
+      const cached = this.peek();
+      if (cached) return cached;
+      if (this.running) return this.running;
+    }
+    const task = this.compute();
+    this.running = task;
+    try {
+      return await task;
+    } finally {
+      if (this.running === task) this.running = null;
+    }
+  }
+  invalidate() {
+    this.cached = null;
+  }
+  async compute() {
+    let last = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await this.source.settle();
+      const revision = this.source.revision();
+      const t0 = performance.now();
+      const model = this.source.index().findings();
+      const local = this.source.localFindings();
+      const all = toFindings(model, local);
+      const stale = this.source.revision() !== revision;
+      last = {
+        revision,
+        computedAt: Date.now(),
+        ms: Math.round(performance.now() - t0),
+        stale,
+        model,
+        local,
+        all,
+        counts: countByCategory(all)
+      };
+      if (!stale) {
+        this.cached = last;
+        return last;
+      }
+    }
+    return last;
+  }
+};
+
 // src/main.ts
 var QUIET_START_MS = 8e3;
 var CACHE_QUIET_MS = 2e3;
@@ -3991,10 +4322,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     super(...arguments);
     this.settings = { ...DEFAULTS };
     this.views = {};
+    this.runtimeHistory = [];
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    this.lastFindingsMs = 0;
     this.detail = null;
     this.statusEl = null;
     this.cacheWriteTimer = null;
@@ -4003,6 +4334,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.lastCacheWriteError = null;
     this.lastCachedRevision = null;
     this.lastWarmRestore = null;
+    this.assurance = null;
     this.lastStartupWaitMs = null;
     this.startPromise = null;
     this.pendingRebuild = false;
@@ -4016,6 +4348,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const stored = await this.loadData() ?? {};
     this.settings = { ...DEFAULTS, ...stored.settings ?? {} };
     this.views = stored.views ?? {};
+    this.runtimeHistory = Array.isArray(stored.runtimeHistory) ? stored.runtimeHistory.slice(-20) : [];
     this.addSettingTab(new WorkbenchSettings(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.setRuntimeStatus("starting");
@@ -4030,7 +4363,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     });
     this.addChild(this.detail);
     this.registerDetailClicks();
-    this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => this.diagnostics() });
+    this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => void this.diagnostics() });
+    this.addCommand({ id: "runtime-history", name: "Show runtime history", callback: () => this.showRuntimeHistory() });
     this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
     this.addCommand({ id: "clear-semantic-cache", name: "Clear semantic cache", callback: () => this.confirmClearSemanticCache() });
     this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
@@ -4099,14 +4433,9 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         app: this.app,
         ready: () => this.isReady(),
         index: () => this.indexer.index,
-        revision: () => this.indexer.revision,
         schema: () => this.schema,
         writer: () => this.writer,
-        localFindings: () => {
-          const indexer = this.indexer;
-          const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
-          return validateLocalModels({ index: indexer.index, local: indexer.local, resolve });
-        }
+        assurance: (force = false) => this.getAssurance(force)
       })
     );
     this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
@@ -4115,6 +4444,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.registerEvent(this.app.metadataCache.on("changed", () => this.lastChange = Date.now()));
     this.registerEvent(this.app.metadataCache.on("resolved", () => {
       this.metadataResolved = true;
+      this.indexer?.linkResolutionSettled();
     }));
     this.register(() => {
       this.unloaded = true;
@@ -4141,7 +4471,35 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
   }
   async saveAll() {
-    await this.saveData({ settings: this.settings, views: this.views });
+    await this.saveData({ settings: this.settings, views: this.views, runtimeHistory: this.runtimeHistory });
+  }
+  async recordRuntimeSample(indexer, stats) {
+    await indexer.whenLocalSettled();
+    if (this.unloaded || this.indexer !== indexer || indexer.stats?.builtAt !== stats.builtAt) return;
+    this.runtimeHistory.push({
+      at: Date.now(),
+      mode: stats.mode,
+      files: stats.files,
+      elements: stats.elements,
+      coreMs: stats.ms,
+      startupWaitMs: this.lastStartupWaitMs,
+      localHydrationMs: indexer.lastLocalHydrationMs,
+      localCandidates: indexer.lastLocalHydrationCandidates,
+      warmRestore: this.lastWarmRestore
+    });
+    this.runtimeHistory = this.runtimeHistory.slice(-20);
+    await this.saveAll();
+  }
+  showRuntimeHistory() {
+    const recent = this.runtimeHistory.slice(-10).reverse();
+    const rows = recent.length ? recent.map((s) => [
+      new Date(s.at).toLocaleString(),
+      `${s.mode} \xB7 core ${(s.coreMs / 1e3).toFixed(2)} s \xB7 Local ${s.localHydrationMs === null ? "n/a" : (s.localHydrationMs / 1e3).toFixed(2) + " s"} (${s.localCandidates}) \xB7 wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1e3).toFixed(2) + " s"}`
+    ]) : [["Runtime history", "No completed startup samples yet."]];
+    new ReportModal(this.app, "MDSE Workbench runtime history", rows, [
+      "Local-only performance evidence; this history is stored in the git-ignored Workbench data.json.",
+      "Use it to compare cold/full, warm/restored and reconciled startup behavior across candidate builds."
+    ]).open();
   }
   /**
    * RTA-2 save-only cache path. Runtime restore is intentionally not enabled yet.
@@ -4177,6 +4535,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.scheduleSemanticCacheWrite();
         return;
       }
+      if (indexer.localReadErrorCount) {
+        this.lastCacheWriteError = `cache not updated: ${indexer.localReadErrorCount} Local Model read error(s)`;
+        return;
+      }
       const revision = indexer.revision;
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
@@ -4199,8 +4561,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.lastCacheWriteAt = Date.now();
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = null;
-      if (indexer.revision === revision) this.lastCachedRevision = revision;
-      else this.scheduleSemanticCacheWrite();
+      if (indexer.revision === revision) {
+        this.lastCachedRevision = revision;
+        indexer.markCacheCommitted(revision);
+      } else this.scheduleSemanticCacheWrite();
     } catch (e) {
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = e.message;
@@ -4261,6 +4625,19 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.writer = new RelationshipWriter(this.app, () => this.schema, () => this.indexer.index);
+      this.assurance = new AssuranceManager({
+        revision: () => this.indexer.revision,
+        settle: () => this.indexer.whenLocalSettled(),
+        index: () => this.indexer.index,
+        localFindings: () => {
+          const indexer2 = this.indexer;
+          const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
+          return [
+            ...validateLocalModels({ index: indexer2.index, local: indexer2.local, resolve }),
+            ...indexer2.localReadFindings()
+          ];
+        }
+      });
       const schemaPaths = () => [(0, import_obsidian8.normalizePath)(this.settings.relationshipsPath), (0, import_obsidian8.normalizePath)(this.settings.elementTypesPath)];
       this.registerEvent(
         this.app.metadataCache.on("changed", (file) => {
@@ -4336,8 +4713,20 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.setRuntimeStatus("indexing");
       stats = await indexer.build();
     }
-    this.setRuntimeStatus("ready", `${stats.elements} elements \xB7 ${stats.mode}`);
-    this.scheduleSemanticCacheWrite();
+    const localPending = indexer.localHydrationPending;
+    this.setRuntimeStatus(
+      "ready",
+      `${stats.elements} elements \xB7 ${stats.mode}${localPending ? ` \xB7 ${localPending} Local Model pending` : ""}`
+    );
+    if (localPending) {
+      void indexer.whenLocalSettled().then(() => {
+        if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
+        const current = indexer.stats;
+        if (current) this.setRuntimeStatus("ready", `${current.elements} elements \xB7 ${current.mode}`);
+        this.scheduleSemanticCacheWrite();
+      });
+    } else this.scheduleSemanticCacheWrite();
+    void this.recordRuntimeSample(indexer, stats);
     if (rebuild || schema.warnings.length) {
       new import_obsidian8.Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1e3).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
     }
@@ -4437,13 +4826,17 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
     return true;
   }
-  diagnostics() {
+  async getAssurance(force = false) {
+    if (!this.assurance || !this.indexer || !this.schema) throw new Error("Workbench assurance is not ready.");
+    return this.assurance.get(force);
+  }
+  async diagnostics() {
     if (!this.ready()) return;
     const s = this.indexer.stats;
     const schema = this.schema;
-    const t0 = performance.now();
-    const f = this.indexer.index.findings();
-    this.lastFindingsMs = Math.round(performance.now() - t0);
+    const assurance = await this.getAssurance(false);
+    const f = assurance.model;
+    const dirtyBuckets = cacheDirtyBucketsForPaths(this.indexer.cacheDirtyPathsSnapshot());
     const mem = performance.memory;
     const rows = [
       ["Index mode", s.mode],
@@ -4451,9 +4844,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Notes with properties", String(s.notes)],
       ["Model notes", String(s.elements)],
       ["Authored links", String(s.links)],
+      ["Local Model hydration", this.indexer.localHydrationPending ? `${this.indexer.localHydrationPending} note(s) pending` : "settled"],
+      ["Local Model read errors", String(this.indexer.localReadErrorCount), this.indexer.localReadErrorCount > 0],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1e3).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1e3).toFixed(2)} s (target under 60 s)`, s.ms > 6e4],
-      ["Findings scan", `${this.lastFindingsMs} ms`],
+      ["Assurance snapshot", `${assurance.ms} ms \xB7 revision ${assurance.revision}${assurance.stale ? " \xB7 stale/retrying" : ""}`],
       ["Missing inverses", String(f.missingInverse.length), f.missingInverse.length > 0],
       ["Inverses with no forward link", String(f.orphanInverse.length), f.orphanInverse.length > 0],
       ["Links that break endpoint rules", String(f.offRule.length)],
@@ -4466,7 +4861,9 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Warm restore", this.lastWarmRestore ?? "not attempted"],
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
       ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
-      ["Semantic cache persistence", this.indexer.revision === this.lastCachedRevision ? "current" : "pending/coalesced"]
+      ["Semantic cache persistence", this.indexer.revision === this.lastCachedRevision ? "current" : "pending/coalesced"],
+      ["Cache dirty paths", String(this.indexer.cacheDirtyPathCount)],
+      ["Cache dirty buckets", `${dirtyBuckets.notes.length} note \xB7 ${dirtyBuckets.localRegions.length} local \xB7 ${dirtyBuckets.fingerprints.length} fingerprint`]
     ];
     if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
     new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
