@@ -60,6 +60,10 @@ export async function writeSemanticCacheGeneration(
 
   // Preserve the newest valid manifest by writing into the absent/invalid/older slot.
   const manifests = await readManifestSlots(storage, clean);
+  sharded.manifest.sequence = Math.max(
+    manifests[0].manifest?.sequence ?? 0,
+    manifests[1].manifest?.sequence ?? 0,
+  ) + 1;
   const slot = chooseWriteSlot(manifests);
   const slotRoot = cacheSlotPaths(clean)[slot];
   await storage.mkdir(slotRoot);
@@ -84,6 +88,7 @@ export async function readSemanticCacheGeneration(storage: CacheStorage, root: s
   const candidates = manifests
     .flatMap((x, slot) => x.manifest ? [{ slot: slot as 0 | 1, manifest: x.manifest }] : [])
     .sort((a, b) =>
+      b.manifest.sequence - a.manifest.sequence ||
       b.manifest.header.createdAt - a.manifest.header.createdAt ||
       b.manifest.generation.localeCompare(a.manifest.generation),
     );
@@ -143,6 +148,7 @@ function chooseWriteSlot(slots: [ManifestSlot, ManifestSlot]): 0 | 1 {
   if (!slots[1].manifest) return 1;
   const a = slots[0].manifest;
   const b = slots[1].manifest;
+  if (a.sequence !== b.sequence) return a.sequence < b.sequence ? 0 : 1;
   if (a.header.createdAt !== b.header.createdAt) return a.header.createdAt < b.header.createdAt ? 0 : 1;
   return a.generation.localeCompare(b.generation) <= 0 ? 0 : 1;
 }
@@ -167,7 +173,7 @@ function isObject(v: unknown): v is Obj {
 }
 
 function isManifestShape(v: unknown): v is CacheDiskManifest {
-  if (!isObject(v) || typeof v.manifestVersion !== "number" || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
+  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || (v.sequence as number) < 0 || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
   if (!isObject(v.notes) || !isObject(v.localRegions)) return false;
   return Number.isInteger(v.notes.count) && (v.notes.count as number) >= 0 &&
     Number.isInteger(v.notes.total) && (v.notes.total as number) >= 0 &&
