@@ -65,6 +65,8 @@ export class Indexer {
   /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
   private hydrationEpoch = 0;
   private hydrationTask: Promise<void> | null = null;
+  /** Remaining owners in the active bulk hydration; retained so cancellation can requeue them. */
+  private activeHydrationPaths: string[] = [];
   private deferredHydrationPaths: string[] = [];
   private deferredHydrationEpoch = 0;
   /** Background occurrence hydration pauses while foreground activity resumes; explicit consumers promote it. */
@@ -193,6 +195,22 @@ export class Indexer {
 
   setBackgroundIdleCheck(check: () => boolean): void {
     this.backgroundIdle = check;
+  }
+
+  /**
+   * Invalidate in-flight occurrence hydration immediately when source semantics change.
+   * Unfinished bulk owners return to the deferred queue. Epoch/revision guards prevent reads
+   * already in flight from publishing stale occurrence data.
+   */
+  private cancelOccurrenceHydration(): void {
+    if (!this.hydrationTask && !this.requestedLocalReads.size) return;
+    this.hydrationEpoch++;
+    const queued = new Set(this.deferredHydrationPaths);
+    for (const path of this.activeHydrationPaths) queued.add(path);
+    this.deferredHydrationPaths = [...queued].sort();
+    this.deferredHydrationEpoch = this.hydrationEpoch;
+    this.hydrationDemanded = false;
+    this.hydrationRemaining = 0;
   }
 
   /**
@@ -603,6 +621,7 @@ export class Indexer {
    * the core note graph is already usable. Occurrence-aware consumers call whenLocalSettled().
    */
   private startLocalHydration(files: TFile[], epoch: number): void {
+    this.activeHydrationPaths = files.map((file) => file.path);
     this.hydrationRemaining = files.length;
     this.lastHydrationCandidatesValue = files.length;
     this.hydrationStartedAt = performance.now();
@@ -624,6 +643,7 @@ export class Indexer {
         }
         const file = files[i];
         const path = file.path;
+        this.activeHydrationPaths = files.slice(i).map((candidate) => candidate.path);
         const revision = (this.localRevision.get(path) ?? 0) + 1;
         this.localRevision.set(path, revision);
         try {
@@ -649,6 +669,7 @@ export class Indexer {
     })().finally(() => {
       if (this.hydrationTask === task) {
         this.hydrationTask = null;
+        this.activeHydrationPaths = [];
         this.hydrationDemanded = false;
         this.hydrationRemaining = 0;
         if (this.hydrationStartedAt !== null) {
@@ -771,6 +792,7 @@ export class Indexer {
   /** One file changed or was created. Rapid events are coalesced by path. */
   changed(path: string): void {
     if (!this.liveChanges) return;
+    this.cancelOccurrenceHydration();
     if (!this.stats || this.running) {
       this.dirty.add(path);
       return;
