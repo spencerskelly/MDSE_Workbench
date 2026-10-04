@@ -470,17 +470,20 @@ export default class MdseWorkbench extends Plugin {
         this.app.metadataCache.on("changed", (file) => {
           if (schemaPaths().includes(file.path)) return;
           this.indexer?.changed(file.path);
+          this.refreshRuntimeHealth();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         }),
       );
       this.registerEvent(this.app.vault.on("delete", (f) => {
         this.indexer?.removed(f.path);
+        this.refreshRuntimeHealth();
         if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
       }));
       this.registerEvent(
         this.app.vault.on("rename", (f, old) => {
           this.indexer?.removed(old);
           this.indexer?.changed(f.path);
+          this.refreshRuntimeHealth();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         }),
       );
