@@ -278,3 +278,87 @@ test("endpoint creation rejects a missing local part target through validation f
     finding.severity === "error"
   ));
 });
+
+
+test("endpoint deletion reports connection endpoint dependencies", () => {
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordDelete(note(), endpointId);
+  assert.equal(result.kind, "endpoint");
+  assert.equal(result.identifier, "J1");
+  assert.ok(result.impacts.some((impact) =>
+    impact.sourceKind === "connection" &&
+    impact.sourceIdentifier === "Harness" &&
+    impact.field === "endpointA"
+  ));
+  assert.doesNotMatch(result.after, /#### J1/);
+});
+
+test("endpoint deletion reports parent exposes and equals dependencies", () => {
+  const endpointA = "ep-20261004235500000skellyspencer";
+  const endpointB = "ep-20261004235500001skellyspencer";
+  const endpointC = "ep-20261004235500002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J-A",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J-B",
+    "- definition: [[CAN Port]]",
+    "- parent: [[#^" + endpointA + "|J-A]]",
+    "^" + endpointB,
+    "",
+    "#### J-C",
+    "- definition: [[CAN Port]]",
+    "- exposes: [[#^" + endpointA + "|J-A]]",
+    "- equals: [[#^" + endpointA + "|J-A]]",
+    "^" + endpointC,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordDelete(text, endpointA);
+  assert.ok(result.impacts.some((impact) => impact.sourceLocalId === endpointB && impact.field === "parent"));
+  assert.ok(result.impacts.some((impact) => impact.sourceLocalId === endpointC && impact.field === "exposes"));
+  assert.ok(result.impacts.some((impact) => impact.sourceLocalId === endpointC && impact.field === "equals"));
+});
+
+test("clean endpoint deletion is allowed when nothing targets the endpoint", () => {
+  const endpointId = "ep-20261004235600000skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### Service Port",
+    "- definition: [[CAN Port]]",
+    "^" + endpointId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordDelete(text, endpointId);
+  assert.equal(result.impacts.length, 0);
+  assert.doesNotMatch(result.after, /#### Service Port/);
+  assert.equal(parseLocalModel(result.after)?.structured, true);
+});
+
+test("deletion slice still refuses connection and flow records", () => {
+  assert.throws(
+    () => planLocalRecordDelete(note(), "conn-" + tokenD),
+    /part and endpoint occurrences only/,
+  );
+});
