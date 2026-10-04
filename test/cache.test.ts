@@ -15,6 +15,7 @@ import {
   type FileFingerprint,
   cacheBucketForPath,
   cacheDirtyBucketsForPaths,
+  MAX_INCREMENTAL_RECONCILIATION_PATHS,
 } from "../src/core/cache";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { ModelIndex, type NoteRecord } from "../src/core/model";
@@ -255,6 +256,23 @@ test("warm-start reconciliation identifies unchanged, changed, added and deleted
   });
 });
 
+
+test("default warm reconciliation threshold is explicit and forces full rebuild above 300 paths", () => {
+  const atLimit = Array.from({ length: MAX_INCREMENTAL_RECONCILIATION_PATHS }, (_, i) => `Changed-${i}.md`);
+  const overLimit = [...atLimit, "Changed-over-limit.md"];
+
+  assert.equal(MAX_INCREMENTAL_RECONCILIATION_PATHS, 300);
+  assert.equal(
+    reconciliationMode({ unchanged: [], changed: atLimit, added: [], deleted: [] }),
+    "incremental",
+    "the exact policy limit remains eligible for bounded reconciliation",
+  );
+  assert.equal(
+    reconciliationMode({ unchanged: [], changed: overLimit, added: [], deleted: [] }),
+    "full",
+    "one path beyond the policy limit must use the cooperative full rebuild",
+  );
+});
 
 test("warm-start policy allows bounded path-set reconciliation with authored-link cache evidence", () => {
   assert.equal(reconciliationMode({ unchanged: ["A"], changed: [], added: [], deleted: [] }), "none");
