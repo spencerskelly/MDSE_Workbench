@@ -6,7 +6,7 @@ if (!expectedVaultPath) throw new Error("vault path required");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-for (let attempt = 0; attempt < 300; attempt++) {
+for (let attempt = 0; attempt < 480; attempt++) {
   let pages = [];
   try { pages = (await CDP.List({ port })).filter((t) => t.type === "page"); } catch {}
   for (const target of pages) {
@@ -169,6 +169,11 @@ for (let attempt = 0; attempt < 300; attempt++) {
         awaitPromise: true,
         returnByValue: true,
       });
+      if (result.exceptionDetails) {
+        const detail = result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "renderer evaluation failed";
+        await client.close();
+        throw new Error(detail);
+      }
       const value = result.result.value;
       await client.close();
       if (value?.waiting) break;
