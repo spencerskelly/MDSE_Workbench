@@ -73,17 +73,24 @@ export async function writeSemanticCacheGeneration(
   const slotRoot = cacheSlotPaths(clean)[slot];
   await storage.mkdir(slotRoot);
 
-  // Stable path buckets deliberately keep shard identities fixed across generations. This still
-  // writes a complete inactive slot today; the stable buckets are the prerequisite for later
-  // dirty-bucket persistence without a cache-format rewrite.
+  // Stable path buckets keep shard identities fixed across generations. Reuse an unchanged shard
+  // already present in the inactive slot and record its generation token in the new manifest.
+  // Changed/missing/corrupt shards are rewritten with the new generation token. The manifest is
+  // still the single publication point, so readers never accept a mixed set accidentally.
   for (const shard of sharded.fingerprintShards) {
-    await storage.write(`${slotRoot}/fingerprints-${pad(shard.index)}.json`, JSON.stringify(shard));
+    const path = `${slotRoot}/fingerprints-${pad(shard.index)}.json`;
+    sharded.manifest.fingerprints.generations![shard.index] =
+      await writeShardIfChanged(storage, path, shard, "fingerprints");
   }
   for (const shard of sharded.noteShards) {
-    await storage.write(`${slotRoot}/notes-${pad(shard.index)}.json`, JSON.stringify(shard));
+    const path = `${slotRoot}/notes-${pad(shard.index)}.json`;
+    sharded.manifest.notes.generations![shard.index] =
+      await writeShardIfChanged(storage, path, shard, "notes");
   }
   for (const shard of sharded.localShards) {
-    await storage.write(`${slotRoot}/local-${pad(shard.index)}.json`, JSON.stringify(shard));
+    const path = `${slotRoot}/local-${pad(shard.index)}.json`;
+    sharded.manifest.localRegions.generations![shard.index] =
+      await writeShardIfChanged(storage, path, shard, "localRegions");
   }
 
   // Commit marker last. A torn/corrupt manifest leaves the opposite slot available.
@@ -180,6 +187,32 @@ async function readSlot(
     readJsonSeries(storage, Array.from({ length: manifest.localRegions.count }, (_, i) => `${slotRoot}/local-${pad(i)}.json`)),
   ]);
   return joinSemanticCache(manifest, fingerprintShards, noteShards, localShards);
+}
+
+async function writeShardIfChanged(
+  storage: CacheStorage,
+  path: string,
+  desired: { generation: string; index: number; [key: string]: unknown },
+  payloadKey: "fingerprints" | "notes" | "localRegions",
+): Promise<string> {
+  try {
+    const existing = JSON.parse(await storage.read(path)) as unknown;
+    if (
+      isObject(existing) &&
+      typeof existing.generation === "string" &&
+      typeof existing.index === "number" &&
+      existing.index === desired.index &&
+      Array.isArray(existing[payloadKey]) &&
+      JSON.stringify(existing[payloadKey]) === JSON.stringify(desired[payloadKey])
+    ) {
+      assertGeneration(existing.generation);
+      return existing.generation;
+    }
+  } catch {
+    // Missing, corrupt, or unsafe existing shard: rewrite it normally.
+  }
+  await storage.write(path, JSON.stringify(desired));
+  return desired.generation;
 }
 
 async function readJsonSeries(storage: CacheStorage, paths: readonly string[], concurrency = 4): Promise<unknown[]> {
