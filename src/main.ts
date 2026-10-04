@@ -228,6 +228,7 @@ export default class MdseWorkbench extends Plugin {
         this.indexer.local,
         this.indexer.fingerprints,
         this.schema,
+        { vaultUid: await this.loadVaultUid() },
         this.manifest.version,
         createdAt,
       );
@@ -256,6 +257,13 @@ export default class MdseWorkbench extends Plugin {
   async loadSchema(): Promise<Schema> {
     const read = async (p: string) => parseYaml(await this.app.vault.adapter.read(normalizePath(p)));
     return parseSchema(await read(this.settings.relationshipsPath), await read(this.settings.elementTypesPath));
+  }
+
+  private async loadVaultUid(): Promise<string> {
+    const raw = parseYaml(await this.app.vault.adapter.read(".vault.yaml")) as { vault_uid?: unknown };
+    const uid = raw?.vault_uid;
+    if (typeof uid !== "string" || !uid.trim()) throw new Error(".vault.yaml has no usable vault_uid.");
+    return uid.trim();
   }
 
   /** Load schema, build the index, then follow vault changes (WB-033, WB-086). */
