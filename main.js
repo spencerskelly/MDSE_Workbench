@@ -1043,7 +1043,7 @@ function pairsNumber(v, label) {
   }
   return out;
 }
-var CACHE_MANIFEST_VERSION = 1;
+var CACHE_MANIFEST_VERSION = 2;
 function shardSemanticCache(cache, generation, notesPerShard = 2e3, regionsPerShard = 500) {
   if (!generation.trim()) throw new Error("Cache generation must not be empty.");
   if (!Number.isInteger(notesPerShard) || notesPerShard < 1 || !Number.isInteger(regionsPerShard) || regionsPerShard < 1) {
@@ -1060,6 +1060,7 @@ function shardSemanticCache(cache, generation, notesPerShard = 2e3, regionsPerSh
   return {
     manifest: {
       manifestVersion: CACHE_MANIFEST_VERSION,
+      sequence: 0,
       generation,
       header: cache.header,
       fingerprints: { ...cache.fingerprints },
@@ -1111,7 +1112,7 @@ function joinLocalShards(manifest, shards) {
   return regions;
 }
 function isDiskManifest(v) {
-  if (!isObject(v) || typeof v.manifestVersion !== "number" || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
+  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0 || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
   return isShardSet(v.notes) && isShardSet(v.localRegions);
 }
 function isShardSet(v) {
@@ -1161,6 +1162,10 @@ async function writeSemanticCacheGeneration(storage, root, cache, generation, op
   await storage.mkdir(clean);
   await storage.mkdir(`${clean}/slots`);
   const manifests = await readManifestSlots(storage, clean);
+  sharded.manifest.sequence = Math.max(
+    manifests[0].manifest?.sequence ?? 0,
+    manifests[1].manifest?.sequence ?? 0
+  ) + 1;
   const slot = chooseWriteSlot(manifests);
   const slotRoot = cacheSlotPaths(clean)[slot];
   await storage.mkdir(slotRoot);
@@ -1177,7 +1182,7 @@ async function readSemanticCacheGeneration(storage, root) {
   const clean = cleanRoot(root);
   const manifests = await readManifestSlots(storage, clean);
   const candidates = manifests.flatMap((x, slot) => x.manifest ? [{ slot, manifest: x.manifest }] : []).sort(
-    (a, b) => b.manifest.header.createdAt - a.manifest.header.createdAt || b.manifest.generation.localeCompare(a.manifest.generation)
+    (a, b) => b.manifest.sequence - a.manifest.sequence || b.manifest.header.createdAt - a.manifest.header.createdAt || b.manifest.generation.localeCompare(a.manifest.generation)
   );
   if (!candidates.length) throw new Error("No semantic cache manifest is available.");
   const errors = [];
@@ -1221,6 +1226,7 @@ function chooseWriteSlot(slots) {
   if (!slots[1].manifest) return 1;
   const a = slots[0].manifest;
   const b = slots[1].manifest;
+  if (a.sequence !== b.sequence) return a.sequence < b.sequence ? 0 : 1;
   if (a.header.createdAt !== b.header.createdAt) return a.header.createdAt < b.header.createdAt ? 0 : 1;
   return a.generation.localeCompare(b.generation) <= 0 ? 0 : 1;
 }
@@ -1239,7 +1245,7 @@ function isObject2(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 function isManifestShape(v) {
-  if (!isObject2(v) || typeof v.manifestVersion !== "number" || typeof v.generation !== "string" || !isObject2(v.header) || !isObject2(v.fingerprints)) return false;
+  if (!isObject2(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || v.sequence < 0 || typeof v.generation !== "string" || !isObject2(v.header) || !isObject2(v.fingerprints)) return false;
   if (!isObject2(v.notes) || !isObject2(v.localRegions)) return false;
   return Number.isInteger(v.notes.count) && v.notes.count >= 0 && Number.isInteger(v.notes.total) && v.notes.total >= 0 && Number.isInteger(v.localRegions.count) && v.localRegions.count >= 0 && Number.isInteger(v.localRegions.total) && v.localRegions.total >= 0 && typeof v.header.createdAt === "number";
 }
