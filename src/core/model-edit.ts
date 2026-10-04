@@ -1,5 +1,5 @@
 import { localRef, type ModelRef } from "./localmodel";
-import { planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch, type LocalDeleteImpact, type LocalRecordPatch, type NewLocalRecord, type PlannedLocalDelete, type PlannedLocalEdit } from "./localmodel-edit";
+import { planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch, type LocalRecordPatch, type NewLocalRecord, type PlannedLocalDelete, type PlannedLocalEdit } from "./localmodel-edit";
 import { TransactionManager, type AppliedEdit, type EditTransaction } from "./transaction";
 
 export interface TextDocumentStore {
