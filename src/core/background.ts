@@ -1,3 +1,5 @@
+export const BACKGROUND_RESUME_QUIET_MS = 3000;
+
 export interface BackgroundWorkState {
   unloaded: boolean;
   ready: boolean;
