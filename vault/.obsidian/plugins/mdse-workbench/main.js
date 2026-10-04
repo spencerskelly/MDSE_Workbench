@@ -945,6 +945,21 @@ function serializeSemanticState(index, local, fingerprints, schema, scope, produ
     localRegions
   };
 }
+function restoreCoreSemanticState(cache, schema, scope) {
+  const problem = cacheCompatibilityProblem(cache, expectedCompatibility(schema, scope));
+  if (problem) throw new Error(`Incompatible semantic cache: ${problem}.`);
+  if (!isObject(cache) || !Array.isArray(cache.notes) || !isObject(cache.fingerprints)) {
+    throw new Error("Malformed core semantic cache payload.");
+  }
+  const index = new ModelIndex(schema);
+  for (const raw of cache.notes) index.upsert(deserializeNote(raw));
+  const fingerprints = /* @__PURE__ */ new Map();
+  for (const [path, raw] of Object.entries(cache.fingerprints)) {
+    if (!isFingerprint(raw)) throw new Error(`Malformed fingerprint for ${path}.`);
+    fingerprints.set(path, { ...raw });
+  }
+  return { index, fingerprints };
+}
 function restoreSemanticState(cache, schema, scope) {
   const problem = cacheCompatibilityProblem(cache, expectedCompatibility(schema, scope));
   if (problem) throw new Error(`Incompatible semantic cache: ${problem}.`);
@@ -1200,14 +1215,22 @@ function shardSemanticCache(cache, generation, noteBuckets = 32, localBuckets = 
 function joinSemanticCache(manifest, fingerprintShards, noteShards, localShards) {
   if (!isDiskManifest(manifest)) throw new Error("Malformed semantic cache manifest.");
   if (manifest.manifestVersion !== CACHE_MANIFEST_VERSION) throw new Error(`Unsupported cache manifest version ${manifest.manifestVersion}.`);
-  const fingerprints = joinFingerprintShards(manifest, fingerprintShards);
-  const notes = joinNoteShards(manifest, noteShards);
-  const localRegions = joinLocalShards(manifest, localShards);
+  return {
+    ...joinCoreSemanticCache(manifest, fingerprintShards, noteShards),
+    ...joinLocalSemanticCache(manifest, localShards)
+  };
+}
+function joinCoreSemanticCache(manifest, fingerprintShards, noteShards) {
   return {
     header: manifest.header,
-    fingerprints,
-    notes,
-    localRegions
+    fingerprints: joinFingerprintShards(manifest, fingerprintShards),
+    notes: joinNoteShards(manifest, noteShards)
+  };
+}
+function joinLocalSemanticCache(manifest, localShards) {
+  return {
+    header: manifest.header,
+    localRegions: joinLocalShards(manifest, localShards)
   };
 }
 function joinFingerprintShards(manifest, shards) {
@@ -1352,12 +1375,35 @@ async function writeSemanticCacheGeneration(storage, root, cache, generation, op
   await storage.write(cacheManifestPaths(clean)[slot], JSON.stringify(sharded.manifest));
   return sharded.manifest;
 }
-async function readSemanticCacheGeneration(storage, root) {
-  const clean = cleanRoot(root);
+async function cacheCandidates(storage, clean) {
   const manifests = await readManifestSlots(storage, clean);
-  const candidates = manifests.flatMap((x, slot) => x.manifest ? [{ slot, manifest: x.manifest }] : []).sort(
+  return manifests.flatMap((x, slot) => x.manifest ? [{ slot, manifest: x.manifest }] : []).sort(
     (a, b) => b.manifest.sequence - a.manifest.sequence || b.manifest.header.createdAt - a.manifest.header.createdAt || b.manifest.generation.localeCompare(a.manifest.generation)
   );
+}
+async function readCoreCacheGeneration(storage, root) {
+  const clean = cleanRoot(root);
+  const candidates = await cacheCandidates(storage, clean);
+  if (!candidates.length) throw new Error("No semantic cache manifest is available.");
+  const errors = [];
+  for (const { slot, manifest } of candidates) {
+    try {
+      assertGeneration(manifest.generation);
+      const slotRoot = cacheSlotPaths(clean)[slot];
+      const [fingerprintShards, noteShards] = await Promise.all([
+        readJsonSeries(storage, Array.from({ length: manifest.fingerprints.count }, (_, i) => `${slotRoot}/fingerprints-${pad(i)}.json`)),
+        readJsonSeries(storage, Array.from({ length: manifest.notes.count }, (_, i) => `${slotRoot}/notes-${pad(i)}.json`))
+      ]);
+      return joinCoreSemanticCache(manifest, fingerprintShards, noteShards);
+    } catch (e) {
+      errors.push(`${MANIFEST_NAMES[slot]}: ${e.message}`);
+    }
+  }
+  throw new Error(`No complete core semantic cache generation is readable. ${errors.join(" | ")}`);
+}
+async function readSemanticCacheGeneration(storage, root) {
+  const clean = cleanRoot(root);
+  const candidates = await cacheCandidates(storage, clean);
   if (!candidates.length) throw new Error("No semantic cache manifest is available.");
   const errors = [];
   for (const { slot, manifest } of candidates) {
@@ -2643,6 +2689,34 @@ var Indexer = class {
   }
   setSchema(schema) {
     this.schema = schema;
+  }
+  /**
+   * Install only the core semantic cache. Local Model regions remain deferred and are discovered
+   * from Obsidian metadata without reading note bodies.
+   */
+  installRestoredCore(state, createdAt) {
+    if (this.running) throw new Error("Cannot install restored state while indexing is active.");
+    this.hydrationEpoch++;
+    this.hydrationTask = null;
+    this.hydrationDemanded = false;
+    this.requestedLocalReads.clear();
+    this.local = new LocalModelIndex();
+    this.deferredHydrationPaths = this.app.vault.getMarkdownFiles().filter((file) => this.mayHaveLocalModel(file)).map((file) => file.path).sort();
+    this.deferredHydrationEpoch = this.hydrationEpoch;
+    this.hydrationRemaining = 0;
+    this.hydrationStartedAt = null;
+    this.lastHydrationMsValue = null;
+    this.lastHydrationCandidatesValue = this.deferredHydrationPaths.length;
+    this.localReadErrors.clear();
+    this.index = state.index;
+    this.fingerprints.clear();
+    for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
+    this.dirty.clear();
+    this.cacheDirtyPaths.clear();
+    this.metadataBurst.reset();
+    this.bumpRevision();
+    this.stats = this.makeStats("restored", 0, createdAt);
+    return this.stats;
   }
   /**
    * Install already-validated disposable cache state. This does not read or write model files.
@@ -5313,12 +5387,12 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       try {
         this.setRuntimeStatus("restoring");
         const scope = { vaultUid: await this.loadVaultUid() };
-        const cache = await readSemanticCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
-        const restored = restoreSemanticState(cache, schema, scope);
+        const cache = await readCoreCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
+        const restored = restoreCoreSemanticState(cache, schema, scope);
         const initialPlan = planReconciliation(restored.fingerprints, indexer.currentFingerprints());
         const initialMode = reconciliationMode(initialPlan);
         if (initialMode !== "full") {
-          stats = indexer.installRestored(restored, cache.header.createdAt);
+          stats = indexer.installRestoredCore(restored, cache.header.createdAt);
           this.lastCachedRevision = indexer.revision;
           const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
           this.lastWarmRestore = initialChanges ? `restored; ${initialChanges} path change(s) to reconcile` : "restored; cache matched current file fingerprints";
