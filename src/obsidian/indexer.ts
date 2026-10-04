@@ -47,6 +47,8 @@ export class Indexer {
   private timer: number | null = null;
   /** Prevents a slower cachedRead from overwriting a newer Local Model edit. */
   private readonly localRevision = new Map<string, number>();
+  /** Body reads started by incremental Local Model updates; consumers can wait for semantic consistency. */
+  private readonly pendingLocalReads = new Set<Promise<void>>();
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -58,6 +60,13 @@ export class Indexer {
 
   enableLiveChanges(): void {
     this.liveChanges = true;
+  }
+
+  /** Wait until every Local Model body read scheduled so far (and any chained during the wait) has settled. */
+  async whenLocalSettled(): Promise<void> {
+    while (this.pendingLocalReads.size) {
+      await Promise.all([...this.pendingLocalReads]);
+    }
   }
 
   /** Current Markdown path/mtime/size evidence without parsing note bodies. */
@@ -266,10 +275,14 @@ export class Indexer {
     this.localRevision.set(path, revision);
     this.local.remove(path);
     if (!file || !this.mayHaveLocalModel(file)) return;
-    void this.app.vault.cachedRead(file).then((text) => {
-      if (this.localRevision.get(path) !== revision) return;
-      this.local.set(path, parseLocalModel(text));
-    });
+    let task: Promise<void>;
+    task = this.app.vault.cachedRead(file)
+      .then((text) => {
+        if (this.localRevision.get(path) !== revision) return;
+        this.local.set(path, parseLocalModel(text));
+      })
+      .finally(() => this.pendingLocalReads.delete(task));
+    this.pendingLocalReads.add(task);
   }
 
   /** One file changed or was created. Cheap; never starts a build directly. */
