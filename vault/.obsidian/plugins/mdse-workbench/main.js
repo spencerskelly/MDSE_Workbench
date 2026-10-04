@@ -2954,6 +2954,15 @@ var Indexer = class {
     const sample = this.relationshipReresolutionHistoryValue[this.relationshipReresolutionHistoryValue.length - 1];
     return sample ? { ...sample, changedPaths: [...sample.changedPaths], fanOut: sample.fanOut.map((row) => ({ ...row })) } : null;
   }
+  recordRelationshipReresolution(sample) {
+    this.relationshipReresolutionHistoryValue.push(sample);
+    if (this.relationshipReresolutionHistoryValue.length > RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT) {
+      this.relationshipReresolutionHistoryValue.splice(
+        0,
+        this.relationshipReresolutionHistoryValue.length - RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT
+      );
+    }
+  }
   get localHydrationCostSummary() {
     return summarizeHydrationCosts(this.hydrationCosts.values());
   }
@@ -3373,10 +3382,20 @@ var Indexer = class {
         throw new Error(`Relationship dependency evidence is incomplete or inconsistent; full rebuild required: ${consistency.issues[0] ?? "unknown mismatch"}`);
       }
       const changedPaths = [...plan.added, ...plan.deleted];
+      const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
       const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
-      await this.reResolveRelationships(
-        shouldUseFullRelationshipReresolution(candidates.length) ? void 0 : candidates
-      );
+      const full = shouldUseFullRelationshipReresolution(candidates.length);
+      const startedAt = performance.now();
+      const changedSourceCount = await this.reResolveRelationships(full ? void 0 : candidates);
+      this.recordRelationshipReresolution({
+        at: Date.now(),
+        mode: full ? "full" : "targeted",
+        changedPaths,
+        fanOut,
+        candidateCount: candidates.length,
+        changedSourceCount,
+        elapsedMs: performance.now() - startedAt
+      });
     }
     const backlog = [...this.dirty];
     this.dirty.clear();
@@ -3476,24 +3495,18 @@ var Indexer = class {
     }
     const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
+    const full = shouldUseFullRelationshipReresolution(candidates.length);
     const startedAt = performance.now();
-    task = this.reResolveRelationships(
-      shouldUseFullRelationshipReresolution(candidates.length) ? void 0 : candidates
-    ).then((changedSourceCount) => {
-      this.relationshipReresolutionHistoryValue.push({
+    task = this.reResolveRelationships(full ? void 0 : candidates).then((changedSourceCount) => {
+      this.recordRelationshipReresolution({
         at: Date.now(),
+        mode: full ? "full" : "targeted",
         changedPaths,
         fanOut,
         candidateCount: candidates.length,
         changedSourceCount,
         elapsedMs: performance.now() - startedAt
       });
-      if (this.relationshipReresolutionHistoryValue.length > RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT) {
-        this.relationshipReresolutionHistoryValue.splice(
-          0,
-          this.relationshipReresolutionHistoryValue.length - RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT
-        );
-      }
     }).finally(() => {
       if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
       if (this.relationshipResolvePending) this.scheduleRelationshipReresolution();
@@ -6128,12 +6141,15 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const dirtyBuckets = cacheDirtyBucketsForPaths(this.indexer.cacheDirtyPathsSnapshot());
     const mem = performance.memory;
     const cacheSizeBytes = await workbenchCacheSizeBytes(this.app);
+    const relationshipReconciliation = this.indexer.lastRelationshipReresolution;
     const rows = [
       ["Index mode", s.mode],
       ["Markdown files", String(s.files)],
       ["Notes with properties", String(s.notes)],
       ["Model notes", String(s.elements)],
       ["Authored links", String(s.links)],
+      ["Relationship reconciliation", relationshipReconciliation ? `${relationshipReconciliation.mode} \xB7 ${relationshipReconciliation.candidateCount} candidate(s) \xB7 ${relationshipReconciliation.elapsedMs.toFixed(1)} ms` : "not measured"],
+      ["Relationship sources changed", relationshipReconciliation ? String(relationshipReconciliation.changedSourceCount) : "not measured"],
       ["Local Model hydration", this.indexer.localHydrationPending ? `${this.indexer.localHydrationPending} note(s) pending` : "settled"],
       ["Local Model read errors", String(this.indexer.localReadErrorCount), this.indexer.localReadErrorCount > 0],
       ["Hydration cost / Object", (() => {
