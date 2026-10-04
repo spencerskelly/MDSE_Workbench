@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ReversePathDependencyIndex } from "../src/core/relationship-dependencies";
+import {\n  ReversePathDependencyIndex,\n  TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES,\n  shouldUseFullRelationshipReresolution,\n} from "../src/core/relationship-dependencies";
 
 test("reverse dependency index finds source notes by resolved target path", () => {
   const index = new ReversePathDependencyIndex();
@@ -85,4 +85,20 @@ test("path-change fan-out reports conservative source counts per changed path wi
     { path: "Other.md", candidates: 1 },
   ]);
   assert.deepEqual(index.candidatesForPathChanges(["Folder/Controller.md", "Other.md"]), ["A.md", "B.md", "C.md"]);
+});
+
+
+test("targeted relationship re-resolution uses the defined candidate threshold", () => {
+  assert.equal(
+    shouldUseFullRelationshipReresolution(TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES - 1),
+    false,
+  );
+  assert.equal(
+    shouldUseFullRelationshipReresolution(TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES),
+    false,
+  );
+  assert.equal(
+    shouldUseFullRelationshipReresolution(TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES + 1),
+    true,
+  );
 });
