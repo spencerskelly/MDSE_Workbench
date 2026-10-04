@@ -4,7 +4,7 @@
  */
 import { App, getLinkpath, TFile } from "obsidian";
 import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../core/model";
-import type { FileFingerprint, ReconciliationPlan, RestoredSemanticState } from "../core/cache";
+import type { FileFingerprint, ReconciliationPlan, RestoredCoreSemanticState, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
 import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative";
@@ -284,6 +284,38 @@ export class Indexer {
 
   setSchema(schema: Schema): void {
     this.schema = schema;
+  }
+
+  /**
+   * Install only the core semantic cache. Local Model regions remain deferred and are discovered
+   * from Obsidian metadata without reading note bodies.
+   */
+  installRestoredCore(state: RestoredCoreSemanticState, createdAt: number): BuildStats {
+    if (this.running) throw new Error("Cannot install restored state while indexing is active.");
+    this.hydrationEpoch++;
+    this.hydrationTask = null;
+    this.hydrationDemanded = false;
+    this.requestedLocalReads.clear();
+    this.local = new LocalModelIndex();
+    this.deferredHydrationPaths = this.app.vault.getMarkdownFiles()
+      .filter((file) => this.mayHaveLocalModel(file))
+      .map((file) => file.path)
+      .sort();
+    this.deferredHydrationEpoch = this.hydrationEpoch;
+    this.hydrationRemaining = 0;
+    this.hydrationStartedAt = null;
+    this.lastHydrationMsValue = null;
+    this.lastHydrationCandidatesValue = this.deferredHydrationPaths.length;
+    this.localReadErrors.clear();
+    this.index = state.index;
+    this.fingerprints.clear();
+    for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
+    this.dirty.clear();
+    this.cacheDirtyPaths.clear();
+    this.metadataBurst.reset();
+    this.bumpRevision();
+    this.stats = this.makeStats("restored", 0, createdAt);
+    return this.stats;
   }
 
   /**
