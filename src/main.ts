@@ -25,6 +25,7 @@ import { AssuranceManager, type AssuranceSnapshot } from "./obsidian/assurance";
 
 /** Quiet time with no cache activity before the first index build starts. */
 const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
+const CORE_AFTER_METADATA_DELAY_MS = 1000;
 const LOCAL_BACKGROUND_DELAY_MS = 3000;
 const CACHE_QUIET_MS = 8000;
 const MIN_CACHE_WRITE_INTERVAL_MS = 30000;
@@ -295,7 +296,13 @@ export default class MdseWorkbench extends Plugin {
    */
   private async whenVaultQuiet(): Promise<void> {
     while (!this.unloaded) {
-      if (this.metadataResolved) return;
+      if (this.metadataResolved) {
+        // Give Obsidian/UI and other lightweight plugin onload work one short lane before
+        // Workbench starts core indexing/restoration. Workbench readiness may come later;
+        // vault usability wins over minimum feature latency.
+        await new Promise((r) => window.setTimeout(r, CORE_AFTER_METADATA_DELAY_MS));
+        return;
+      }
       if (Date.now() - this.lastChange >= QUIET_START_MS) return;
       await new Promise((r) => window.setTimeout(r, 250));
     }
