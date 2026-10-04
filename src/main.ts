@@ -57,6 +57,8 @@ interface RuntimeSample {
   files: number;
   elements: number;
   coreMs: number;
+  /** User-visible elapsed time from Workbench startup handoff to core model readiness. */
+  timeToCoreReadyMs: number | null;
   startupWaitMs: number | null;
   localHydrationMs: number | null;
   localCandidates: number;
@@ -97,6 +99,7 @@ export default class MdseWorkbench extends Plugin {
   private lastWarmRestore: string | null = null;
   private assurance: AssuranceManager | null = null;
   private lastStartupWaitMs: number | null = null;
+  private lastTimeToCoreReadyMs: number | null = null;
   private startPromise: Promise<void> | null = null;
   private pendingRebuild = false;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
@@ -328,6 +331,7 @@ export default class MdseWorkbench extends Plugin {
       files: stats.files,
       elements: stats.elements,
       coreMs: stats.ms,
+      timeToCoreReadyMs: this.lastTimeToCoreReadyMs,
       startupWaitMs: this.lastStartupWaitMs,
       localHydrationMs: indexer.lastLocalHydrationMs,
       localCandidates: indexer.lastLocalHydrationCandidates,
@@ -342,7 +346,7 @@ export default class MdseWorkbench extends Plugin {
     const rows: Array<[string, string]> = recent.length
       ? recent.map((s) => [
           new Date(s.at).toLocaleString(),
-          `${s.mode} · core ${(s.coreMs / 1000).toFixed(2)} s · Local ${s.localHydrationMs === null ? "n/a" : (s.localHydrationMs / 1000).toFixed(2) + " s"} (${s.localCandidates}) · wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1000).toFixed(2) + " s"}`,
+          `${s.mode} · ready ${s.timeToCoreReadyMs === null ? "n/a" : (s.timeToCoreReadyMs / 1000).toFixed(2) + " s"} · core ${(s.coreMs / 1000).toFixed(2)} s · Local ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1000).toFixed(2) + " s"} (${s.localCandidates}) · wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1000).toFixed(2) + " s"}`,
         ])
       : [["Runtime history", "No completed startup samples yet."]];
     new ReportModal(this.app, "MDSE Workbench runtime history", rows, [
@@ -512,6 +516,7 @@ export default class MdseWorkbench extends Plugin {
 
   /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
   private async runStart(rebuild: boolean): Promise<void> {
+    const runStartedAt = performance.now();
     this.lastCoreError = null;
     this.setRuntimeStatus("starting");
     try {
@@ -639,6 +644,7 @@ export default class MdseWorkbench extends Plugin {
       stats = await indexer.build();
     }
 
+    this.lastTimeToCoreReadyMs = Math.round(performance.now() - runStartedAt);
     const localPending = indexer.localHydrationPending;
     this.setRuntimeStatus(
       "ready",
@@ -784,6 +790,7 @@ export default class MdseWorkbench extends Plugin {
       ["Local Model hydration", this.indexer!.localHydrationPending ? `${this.indexer!.localHydrationPending} note(s) pending` : "settled"],
       ["Local Model read errors", String(this.indexer!.localReadErrorCount), this.indexer!.localReadErrorCount > 0],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
+      ["Time to core ready", this.lastTimeToCoreReadyMs === null ? "not measured" : `${(this.lastTimeToCoreReadyMs / 1000).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
       ["Assurance snapshot", assurance.error
         ? `unavailable · ${assurance.ms} ms · revision ${assurance.revision}`
