@@ -1,0 +1,208 @@
+name: Exact candidate startup acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/integration-candidate-startup.yml"
+      - "bench/obsidian-e2e-activate.mjs"
+      - "bench/obsidian-plugin-overlap-probe.mjs"
+      - "artifact-sha256.txt"
+      - "main.js"
+      - "manifest.json"
+      - "styles.css"
+
+permissions:
+  contents: read
+
+jobs:
+  startup-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NOTE_COUNT: "12000"
+      OBSIDIAN_VERSION: "1.13.7"
+      CORE_ACCEPTANCE_MS: "60000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Verify exact CI-built candidate bytes
+        run: |
+          sha256sum -c artifact-sha256.txt
+          cp artifact-sha256.txt exact-candidate-sha256.txt
+          git log -1 --format='%H %s' -- main.js > exact-candidate-origin.txt
+          cat exact-candidate-sha256.txt
+          cat exact-candidate-origin.txt
+
+      - name: Install harness dependencies only
+        run: |
+          npm ci
+          npm install --no-save chrome-remote-interface
+
+      - name: Install Obsidian desktop and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          curl -L --retry 3 -o "$RUNNER_TEMP/obsidian.deb" \
+            "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian_${OBSIDIAN_VERSION}_amd64.deb"
+          sudo apt-get install -y "$RUNNER_TEMP/obsidian.deb"
+
+      - name: Prepare disposable vault using exact candidate
+        run: |
+          VAULT="$RUNNER_TEMP/mdse-exact-candidate"
+          echo "VAULT=$VAULT" >> "$GITHUB_ENV"
+          rm -rf "$VAULT"
+          mkdir -p "$VAULT/.obsidian/plugins/mdse-workbench"
+
+          cp -R vault/99_System "$VAULT/99_System"
+          npm run bench:generate -- "$NOTE_COUNT" "$VAULT/IntegrationData"
+
+          # Do not rebuild Workbench here. Install the exact checked-in CI-built bundle.
+          cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/mdse-workbench/"
+          printf '%s\n' '["mdse-workbench"]' > "$VAULT/.obsidian/community-plugins.json"
+          cat > "$VAULT/.vault.yaml" <<'EOF'
+          vault_uid: 20261004201000000exactcandidate
+          vault_name: MDSE Exact Candidate Acceptance
+          default_branch: main
+          EOF
+
+          sha256sum \
+            "$VAULT/.obsidian/plugins/mdse-workbench/main.js" \
+            "$VAULT/.obsidian/plugins/mdse-workbench/manifest.json" \
+            "$VAULT/.obsidian/plugins/mdse-workbench/styles.css"
+
+      - name: Register disposable vault
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-candidate
+        run: |
+          mkdir -p "$XDG_CONFIG_HOME/obsidian"
+          export VAULT
+          node -e 'const fs=require("fs"),p=require("path");const out=p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json");fs.writeFileSync(out,JSON.stringify({vaults:{candidate:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
+
+      - name: Measure exact-candidate cold startup
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-candidate
+        run: |
+          export VAULT NOTE_COUNT
+          rm -rf "$VAULT/.obsidian/plugins/mdse-workbench/cache"
+          rm -f "$VAULT/.mdse_integration_result.json" "$VAULT/.mdse_integration_metadata.json" "$VAULT/.mdse_integration_readable.json"
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.NOTE_COUNT),label:"exact-ci-candidate"},null,2))'
+
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9240 >"$RUNNER_TEMP/exact-candidate-obsidian.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9240 >"$RUNNER_TEMP/exact-candidate-activate.log" 2>&1
+            cat "$RUNNER_TEMP/exact-candidate-activate.log"
+
+            for i in $(seq 1 360); do
+              if [ -f "$VAULT/.mdse_integration_result.json" ] && node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync(process.env.VAULT+"/.mdse_integration_result.json","utf8"));process.exit(Number.isFinite(r.occurrenceReadyAt)?0:1)'"'"'; then
+                cp "$VAULT/.mdse_integration_result.json" exact-candidate-startup.json
+                node bench/obsidian-plugin-overlap-probe.mjs "$VAULT" 9240 "" > exact-candidate-capability.json
+                cat exact-candidate-startup.json
+                cat exact-candidate-capability.json
+                exit 0
+              fi
+              sleep 0.5
+            done
+            echo "Timed out waiting for exact-candidate startup acceptance." >&2
+            tail -200 "$RUNNER_TEMP/exact-candidate-obsidian.log" >&2 || true
+            exit 1
+          '
+
+      - name: Validate startup responsiveness acceptance
+        run: |
+          node <<'NODE'
+          const fs=require("fs");
+          const r=JSON.parse(fs.readFileSync("exact-candidate-startup.json","utf8"));
+          const c=JSON.parse(fs.readFileSync("exact-candidate-capability.json","utf8"));
+          const fail=(m)=>{throw new Error(m)};
+          const n=Number(process.env.NOTE_COUNT);
+          const max=Number(process.env.CORE_ACCEPTANCE_MS);
+
+          if(r.label!=="exact-ci-candidate") fail("wrong integration label");
+          if(r.mode!=="full") fail("expected authoritative cold full build");
+          if(r.files!==n) fail("not all Markdown files were parsed");
+          if(r.elements!==n) fail("not all generated model elements were indexed");
+          if(!Number.isFinite(r.launchToReadableMs)) fail("readable milestone missing");
+          if(!Number.isFinite(r.launchToMetadataCoverageMs)) fail("metadata coverage milestone missing");
+          if(!Number.isFinite(r.launchToCoreReadyMs)) fail("core-ready milestone missing");
+          if(!Number.isFinite(r.launchToOccurrenceReadyMs)) fail("occurrence-ready milestone missing");
+          if(r.launchToReadableMs>=r.launchToCoreReadyMs) fail("Workbench core became ready before/at readable milestone; staged startup not demonstrated");
+          if(r.launchToMetadataCoverageMs>r.launchToCoreReadyMs) fail("core-ready preceded complete metadata coverage");
+          if(r.launchToOccurrenceReadyMs<r.launchToCoreReadyMs) fail("occurrence-ready preceded core-ready");
+          if(r.launchToCoreReadyMs>max) fail("launch-to-core-ready exceeded "+max+" ms acceptance target");
+          if(!c.workbenchEnabled||!c.workbenchCoreReady||!c.commandsReady) fail("required Workbench capability unavailable");
+
+          const result={
+            accepted:true,
+            artifactSha256:fs.readFileSync("exact-candidate-sha256.txt","utf8").trim().split("\n"),
+            artifactOrigin:fs.readFileSync("exact-candidate-origin.txt","utf8").trim(),
+            startup:{
+              readableMs:r.launchToReadableMs,
+              metadataResolvedMs:r.launchToMetadataResolvedMs,
+              metadataCoverageMs:r.launchToMetadataCoverageMs,
+              coreReadyMs:r.launchToCoreReadyMs,
+              occurrenceReadyMs:r.launchToOccurrenceReadyMs,
+              workbenchCoreWorkMs:r.workbenchCoreWorkMs,
+              files:r.files,
+              elements:r.elements,
+              links:r.links,
+              mode:r.mode,
+            },
+            capability:{
+              commandsReady:c.commandsReady,
+              workbenchCoreReady:c.workbenchCoreReady,
+              workbenchMode:c.workbenchMode,
+            },
+            acceptance:{
+              coreReadyTargetMs:max,
+              readableBeforeCore:true,
+              completeMetadataBeforeCore:true,
+              completeSourceCoverage:true,
+            }
+          };
+          fs.writeFileSync("exact-candidate-acceptance.json",JSON.stringify(result,null,2)+"\n");
+          console.log(JSON.stringify(result,null,2));
+          NODE
+
+      - name: Write acceptance summary
+        if: always()
+        run: |
+          if [ -f exact-candidate-acceptance.json ]; then
+            node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const r=require("./exact-candidate-acceptance.json");
+          console.log("## Exact CI-built Workbench startup acceptance");
+          console.log("");
+          console.log("| Metric | Value |");
+          console.log("|---|---:|");
+          console.log("| Accepted | "+(r.accepted?"yes":"no")+" |");
+          console.log("| Readable | "+r.startup.readableMs+" ms |");
+          console.log("| Metadata coverage | "+r.startup.metadataCoverageMs+" ms |");
+          console.log("| Core ready | "+r.startup.coreReadyMs+" ms |");
+          console.log("| Occurrence ready | "+r.startup.occurrenceReadyMs+" ms |");
+          console.log("| Core target | "+r.acceptance.coreReadyTargetMs+" ms |");
+          console.log("| Files / elements / links | "+r.startup.files+" / "+r.startup.elements+" / "+r.startup.links+" |");
+          console.log("| Mode | "+r.startup.mode+" |");
+          NODE
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-candidate-startup-evidence
+          path: |
+            exact-candidate-sha256.txt
+            exact-candidate-origin.txt
+            exact-candidate-startup.json
+            exact-candidate-capability.json
+            exact-candidate-acceptance.json
+            ${{ runner.temp }}/exact-candidate-obsidian.log
+            ${{ runner.temp }}/exact-candidate-activate.log
+          if-no-files-found: warn
