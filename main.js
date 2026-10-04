@@ -1607,7 +1607,8 @@ var STRUCTURE_PROFILE = {
   ],
   depth: 2,
   nodeCap: 80,
-  perParent: 12
+  perParent: 12,
+  needsLocalOccurrences: true
 };
 var INTERNAL_PROFILE = {
   name: "Internal",
@@ -1615,7 +1616,8 @@ var INTERNAL_PROFILE = {
   startTypes: ["Object"],
   steps: [],
   depth: 0,
-  nodeCap: 200
+  nodeCap: 200,
+  needsLocalOccurrences: true
 };
 var FUNCTIONAL_PROFILE = {
   name: "Functional",
@@ -1658,7 +1660,8 @@ var REQUIREMENTS_PROFILE = {
   ],
   depth: 2,
   nodeCap: 80,
-  perParent: 12
+  perParent: 12,
+  needsLocalOccurrences: true
 };
 var WHERE_USED_PROFILE = {
   name: "Where Used",
@@ -1677,7 +1680,8 @@ var WHERE_USED_PROFILE = {
   ],
   depth: 3,
   nodeCap: 80,
-  perParent: 12
+  perParent: 12,
+  needsLocalOccurrences: true
 };
 var INTERFACES_PROFILE = {
   name: "Interfaces",
@@ -1700,7 +1704,8 @@ var INTERFACES_PROFILE = {
   ],
   depth: 3,
   nodeCap: 80,
-  perParent: 12
+  perParent: 12,
+  needsLocalOccurrences: true
 };
 var VERIFICATION_PROFILE = {
   name: "Verification",
@@ -2109,7 +2114,7 @@ function withLocalInternal(index, local, resolve, base3, profile = INTERNAL_PROF
   return { ...base3, ...m, specialCanvas: internal.canvas };
 }
 function profileNeedsLocalOccurrences(profile) {
-  return ["Internal", "Structure", "Interfaces", "Where Used", "Requirements"].includes(profile.name);
+  return profile.needsLocalOccurrences === true;
 }
 function withLocalOccurrences(index, local, resolve, base3, profile) {
   switch (profile.name) {
