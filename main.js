@@ -28,6 +28,18 @@ var import_obsidian8 = require("obsidian");
 // src/core/runtime-health.ts
 function summarizeRuntimeHealth(input) {
   if (!input.ready) {
+    if (input.coreError) {
+      return {
+        level: "attention",
+        label: "Workbench \xB7 core unavailable",
+        detail: "Workbench core model startup failed, but Obsidian remains usable.",
+        rows: [
+          ["Model service", "unavailable", true],
+          ["Core error", input.coreError, true],
+          ["Recovery", "Correct the reported issue, then run Rebuild index"]
+        ]
+      };
+    }
     const level = input.building ? "syncing" : "starting";
     return {
       level,
@@ -35,17 +47,19 @@ function summarizeRuntimeHealth(input) {
       detail: "Model service is not ready yet.",
       rows: [
         ["Model service", input.building ? "indexing" : "starting"],
-        ["Local Model", input.localPending ? `${input.localPending} pending` : "not yet available"]
+        ["Local Model", input.localQueued ? `${input.localQueued} queued` : input.localPending ? `${input.localPending} pending` : "not yet available"]
       ]
     };
   }
   const rows = [];
-  const hardAttention = input.localReadErrors > 0 || !!input.cacheWriteError || input.schemaWarnings > 0;
+  const assuranceError = input.assurance?.current ? input.assurance.error ?? null : null;
+  const hardAttention = input.localReadErrors > 0 || !!input.occurrenceError || !!input.cacheWriteError || input.schemaWarnings > 0 || !!assuranceError;
   rows.push(["Model service", input.livePending ? `${input.livePending} live update(s) pending` : "ready"]);
+  const activeLocal = Math.max(0, input.localPending - input.localQueued);
   rows.push([
     "Local Model",
-    input.localReadErrors ? `${input.localReadErrors} read error(s)` : input.localPending ? `${input.localPending} note(s) hydrating` : "settled",
-    input.localReadErrors > 0
+    input.occurrenceError ? `background processing issue: ${input.occurrenceError}` : input.localReadErrors ? `${input.localReadErrors} read error(s)` : activeLocal ? `${activeLocal} note(s) hydrating` : input.localQueued ? `${input.localQueued} note(s) queued for later` : "settled",
+    !!input.occurrenceError || input.localReadErrors > 0
   ]);
   rows.push(["Schema", input.schemaWarnings ? `${input.schemaWarnings} warning(s)` : "compatible", input.schemaWarnings > 0]);
   rows.push([
@@ -57,6 +71,8 @@ function summarizeRuntimeHealth(input) {
     rows.push(["Global assurance", "not run for current model revision"]);
   } else if (!input.assurance.current) {
     rows.push(["Global assurance", "stale; recomputes on demand"]);
+  } else if (input.assurance.error) {
+    rows.push(["Global assurance", `unavailable: ${input.assurance.error}`, true]);
   } else {
     rows.push([
       "Global assurance",
@@ -65,7 +81,7 @@ function summarizeRuntimeHealth(input) {
     ]);
   }
   if (hardAttention) {
-    const issues = input.localReadErrors + input.schemaWarnings + (input.cacheWriteError ? 1 : 0);
+    const issues = input.localReadErrors + input.schemaWarnings + (input.occurrenceError ? 1 : 0) + (input.cacheWriteError ? 1 : 0) + (assuranceError ? 1 : 0);
     return {
       level: "attention",
       label: `Workbench \xB7 ${issues} issue${issues === 1 ? "" : "s"}`,
@@ -75,10 +91,11 @@ function summarizeRuntimeHealth(input) {
   }
   const pending = input.livePending + input.localPending;
   if (pending > 0) {
+    const activeOccurrence = Math.max(0, input.localPending - input.localQueued);
     return {
       level: "syncing",
-      label: input.livePending ? `Workbench \u2713 \xB7 applying ${input.livePending}` : "Workbench \u2713 \xB7 occurrence data loading",
-      detail: input.livePending ? "Core model remains usable while coalesced live edits finish." : "Core model is ready; occurrence-aware capabilities are loading in the background.",
+      label: input.livePending ? `Workbench \u2713 \xB7 applying ${input.livePending}` : activeOccurrence ? "Workbench \u2713 \xB7 occurrence data loading" : "Workbench \u2713 \xB7 occurrence data queued",
+      detail: input.livePending ? "Core model remains usable while coalesced live edits finish." : activeOccurrence ? "Core model is ready; occurrence-aware capabilities are loading in the background." : "Core model is ready; occurrence-aware capabilities are intentionally deferred until the vault is quiet or one is requested.",
       rows
     };
   }
@@ -2374,7 +2391,7 @@ var Indexer = class {
     /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
     this.hydrationEpoch = 0;
     this.hydrationTask = null;
-    this.deferredHydrationFiles = [];
+    this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = 0;
     this.hydrationRemaining = 0;
     this.hydrationStartedAt = null;
@@ -2402,7 +2419,13 @@ var Indexer = class {
     return this.semanticRevision;
   }
   get localHydrationPending() {
-    return this.hydrationRemaining + this.deferredHydrationFiles.length;
+    return this.hydrationRemaining + this.deferredHydrationPaths.length;
+  }
+  get localHydrationQueued() {
+    return this.deferredHydrationPaths.length;
+  }
+  get localHydrationActive() {
+    return this.hydrationRemaining;
   }
   get liveUpdatePending() {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
@@ -2443,10 +2466,11 @@ var Indexer = class {
   }
   /** Start deferred occurrence parsing when an occurrence-aware consumer actually needs it. */
   beginDeferredLocalHydration() {
-    if (this.hydrationTask || !this.deferredHydrationFiles.length) return;
-    const files = this.deferredHydrationFiles;
+    if (this.hydrationTask || !this.deferredHydrationPaths.length) return;
+    const paths = this.deferredHydrationPaths;
     const epoch = this.deferredHydrationEpoch;
-    this.deferredHydrationFiles = [];
+    this.deferredHydrationPaths = [];
+    const files = paths.map((path) => this.app.vault.getAbstractFileByPath(path)).filter((f) => f instanceof import_obsidian.TFile && f.extension === "md");
     this.startLocalHydration(files, epoch);
   }
   /** Wait until all asynchronous semantic work that can affect occurrence-aware queries has settled. */
@@ -2480,7 +2504,7 @@ var Indexer = class {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
     this.hydrationEpoch++;
     this.hydrationTask = null;
-    this.deferredHydrationFiles = [];
+    this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
     this.hydrationStartedAt = null;
@@ -2800,7 +2824,7 @@ var Indexer = class {
       this.cacheDirtyPaths.add(path);
     }
     this.bumpRevision();
-    this.deferredHydrationFiles = localCandidates;
+    this.deferredHydrationPaths = localCandidates.map((file) => file.path);
     this.deferredHydrationEpoch = epoch;
     this.hydrationRemaining = 0;
     this.lastHydrationCandidatesValue = localCandidates.length;
@@ -2926,7 +2950,7 @@ var Indexer = class {
     this.relationshipResolvePending = false;
     this.hydrationEpoch++;
     this.hydrationTask = null;
-    this.deferredHydrationFiles = [];
+    this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
   }
@@ -3771,6 +3795,14 @@ var ReviewView = class extends import_obsidian5.ItemView {
       return;
     }
     const snapshot = await this.host.assurance(force);
+    if (snapshot.error) {
+      this.contentEl.empty();
+      this.contentEl.createEl("h3", { text: "Review" });
+      this.contentEl.createEl("p", { text: "Global assurance is temporarily unavailable. The core model and ordinary notes remain usable.", cls: "mdse-warn" });
+      this.contentEl.createEl("p", { text: snapshot.error, cls: "mdse-muted" });
+      this.contentEl.createEl("button", { text: "Retry assurance" }).onclick = () => void this.refresh(true);
+      return;
+    }
     this.all = snapshot.all;
     this.resolved.clear();
     this.render();
@@ -4465,28 +4497,59 @@ var AssuranceManager = class {
       await this.source.settle();
       const revision = this.source.revision();
       const t0 = performance.now();
-      const model = this.source.index().findings();
-      const local = this.source.localFindings();
-      const all = toFindings(model, local);
-      const stale = this.source.revision() !== revision;
-      last = {
-        revision,
-        computedAt: Date.now(),
-        ms: Math.round(performance.now() - t0),
-        stale,
-        model,
-        local,
-        all,
-        counts: countByCategory(all)
-      };
-      if (!stale) {
-        this.cached = last;
-        return last;
+      try {
+        const model = this.source.index().findings();
+        const local = this.source.localFindings();
+        const all = toFindings(model, local);
+        const stale = this.source.revision() !== revision;
+        last = {
+          revision,
+          computedAt: Date.now(),
+          ms: Math.round(performance.now() - t0),
+          stale,
+          error: null,
+          model,
+          local,
+          all,
+          counts: countByCategory(all)
+        };
+        if (!stale) {
+          this.cached = last;
+          return last;
+        }
+      } catch (e) {
+        const model = emptyFindings();
+        const all = [];
+        last = {
+          revision,
+          computedAt: Date.now(),
+          ms: Math.round(performance.now() - t0),
+          stale: this.source.revision() !== revision,
+          error: e.message || String(e),
+          model,
+          local: [],
+          all,
+          counts: countByCategory(all)
+        };
+        if (!last.stale) {
+          this.cached = last;
+          return last;
+        }
       }
     }
     return last;
   }
 };
+function emptyFindings() {
+  return {
+    missingInverse: [],
+    orphanInverse: [],
+    offRule: [],
+    provisional: [],
+    unresolvedLinks: 0,
+    broken: []
+  };
+}
 
 // src/main.ts
 var QUIET_START_MS = 8e3;
@@ -4523,10 +4586,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.lastCacheWriteAt = null;
     this.lastCacheWriteMs = null;
     this.lastCacheWriteError = null;
+    this.lastCoreError = null;
+    this.lastOccurrenceError = null;
     this.lastCachedRevision = null;
     this.lastWarmRestore = null;
     this.assurance = null;
     this.lastStartupWaitMs = null;
+    this.lastTimeToCoreReadyMs = null;
     this.startPromise = null;
     this.pendingRebuild = false;
     /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
@@ -4661,7 +4727,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     return summarizeRuntimeHealth({
       ready: this.isReady(),
       building: !!indexer?.building,
+      coreError: this.lastCoreError,
+      occurrenceError: this.lastOccurrenceError,
       localPending: indexer?.localHydrationPending ?? 0,
+      localQueued: indexer?.localHydrationQueued ?? 0,
       livePending: indexer?.liveUpdatePending ?? 0,
       localReadErrors: indexer?.localReadErrorCount ?? 0,
       schemaWarnings: this.schema?.warnings.length ?? 0,
@@ -4670,7 +4739,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       assurance: cachedAssurance ? {
         current: cachedAssurance.revision === indexer?.revision && !cachedAssurance.stale,
         findings: cachedAssurance.all.length,
-        computedAt: cachedAssurance.computedAt
+        computedAt: cachedAssurance.computedAt,
+        error: cachedAssurance.error
       } : null
     });
   }
@@ -4695,7 +4765,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.healthRefreshTimer = null;
       this.refreshRuntimeHealth();
       const indexer = this.indexer;
-      if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationPending > 0) {
+      if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationActive > 0) {
         this.scheduleRuntimeHealthRefresh();
       }
     }, 400);
@@ -4726,6 +4796,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       files: stats.files,
       elements: stats.elements,
       coreMs: stats.ms,
+      timeToCoreReadyMs: this.lastTimeToCoreReadyMs,
       startupWaitMs: this.lastStartupWaitMs,
       localHydrationMs: indexer.lastLocalHydrationMs,
       localCandidates: indexer.lastLocalHydrationCandidates,
@@ -4738,7 +4809,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const recent = this.runtimeHistory.slice(-10).reverse();
     const rows = recent.length ? recent.map((s) => [
       new Date(s.at).toLocaleString(),
-      `${s.mode} \xB7 core ${(s.coreMs / 1e3).toFixed(2)} s \xB7 Local ${s.localHydrationMs === null ? "n/a" : (s.localHydrationMs / 1e3).toFixed(2) + " s"} (${s.localCandidates}) \xB7 wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1e3).toFixed(2) + " s"}`
+      `${s.mode} \xB7 ready ${s.timeToCoreReadyMs == null ? "n/a" : (s.timeToCoreReadyMs / 1e3).toFixed(2) + " s"} \xB7 core ${(s.coreMs / 1e3).toFixed(2)} s \xB7 Local ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1e3).toFixed(2) + " s"} (${s.localCandidates}) \xB7 wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1e3).toFixed(2) + " s"}`
     ]) : [["Runtime history", "No completed startup samples yet."]];
     new ReportModal(this.app, "MDSE Workbench runtime history", rows, [
       "Local-only performance evidence; this history is stored in the git-ignored Workbench data.json.",
@@ -4765,8 +4836,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.scheduleRuntimeHealthRefresh();
       void indexer.whenLocalSettled().then(() => {
         if (this.unloaded || this.indexer !== indexer) return;
+        this.lastOccurrenceError = null;
         this.refreshRuntimeHealth();
         this.scheduleSemanticCacheWrite();
+      }).catch((e) => {
+        if (this.unloaded || this.indexer !== indexer) return;
+        this.lastOccurrenceError = e.message || String(e);
+        this.refreshRuntimeHealth();
       });
     }, LOCAL_BACKGROUND_DELAY_MS);
   }
@@ -4874,6 +4950,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.startPromise = this.runStart(rebuild);
     try {
       await this.startPromise;
+    } catch (e) {
+      const message = e.message || String(e);
+      this.lastCoreError = message;
+      this.setRuntimeStatus("error", "core model unavailable");
+      new import_obsidian8.Notice(`MDSE Workbench: core model startup failed. Obsidian remains usable. ${message} Use \u201CRebuild index\u201D after correcting the issue.`, 12e3);
     } finally {
       this.startPromise = null;
     }
@@ -4884,12 +4965,16 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
   async runStart(rebuild) {
+    const runStartedAt = performance.now();
+    this.lastCoreError = null;
     this.setRuntimeStatus("starting");
     try {
       this.schema = await this.loadSchema();
     } catch (e) {
+      const message = e.message || String(e);
+      this.lastCoreError = `schema: ${message}`;
       this.setRuntimeStatus("error", "schema");
-      new import_obsidian8.Notice(`MDSE Workbench: could not read the schema files. ${e.message} Check the paths in settings.`);
+      new import_obsidian8.Notice(`MDSE Workbench: could not read the schema files. ${message} Check the paths in settings.`);
       return;
     }
     const schema = this.schema;
@@ -4988,6 +5073,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.setRuntimeStatus("indexing");
       stats = await indexer.build();
     }
+    this.lastTimeToCoreReadyMs = Math.round(performance.now() - runStartedAt);
     const localPending = indexer.localHydrationPending;
     this.setRuntimeStatus(
       "ready",
@@ -5120,13 +5206,15 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Local Model hydration", this.indexer.localHydrationPending ? `${this.indexer.localHydrationPending} note(s) pending` : "settled"],
       ["Local Model read errors", String(this.indexer.localReadErrorCount), this.indexer.localReadErrorCount > 0],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1e3).toFixed(2)} s`],
+      ["Time to core ready", this.lastTimeToCoreReadyMs === null ? "not measured" : `${(this.lastTimeToCoreReadyMs / 1e3).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1e3).toFixed(2)} s (target under 60 s)`, s.ms > 6e4],
-      ["Assurance snapshot", `${assurance.ms} ms \xB7 revision ${assurance.revision}${assurance.stale ? " \xB7 stale/retrying" : ""}`],
-      ["Missing inverses", String(f.missingInverse.length), f.missingInverse.length > 0],
-      ["Inverses with no forward link", String(f.orphanInverse.length), f.orphanInverse.length > 0],
-      ["Links that break endpoint rules", String(f.offRule.length)],
-      ["Provisional links (tracesTo)", String(f.provisional.length)],
-      ["Unresolved relationship links", String(f.unresolvedLinks), f.unresolvedLinks > 0],
+      ["Assurance snapshot", assurance.error ? `unavailable \xB7 ${assurance.ms} ms \xB7 revision ${assurance.revision}` : `${assurance.ms} ms \xB7 revision ${assurance.revision}${assurance.stale ? " \xB7 stale/retrying" : ""}`, !!assurance.error],
+      ["Assurance error", assurance.error ?? "none", !!assurance.error],
+      ["Missing inverses", assurance.error ? "not evaluated" : String(f.missingInverse.length), !assurance.error && f.missingInverse.length > 0],
+      ["Inverses with no forward link", assurance.error ? "not evaluated" : String(f.orphanInverse.length), !assurance.error && f.orphanInverse.length > 0],
+      ["Links that break endpoint rules", assurance.error ? "not evaluated" : String(f.offRule.length)],
+      ["Provisional links (tracesTo)", assurance.error ? "not evaluated" : String(f.provisional.length)],
+      ["Unresolved relationship links", assurance.error ? "not evaluated" : String(f.unresolvedLinks), !assurance.error && f.unresolvedLinks > 0],
       ["relationships.yaml", schema.relationshipsVersion],
       ["element-types.yaml", schema.elementTypesVersion],
       ["Editing", editingBlocked(schema) ? "off (schema too old)" : "on", editingBlocked(schema)],
