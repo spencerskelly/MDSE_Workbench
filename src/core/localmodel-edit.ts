@@ -56,7 +56,12 @@ export function editableLocalRegion(text: string): EditableLocalRegion {
   };
 }
 
-export interface LocalPlanOptions {\n  /** Staged structural transactions may temporarily hold an invalid target record. Atomic edits leave this false. */\n  allowInvalidTarget?: boolean;\n}\n\nexport function planLocalRecordPatch(text: string, localId: string, patch: LocalRecordPatch, options: LocalPlanOptions = {}): PlannedLocalEdit {
+export interface LocalPlanOptions {
+  /** Staged structural transactions may temporarily hold an invalid target record. Atomic edits leave this false. */
+  allowInvalidTarget?: boolean;
+}
+
+export function planLocalRecordPatch(text: string, localId: string, patch: LocalRecordPatch, options: LocalPlanOptions = {}): PlannedLocalEdit {
   const editable = editableLocalRegion(text);
   const record = editable.region.records.find((r) => r.localId === localId);
   if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
