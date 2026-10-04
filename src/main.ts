@@ -6,7 +6,7 @@
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
-import { canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
+import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
@@ -28,8 +28,6 @@ import { AssuranceManager, type AssuranceSnapshot } from "./obsidian/assurance";
 const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
 const CORE_AFTER_METADATA_DELAY_MS = 1000;
 const LOCAL_BACKGROUND_DELAY_MS = 3000;
-/** Foreground activity must stay quiet this long before paused background work may resume. */
-const BACKGROUND_RESUME_QUIET_MS = 3000;
 const CACHE_QUIET_MS = 8000;
 const MIN_CACHE_WRITE_INTERVAL_MS = 30000;
 
