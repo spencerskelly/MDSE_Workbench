@@ -2452,6 +2452,7 @@ var Indexer = class {
     this.localRevision = /* @__PURE__ */ new Map();
     /** Body reads started by incremental Local Model updates; consumers can wait for semantic consistency. */
     this.pendingLocalReads = /* @__PURE__ */ new Set();
+    this.requestedLocalReads = /* @__PURE__ */ new Set();
     /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
     this.semanticRevision = 0;
     /** Paths whose derived cache buckets no longer match the last committed cache generation. */
@@ -2496,10 +2497,10 @@ var Indexer = class {
     return this.deferredHydrationPaths.length;
   }
   get localHydrationActive() {
-    return this.hydrationRemaining;
+    return this.hydrationRemaining + this.requestedLocalReads.size;
   }
   get localHydrationDemanded() {
-    return this.hydrationDemanded && (this.hydrationTask !== null || this.deferredHydrationPaths.length > 0);
+    return this.requestedLocalReads.size > 0 || this.hydrationDemanded && (this.hydrationTask !== null || this.deferredHydrationPaths.length > 0);
   }
   get liveUpdatePending() {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
@@ -2596,6 +2597,40 @@ var Indexer = class {
       if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
       if (work.length) await Promise.all(work);
       else await new Promise((r) => window.setTimeout(r, 50));
+    }
+  }
+  /**
+   * Hydrate only the Local Model regions owned by the requested Object notes.
+   * This is the foreground path for occurrence-aware views that already know their owners.
+   * Unrelated deferred regions stay queued for background hydration.
+   */
+  async hydrateLocalOwners(paths) {
+    const unique = [...new Set(paths)].sort();
+    if (!unique.length) return;
+    const wanted = new Set(unique);
+    this.deferredHydrationPaths = this.deferredHydrationPaths.filter((path) => !wanted.has(path));
+    const epoch = this.deferredHydrationEpoch;
+    const budget = new CooperativeBudget(WORK_SLICE_MS);
+    for (const path of unique) {
+      if (epoch !== this.hydrationEpoch) return;
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof import_obsidian.TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
+      const revision = (this.localRevision.get(path) ?? 0) + 1;
+      this.localRevision.set(path, revision);
+      let task;
+      task = this.app.vault.cachedRead(file).then((text) => {
+        if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+        this.local.set(path, parseLocalModel(text));
+        this.localReadErrors.delete(path);
+        this.bumpRevision(path);
+      }).catch((e) => {
+        if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+        this.localReadErrors.set(path, e.message);
+        this.bumpRevision(path);
+      }).finally(() => this.requestedLocalReads.delete(task));
+      this.requestedLocalReads.add(task);
+      await task;
+      await budget.checkpoint(yieldToUi);
     }
   }
   /** Current Markdown path/mtime/size evidence without parsing note bodies. */
@@ -5492,17 +5527,40 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const fits = Object.values(PROFILES).filter((p) => !p.startTypes || p.startTypes.includes(type));
     new ViewPicker(this.app, fits, rec?.name ?? "this note", (p) => void this.explore([path], p)).open();
   }
+  /**
+   * Exact Local Model owners knowable from the core graph alone.
+   * null means the profile needs a vault-wide occurrence search to remain complete.
+   */
+  occurrenceOwnerPaths(profile, starts, baseDepths) {
+    const index = this.indexer.index;
+    switch (profile.name) {
+      case "Internal": {
+        const owner = starts[0];
+        return owner && index.notes.get(owner)?.type === "Object" ? [owner] : [];
+      }
+      case "Structure":
+        return [...baseDepths.entries()].filter(([path, depth]) => depth < profile.depth && index.notes.get(path)?.type === "Object").map(([path]) => path).sort();
+      case "Requirements": {
+        const owners = /* @__PURE__ */ new Set();
+        for (const requirementPath of starts) {
+          if (index.notes.get(requirementPath)?.type !== "Requirement") continue;
+          for (const ref of index.notes.get(requirementPath)?.localRefs ?? []) if (ref.field === "appliesTo") owners.add(ref.path);
+        }
+        return [...owners].sort();
+      }
+      // Interfaces may follow cross-owner local topology and definition starts; Where Used is
+      // inherently an inverse search across every hydrated owner. Keep both complete for now.
+      case "Interfaces":
+      case "Where Used":
+        return null;
+      default:
+        return [];
+    }
+  }
   async explore(starts, profile = STRUCTURE_PROFILE) {
     this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer;
-    await indexer.whenSourceSettled();
-    if (profileNeedsLocalOccurrences(profile)) {
-      this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements \xB7 loading occurrence data for ${profile.name}`);
-      await indexer.whenLocalSettled();
-      void this.markOccurrenceReady(indexer);
-      this.refreshRuntimeHealth();
-    }
     await indexer.whenSourceSettled();
     const index = indexer.index;
     const t0 = performance.now();
@@ -5514,6 +5572,18 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       }
     }
     const baseView = traverse(index, starts, profile);
+    if (profileNeedsLocalOccurrences(profile)) {
+      this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements \xB7 loading occurrence data for ${profile.name}`);
+      const owners = this.occurrenceOwnerPaths(profile, starts, baseView.depthOf);
+      if (owners === null) {
+        await indexer.whenLocalSettled();
+        void this.markOccurrenceReady(indexer);
+      } else {
+        await indexer.hydrateLocalOwners(owners);
+      }
+      this.refreshRuntimeHealth();
+    }
+    await indexer.whenSourceSettled();
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
     const view = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
@@ -5617,13 +5687,18 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
     await indexer.whenSourceSettled();
-    if (profileNeedsLocalOccurrences(profile)) {
-      await indexer.whenLocalSettled();
-      void this.markOccurrenceReady(indexer);
-    }
-    await indexer.whenSourceSettled();
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
+    if (profileNeedsLocalOccurrences(profile)) {
+      const owners = this.occurrenceOwnerPaths(profile, meta.starts, baseView.depthOf);
+      if (owners === null) {
+        await indexer.whenLocalSettled();
+        void this.markOccurrenceReady(indexer);
+      } else {
+        await indexer.hydrateLocalOwners(owners);
+      }
+    }
+    await indexer.whenSourceSettled();
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
     const current = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     const now = signature(current);
