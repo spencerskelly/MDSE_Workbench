@@ -64,7 +64,9 @@ export default class MdseWorkbench extends Plugin {
   private statusEl: HTMLElement | null = null;
   private cacheWriteTimer: number | null = null;
   private lastCacheWriteAt: number | null = null;
+  private lastCacheWriteMs: number | null = null;
   private lastCacheWriteError: string | null = null;
+  private lastStartupWaitMs: number | null = null;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
   private lastChange = Date.now();
   private unloaded = false;
@@ -224,6 +226,7 @@ export default class MdseWorkbench extends Plugin {
     const schema = this.schema;
     const indexer = this.indexer;
     if (!schema || !indexer || indexer.building || !indexer.stats) return;
+    const t0 = performance.now();
     try {
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
@@ -244,9 +247,11 @@ export default class MdseWorkbench extends Plugin {
         generation,
       );
       this.lastCacheWriteAt = Date.now();
+      this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = null;
     } catch (e) {
       // Cache is disposable. Failure is diagnostic only and never makes the model unavailable.
+      this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = (e as Error).message;
     }
   }
@@ -309,7 +314,9 @@ export default class MdseWorkbench extends Plugin {
       // On a large vault that first caching takes minutes; indexing alongside it made the app
       // look frozen (0.0.4). No fixed timeout: a slow vault just starts later.
       this.setRuntimeStatus("waiting");
+      const waitStarted = performance.now();
       await this.whenVaultQuiet();
+      this.lastStartupWaitMs = Math.round(performance.now() - waitStarted);
       if (this.unloaded) return;
     } else {
       this.indexer.setSchema(schema);
@@ -410,6 +417,7 @@ export default class MdseWorkbench extends Plugin {
       ["Notes with properties", String(s.notes)],
       ["Model notes", String(s.elements)],
       ["Authored links", String(s.links)],
+      ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
       ["Findings scan", `${this.lastFindingsMs} ms`],
       ["Missing inverses", String(f.missingInverse.length), f.missingInverse.length > 0],
@@ -422,6 +430,7 @@ export default class MdseWorkbench extends Plugin {
       ["Editing", editingBlocked(schema) ? "off (schema too old)" : "on", editingBlocked(schema)],
       ["Semantic cache mode", "save-only (warm restore disabled)"],
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
+      ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
     ];
     if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
     new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
