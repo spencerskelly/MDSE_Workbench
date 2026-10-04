@@ -5,8 +5,8 @@
  */
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
-import { serializeSemanticState } from "./core/cache";
-import { writeSemanticCacheGeneration } from "./core/cache-storage";
+import { planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
+import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
@@ -89,6 +89,7 @@ export default class MdseWorkbench extends Plugin {
     this.registerDetailClicks();
 
     this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => this.diagnostics() });
+    this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
     this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
     this.addCommand({
       id: "explore-structure",
@@ -322,6 +323,41 @@ export default class MdseWorkbench extends Plugin {
   /** Quiet version of ready(): no notice. Used by Review, which waits and retries. */
   private isReady(): boolean {
     return !!(this.schema && this.indexer && this.writer && !this.indexer.building && this.indexer.stats);
+  }
+
+  async inspectSemanticCache(): Promise<void> {
+    if (!this.schema || !this.indexer) {
+      new Notice("MDSE Workbench has not loaded the model schemas yet.");
+      return;
+    }
+    try {
+      const scope = { vaultUid: await this.loadVaultUid() };
+      const cache = await readSemanticCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
+      const restored = restoreSemanticState(cache, this.schema, scope);
+      const current = this.indexer.currentFingerprints();
+      const plan = planReconciliation(restored.fingerprints, current);
+      const mode = reconciliationMode(plan);
+      const localRecords = [...restored.local.regions.values()].reduce((n, region) => n + region.records.length, 0);
+      const rows: Array<[string, string, boolean?]> = [
+        ["Cache producer", cache.header.producerVersion],
+        ["Cache created", new Date(cache.header.createdAt).toLocaleString()],
+        ["Cached notes", String(restored.index.size)],
+        ["Cached Local Model records", String(localRecords)],
+        ["Unchanged paths", String(plan.unchanged.length)],
+        ["Changed paths", String(plan.changed.length)],
+        ["Added paths", String(plan.added.length), plan.added.length > 0],
+        ["Deleted paths", String(plan.deleted.length), plan.deleted.length > 0],
+        ["Safe next-start mode", mode],
+      ];
+      new ReportModal(this.app, "MDSE semantic cache", rows, [
+        "Inspection is read-only. Warm restore is still disabled; the vault remains authoritative.",
+        mode === "full" && (plan.added.length || plan.deleted.length)
+          ? "A path-set change can alter wikilink resolution, so the current safe policy requires a full rebuild."
+          : "",
+      ].filter(Boolean)).open();
+    } catch (e) {
+      new Notice(`Semantic cache is unavailable or invalid: ${(e as Error).message}`, 15000);
+    }
   }
 
   /** WB-111: read every Local Model region, run the WB-106 checks, write the report and open it. */
