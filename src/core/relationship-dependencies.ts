@@ -116,7 +116,16 @@ function removeReverseSource(index: Map<string, Set<string>>, keys: Set<string> 
 }
 
 function linkpathKeys(value: string): string[] {
-  const clean = value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\.md$/i, "");
+  // Candidate indexing is deliberately more permissive than authoritative Obsidian resolution.
+  // Normalize equivalent path spellings so targeted invalidation cannot miss a source merely
+  // because authored evidence includes an alias/fragment, Windows separators, .md, or case drift.
+  const withoutAlias = value.split("|", 1)[0];
+  const withoutFragment = withoutAlias.split("#", 1)[0];
+  const clean = withoutFragment
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\.md$/i, "")
+    .toLowerCase();
   if (!clean) return [];
   const slash = clean.lastIndexOf("/");
   const base = slash >= 0 ? clean.slice(slash + 1) : clean;
