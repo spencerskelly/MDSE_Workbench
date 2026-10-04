@@ -15,6 +15,7 @@ import {
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { ModelIndex, type NoteRecord } from "../src/core/model";
 import { fixtureSchema } from "./helpers";
+import { schemaSignature } from "../src/core/schema";
 
 const schema = fixtureSchema();
 const scope = { vaultUid: "20261003190000001skellyspencer" };
@@ -242,4 +243,14 @@ test("warm-start policy stays incremental only while the path set is stable", ()
   assert.equal(reconciliationMode({ unchanged: [], changed: [], added: [], deleted: ["B"] }), "full", "deleting/renaming a path can change wikilink resolution");
   assert.equal(reconciliationMode({ unchanged: [], changed: ["A", "B"], added: [], deleted: [] }, 1), "full", "large stable-path bursts use the proven full rebuild");
   assert.throws(() => reconciliationMode({ unchanged: [], changed: [], added: [], deleted: [] }, 0), /positive integer/);
+});
+
+
+test("schema signature ignores object identity but changes with parsed semantic rules", () => {
+  const a = fixtureSchema();
+  const b = fixtureSchema();
+  assert.equal(schemaSignature(a), schemaSignature(b));
+
+  const changed = { ...b, commonProperties: [...b.commonProperties, "newSemanticProperty"] };
+  assert.notEqual(schemaSignature(a), schemaSignature(changed));
 });
