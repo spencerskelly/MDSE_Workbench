@@ -59,6 +59,8 @@ interface RuntimeSample {
   coreMs: number;
   /** User-visible elapsed time from Workbench startup handoff to core model readiness. Optional for pre-W-360 local history. */
   timeToCoreReadyMs?: number | null;
+  /** User-visible elapsed time from Workbench startup handoff until occurrence data is fully usable. */
+  timeToOccurrenceReadyMs?: number | null;
   startupWaitMs: number | null;
   localHydrationMs: number | null;
   localCandidates: number;
@@ -102,6 +104,8 @@ export default class MdseWorkbench extends Plugin {
   private assurance: AssuranceManager | null = null;
   private lastStartupWaitMs: number | null = null;
   private lastTimeToCoreReadyMs: number | null = null;
+  private lastTimeToOccurrenceReadyMs: number | null = null;
+  private startupRunStartedAt: number | null = null;
   private startPromise: Promise<void> | null = null;
   private pendingRebuild = false;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
@@ -343,6 +347,7 @@ export default class MdseWorkbench extends Plugin {
       elements: stats.elements,
       coreMs: stats.ms,
       timeToCoreReadyMs: this.lastTimeToCoreReadyMs,
+      timeToOccurrenceReadyMs: this.lastTimeToOccurrenceReadyMs,
       startupWaitMs: this.lastStartupWaitMs,
       localHydrationMs: indexer.lastLocalHydrationMs,
       localCandidates: indexer.lastLocalHydrationCandidates,
@@ -352,12 +357,24 @@ export default class MdseWorkbench extends Plugin {
     await this.saveAll();
   }
 
+  private async markOccurrenceReady(indexer: Indexer): Promise<void> {
+    if (this.unloaded || this.indexer !== indexer || indexer.localHydrationPending > 0 || this.startupRunStartedAt === null) return;
+    this.lastTimeToOccurrenceReadyMs = Math.round(performance.now() - this.startupRunStartedAt);
+    const latest = this.runtimeHistory[this.runtimeHistory.length - 1];
+    if (latest) {
+      latest.timeToOccurrenceReadyMs = this.lastTimeToOccurrenceReadyMs;
+      latest.localHydrationMs = indexer.lastLocalHydrationMs;
+      latest.localCandidates = indexer.lastLocalHydrationCandidates;
+      await this.saveAll();
+    }
+  }
+
   private showRuntimeHistory(): void {
     const recent = this.runtimeHistory.slice(-10).reverse();
     const rows: Array<[string, string]> = recent.length
       ? recent.map((s) => [
           new Date(s.at).toLocaleString(),
-          `${s.mode} · ready ${s.timeToCoreReadyMs == null ? "n/a" : (s.timeToCoreReadyMs / 1000).toFixed(2) + " s"} · core ${(s.coreMs / 1000).toFixed(2)} s · Local ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1000).toFixed(2) + " s"} (${s.localCandidates}) · wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1000).toFixed(2) + " s"}`,
+          `${s.mode} · core ready ${s.timeToCoreReadyMs == null ? "n/a" : (s.timeToCoreReadyMs / 1000).toFixed(2) + " s"} · occurrence ready ${s.timeToOccurrenceReadyMs == null ? "pending/n/a" : (s.timeToOccurrenceReadyMs / 1000).toFixed(2) + " s"} · core work ${(s.coreMs / 1000).toFixed(2)} s · Local work ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1000).toFixed(2) + " s"} (${s.localCandidates}) · wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1000).toFixed(2) + " s"}`,
         ])
       : [["Runtime history", "No completed startup samples yet."]];
     new ReportModal(this.app, "MDSE Workbench runtime history", rows, [
@@ -390,6 +407,7 @@ export default class MdseWorkbench extends Plugin {
         .then(() => {
           if (this.unloaded || this.indexer !== indexer) return;
           this.lastOccurrenceError = null;
+          void this.markOccurrenceReady(indexer);
           this.refreshRuntimeHealth();
           this.scheduleSemanticCacheWrite();
         })
@@ -547,6 +565,11 @@ export default class MdseWorkbench extends Plugin {
     const runStartedAt = performance.now();
     this.lastCoreError = null;
     const firstStart = !this.indexer;
+    if (firstStart) {
+      this.startupRunStartedAt = runStartedAt;
+      this.lastTimeToCoreReadyMs = null;
+      this.lastTimeToOccurrenceReadyMs = null;
+    }
 
     // First-start safety gate comes before *all* model/schema I/O. Workbench commands and status
     // are already registered, while Obsidian keeps the startup lane until metadata resolution
@@ -679,6 +702,7 @@ export default class MdseWorkbench extends Plugin {
 
     this.lastTimeToCoreReadyMs = Math.round(performance.now() - runStartedAt);
     const localPending = indexer.localHydrationPending;
+    if (!localPending) this.lastTimeToOccurrenceReadyMs = this.lastTimeToCoreReadyMs;
     this.setRuntimeStatus(
       "ready",
       `${stats.elements} elements · ${stats.mode}${localPending ? ` · occurrence features loading later` : ""}`,
@@ -775,6 +799,7 @@ export default class MdseWorkbench extends Plugin {
     try {
       const indexer = this.indexer as Indexer;
       await indexer.whenLocalSettled();
+      void this.markOccurrenceReady(indexer);
       const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
       const scan = analyzeLocalModel(indexer.index, indexer.local, resolve);
       const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
@@ -828,6 +853,7 @@ export default class MdseWorkbench extends Plugin {
       ["Local Model read errors", String(this.indexer!.localReadErrorCount), this.indexer!.localReadErrorCount > 0],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
       ["Time to core ready", this.lastTimeToCoreReadyMs === null ? "not measured" : `${(this.lastTimeToCoreReadyMs / 1000).toFixed(2)} s`],
+      ["Time to occurrence ready", this.lastTimeToOccurrenceReadyMs === null ? (this.indexer!.localHydrationPending ? "pending" : "not measured") : `${(this.lastTimeToOccurrenceReadyMs / 1000).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
       ["Assurance snapshot", assurance.error
         ? `unavailable · ${assurance.ms} ms · revision ${assurance.revision}`
@@ -871,6 +897,7 @@ export default class MdseWorkbench extends Plugin {
     if (profileNeedsLocalOccurrences(profile)) {
       this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements · loading occurrence data for ${profile.name}`);
       await indexer.whenLocalSettled();
+      void this.markOccurrenceReady(indexer);
       this.refreshRuntimeHealth();
     }
     const index = indexer.index;
@@ -993,7 +1020,10 @@ export default class MdseWorkbench extends Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
-    if (profileNeedsLocalOccurrences(profile)) await indexer.whenLocalSettled();
+    if (profileNeedsLocalOccurrences(profile)) {
+      await indexer.whenLocalSettled();
+      void this.markOccurrenceReady(indexer);
+    }
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
