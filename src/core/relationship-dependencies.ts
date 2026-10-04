@@ -7,11 +7,12 @@
 /**
  * Conservative safety guard for targeted relationship re-resolution.
  *
- * Step 34 deliberately defines policy before Step 37 benchmarks representative vault-scale
- * add/delete/rename reconciliation. Candidate sets at or below this size stay targeted; larger
- * sets use the already-cooperative whole-graph path. Tune only from measured Step 37 evidence.
+ * Step 34 established the initial conservative policy. Step 37 measured representative 60k-note
+ * add/delete/rename reconciliation and confirmed a 10k candidate set retained a consistent
+ * >3x advantage over the cooperative whole-graph path. Candidate sets above this size fall back
+ * rather than extending into the lower-margin/noisier 20k region.
  */
-export const TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES = 5_000;
+export const TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES = 10_000;
 
 export function shouldUseFullRelationshipReresolution(candidateCount: number): boolean {
   return candidateCount > TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES;
