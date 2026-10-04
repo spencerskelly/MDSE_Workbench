@@ -22,6 +22,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: 60k semantic-cache scale smoke
+        run: npm run bench:cache -- 60000 25
       - run: npm run build
       - name: Record artifact hashes
         run: sha256sum main.js manifest.json styles.css > artifact-sha256.txt
