@@ -170,6 +170,12 @@ function canPublishCoreReady(state) {
   return state.publicationGate && state.schemaLoaded && state.writerReady && state.statsAvailable && !state.sourceReconciliationPending && !state.building;
 }
 
+// src/core/startup-recovery.ts
+async function recoverWithColdBuild(discardProvisionalState, coldBuild) {
+  await discardProvisionalState();
+  return await coldBuild();
+}
+
 // src/core/cache-size.ts
 async function cacheTreeSizeBytes(storage, root) {
   let total = 0;
@@ -3194,6 +3200,58 @@ var Indexer = class {
     this.cacheDirtyPaths.clear();
     this.bumpRevision();
   }
+  /**
+   * Drop any provisional restored/reconciled semantic state before the recovery cold build.
+   *
+   * Warm restore is an optimization only. If it fails or loses its reconciliation race, no
+   * restored graph, reverse dependency evidence, fingerprints, Local Model state, or readiness
+   * statistics may remain observable while authoritative Markdown is rebuilt cooperatively.
+   */
+  async discardProvisionalSemanticState() {
+    this.liveChanges = false;
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.liveApplyTimer !== null) {
+      window.clearTimeout(this.liveApplyTimer);
+      this.liveApplyTimer = null;
+    }
+    if (this.relationshipResolveTimer !== null) {
+      window.clearTimeout(this.relationshipResolveTimer);
+      this.relationshipResolveTimer = null;
+    }
+    this.relationshipResolvePending = false;
+    this.relationshipPathChanges.clear();
+    const active = [];
+    if (this.liveApplyTask) active.push(this.liveApplyTask);
+    if (this.relationshipResolveTask) active.push(this.relationshipResolveTask);
+    if (active.length) await Promise.allSettled(active);
+    this.cancelOccurrenceHydration();
+    this.hydrationEpoch++;
+    this.localRevision.clear();
+    this.index = new ModelIndex(this.schema);
+    this.relationshipDependencies.clear();
+    this.relationshipReresolutionHistoryValue = [];
+    this.local = new LocalModelIndex();
+    this.hydrationCosts.clear();
+    this.coldLocalPaths.clear();
+    this.localRetentionOrder.clear();
+    this.localRetentionClock = 0;
+    this.deferredHydrationPaths = [];
+    this.deferredHydrationEpoch = this.hydrationEpoch;
+    this.hydrationRemaining = 0;
+    this.lastHydrationMsValue = null;
+    this.lastHydrationCandidatesValue = 0;
+    this.localReadErrors.clear();
+    this.fingerprints.clear();
+    this.dirty.clear();
+    this.livePending.clear();
+    this.cacheDirtyPaths.clear();
+    this.stats = null;
+    this.metadataBurst.reset();
+    this.bumpRevision();
+  }
   relationshipDependentsOf(paths) {
     return this.relationshipDependencies.dependentsOf(paths);
   }
@@ -6044,9 +6102,14 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       }
     }
     if (!stats) {
-      indexer.enableLiveChanges();
       this.setRuntimeStatus("indexing");
-      stats = await indexer.build();
+      stats = await recoverWithColdBuild(
+        () => indexer.discardProvisionalSemanticState(),
+        async () => {
+          indexer.enableLiveChanges();
+          return await indexer.build();
+        }
+      );
     }
     await indexer.whenSourceSettled();
     if (!indexer.stats) throw new Error("Core source reconciliation settled without publishable index statistics.");
