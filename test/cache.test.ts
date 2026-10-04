@@ -72,8 +72,8 @@ function state() {
   const local = new LocalModelIndex();
   local.set("Assembly.md", parseLocalModel(localText()));
   const fingerprints = new Map<string, FileFingerprint>([
-    ["Assembly.md", { mtime: 1234, size: 5678, hash: "abc" }],
-    ["Target.md", { mtime: 1235, size: 42 }],
+    ["Assembly.md", { ctime: 1200, mtime: 1234, size: 5678, hash: "abc" }],
+    ["Target.md", { ctime: 1201, mtime: 1235, size: 42 }],
   ]);
   return { index, local, fingerprints };
 }
@@ -102,7 +102,7 @@ test("semantic cache JSON round-trip restores notes, edges, maps, Local Model an
   assert.equal(records[1].part?.blockId, P);
   assert.equal(records[1].endpointKind, "data");
 
-  assert.deepEqual(restored.fingerprints.get("Assembly.md"), { mtime: 1234, size: 5678, hash: "abc" });
+  assert.deepEqual(restored.fingerprints.get("Assembly.md"), { ctime: 1200, mtime: 1234, size: 5678, hash: "abc" });
 });
 
 test("cache compatibility is exact for format and semantic parser/schema inputs", () => {
@@ -219,16 +219,16 @@ test("invalid shard sizing and empty generation are refused before anything can 
 
 test("warm-start reconciliation identifies unchanged, changed, added and deleted files deterministically", () => {
   const cached = new Map([
-    ["A.md", { mtime: 1, size: 10 }],
-    ["B.md", { mtime: 2, size: 20, hash: "same" }],
-    ["C.md", { mtime: 3, size: 30 }],
-    ["Gone.md", { mtime: 4, size: 40 }],
+    ["A.md", { ctime: 1, mtime: 1, size: 10 }],
+    ["B.md", { ctime: 2, mtime: 2, size: 20, hash: "same" }],
+    ["C.md", { ctime: 3, mtime: 3, size: 30 }],
+    ["Gone.md", { ctime: 4, mtime: 4, size: 40 }],
   ]);
   const current = new Map([
-    ["A.md", { mtime: 1, size: 10 }],
-    ["B.md", { mtime: 2, size: 20, hash: "different" }],
-    ["C.md", { mtime: 99, size: 30 }],
-    ["New.md", { mtime: 5, size: 50 }],
+    ["A.md", { ctime: 1, mtime: 1, size: 10 }],
+    ["B.md", { ctime: 2, mtime: 2, size: 20, hash: "different" }],
+    ["C.md", { ctime: 99, mtime: 99, size: 30 }],
+    ["New.md", { ctime: 5, mtime: 5, size: 50 }],
   ]);
 
   assert.deepEqual(planReconciliation(cached, current), {
