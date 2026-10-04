@@ -904,7 +904,9 @@ function planLocalRecordDelete(text, localId) {
   const editable = editableLocalRegion(text);
   const record = editable.region.records.find((candidate) => candidate.localId === localId);
   if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
-  if (record.kind !== "part") throw new Error("This deletion slice supports part occurrences only.");
+  if (record.kind !== "part" && record.kind !== "endpoint") {
+    throw new Error("This deletion slice supports part and endpoint occurrences only.");
+  }
   const impacts = [];
   for (const source of editable.region.records) {
     if (source.localId === localId) continue;
@@ -1190,7 +1192,7 @@ var ModelEditService = class {
     const uid = this.ownerUid(path);
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
     const txId = `local-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
-    const label = `delete part ${plan.identifier}`;
+    const label = `delete ${plan.kind} ${plan.identifier}`;
     this.transactions.begin(txId, label, "structural");
     const transaction = this.transactions.add(txId, {
       id: txId + "-delete",
@@ -4833,11 +4835,12 @@ var LocalPartCreateModal = class extends import_obsidian3.Modal {
     };
   }
 };
-var LocalPartDeleteModal = class extends import_obsidian3.Modal {
-  constructor(app, ownerName, occurrenceName, stage, apply, cancel, onApplied) {
+var LocalOccurrenceDeleteModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, occurrenceName, occurrenceKind, stage, apply, cancel, onApplied) {
     super(app);
     this.ownerName = ownerName;
     this.occurrenceName = occurrenceName;
+    this.occurrenceKind = occurrenceKind;
     this.stage = stage;
     this.apply = apply;
     this.cancel = cancel;
@@ -4846,7 +4849,7 @@ var LocalPartDeleteModal = class extends import_obsidian3.Modal {
     this.applied = false;
   }
   onOpen() {
-    this.titleEl.setText("Review part occurrence deletion");
+    this.titleEl.setText(`Review ${this.occurrenceKind} occurrence deletion`);
     void this.load();
   }
   onClose() {
@@ -4940,7 +4943,7 @@ var LocalPartDeleteModal = class extends import_obsidian3.Modal {
           this.staged = null;
           this.close();
           this.onApplied();
-          new import_obsidian3.Notice(`Deleted part occurrence ${this.occurrenceName}.`, 5e3);
+          new import_obsidian3.Notice(`Deleted ${this.occurrenceKind} occurrence ${this.occurrenceName}.`, 5e3);
         } catch (e) {
           new import_obsidian3.Notice(`Not deleted: ${e.message}`, 12e3);
           apply.disabled = false;
@@ -5381,8 +5384,10 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     if (this.editing && record.kind === "part") {
       const addEndpoint = head.createEl("button", { text: "Add endpoint\u2026", cls: "mdse-detail-btn" });
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
-      const deletePart = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
-      deletePart.onclick = () => this.deletePartOccurrence(file, record);
+    }
+    if (this.editing && (record.kind === "part" || record.kind === "endpoint")) {
+      const deleteOccurrence = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
+      deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
     }
     const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
     owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
@@ -5496,14 +5501,16 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       new import_obsidian4.Notice(`Cannot create endpoint: ${e.message}`, 12e3);
     }
   }
-  deletePartOccurrence(file, record) {
+  deleteOccurrence(file, record) {
+    if (record.kind !== "part" && record.kind !== "endpoint") return;
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
-      new LocalPartDeleteModal(
+      new LocalOccurrenceDeleteModal(
         this.app,
         file.basename,
         record.identifier,
+        record.kind,
         () => editor.stageLocalRecordDelete(file.path, record.localId),
         (transactionId) => editor.applyLocalDelete(transactionId),
         (transactionId) => {
