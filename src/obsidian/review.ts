@@ -84,6 +84,14 @@ export class ReviewView extends ItemView {
       return;
     }
     const snapshot = await this.host.assurance(force);
+    if (snapshot.error) {
+      this.contentEl.empty();
+      this.contentEl.createEl("h3", { text: "Review" });
+      this.contentEl.createEl("p", { text: "Global assurance is temporarily unavailable. The core model and ordinary notes remain usable.", cls: "mdse-warn" });
+      this.contentEl.createEl("p", { text: snapshot.error, cls: "mdse-muted" });
+      this.contentEl.createEl("button", { text: "Retry assurance" }).onclick = () => void this.refresh(true);
+      return;
+    }
     this.all = snapshot.all;
     this.resolved.clear();
     this.render();
