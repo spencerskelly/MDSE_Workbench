@@ -11,7 +11,7 @@ import { schemaSignature, type Schema } from "./schema";
 
 export const CACHE_FORMAT_VERSION = 1;
 /** Bump when semantic parsing/resolution meaning changes even if the JSON shape does not. */
-export const CACHE_SEMANTIC_VERSION = 2;
+export const CACHE_SEMANTIC_VERSION = 3;
 
 export interface CacheScope {
   /** Binds disposable state to one initialized MDSE vault identity. */
@@ -20,6 +20,8 @@ export interface CacheScope {
 
 /** Cheap evidence used to decide which files require reconciliation after warm restore. */
 export interface FileFingerprint {
+  /** Filesystem creation/change time from Obsidian FileStats; paired with mtime+size for cheap warm-start evidence. */
+  ctime: number;
   mtime: number;
   size: number;
   /** Optional stronger evidence for callers that cannot trust mtime/size alone. */
@@ -344,7 +346,7 @@ function strictNullableString(v: unknown, field: string): string | null {
   throw new Error(`Malformed Local Model ${field} cache entry.`);
 }
 const isLocalKind = (v: unknown): v is LocalRecord["kind"] => v === "part" || v === "endpoint" || v === "connection" || v === "flow";
-const isFingerprint = (v: unknown): v is FileFingerprint => isObject(v) && typeof v.mtime === "number" && typeof v.size === "number" && (v.hash === undefined || typeof v.hash === "string");
+const isFingerprint = (v: unknown): v is FileFingerprint => isObject(v) && typeof v.ctime === "number" && typeof v.mtime === "number" && typeof v.size === "number" && (v.hash === undefined || typeof v.hash === "string");
 const isLink = (v: unknown): v is LinkRef => isObject(v) && typeof v.text === "string" && typeof v.target === "string" && typeof v.blockId === "string" && (v.alias === undefined || typeof v.alias === "string");
 function strictLinkOrNull(v: unknown, field: string): LinkRef | null {
   if (v === null) return null;
@@ -535,7 +537,7 @@ export function planReconciliation(
       added.push(path);
       continue;
     }
-    const basicSame = before.mtime === now.mtime && before.size === now.size;
+    const basicSame = before.ctime === now.ctime && before.mtime === now.mtime && before.size === now.size;
     const hashSame = before.hash !== undefined && now.hash !== undefined ? before.hash === now.hash : true;
     (basicSame && hashSame ? unchanged : changed).push(path);
   }
