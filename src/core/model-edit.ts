@@ -175,7 +175,7 @@ export class ModelEditService {
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
 
     const txId = `local-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
-    const label = `delete part ${plan.identifier}`;
+    const label = `delete ${plan.kind} ${plan.identifier}`;
     this.transactions.begin(txId, label, "structural");
     const transaction = this.transactions.add(txId, {
       id: txId + "-delete",
