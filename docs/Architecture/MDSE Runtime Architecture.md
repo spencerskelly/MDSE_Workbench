@@ -61,7 +61,7 @@ The cache must:
 - have explicit storage-format and semantic-parser contract versions;
 - bind to the initialized `vault_uid`;
 - record relationship/element schema versions **and** a deterministic signature of the parsed schema semantics, so an accidental rule change without a version bump cannot silently reuse stale state;
-- retain file fingerprints sufficient to identify changed files;
+- retain cheap file fingerprints sufficient to identify changed files: semantic-cache v3 uses Obsidian FileStats ctime + mtime + size, with optional stronger content hashes available for future edge cases;
 - be sharded or otherwise bounded rather than one fragile monolithic file at large model sizes;
 - use two bounded A/B commit slots with generation tokens: shards are written first, the slot manifest last, and the opposite slot remains a complete fallback if a write is interrupted;
 - order committed cache slots with a monotonic local sequence number rather than wall-clock time, so clock rollback cannot make an older generation appear newer;
@@ -72,7 +72,7 @@ When compatibility is uncertain, Workbench discards the cache and rebuilds it.
 
 ## Incremental reconciliation
 
-For each indexed Markdown file, Workbench retains lightweight change evidence such as path, modification time, size and—where required—a content fingerprint.
+For each indexed Markdown file, Workbench retains lightweight change evidence: path plus Obsidian FileStats ctime, mtime and size. An optional content hash remains available where a future environment demonstrates that filesystem timestamps are insufficient.
 
 On warm startup:
 
@@ -253,7 +253,7 @@ Targets are acceptance budgets, not promises until measured on the real model.
 RTA-1 is implemented at source level: Workbench exposes explicit startup/indexing/ready status and retains the current chunked full rebuild as the safe fallback.
 
 RTA-2 foundation is implemented through the save-only runtime boundary, and RTA-3 has advanced into bounded warm-reconciliation preview:
-- `src/core/cache.ts` defines cache format v1 plus semantic-parser contract v2, vault binding, parsed-schema semantic signatures, deterministic serialization/restoration, bounded note/Local Model shards, corruption refusal, file-fingerprint reconciliation planning and the bounded reconciliation policy;
+- `src/core/cache.ts` defines cache format v1 plus semantic-parser contract v3, vault binding, parsed-schema semantic signatures, deterministic serialization/restoration, bounded note/Local Model shards, corruption refusal, ctime+mtime+size reconciliation fingerprints and the bounded reconciliation policy;
 - `src/core/cache-storage.ts` uses two fixed A/B slots with unique generation tokens. Each target slot writes shards first and its manifest last; a partial/torn target slot cannot displace the opposite complete slot, disk usage is bounded, and a monotonic commit sequence prevents system-clock rollback from selecting stale cache state;
 - `src/obsidian/cache.ts` is the thin Obsidian storage adapter;
 - Workbench now writes the cache **after it is already Ready**, after a short quiet period. Cache-write failure is diagnostic only and cannot make the model unavailable;
