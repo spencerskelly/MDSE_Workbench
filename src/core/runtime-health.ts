@@ -90,10 +90,12 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
   if (pending > 0) {
     return {
       level: "syncing",
-      label: `Workbench · syncing ${pending}`,
+      label: input.livePending
+        ? `Workbench ✓ · applying ${input.livePending}`
+        : "Workbench ✓ · occurrence data loading",
       detail: input.livePending
-        ? "Core model is usable while coalesced live edits and Local Model hydration finish."
-        : "Core model is ready while Local Model hydration finishes in the background.",
+        ? "Core model remains usable while coalesced live edits finish."
+        : "Core model is ready; occurrence-aware capabilities are loading in the background.",
       rows,
     };
   }
