@@ -446,3 +446,40 @@ function isDiskManifest(v: unknown): v is CacheDiskManifest {
 function isShardSet(v: unknown): v is CacheShardSet {
   return isObject(v) && Number.isInteger(v.count) && Number.isInteger(v.total) && (v.count as number) >= 0 && (v.total as number) >= 0;
 }
+
+
+export interface ReconciliationPlan {
+  unchanged: string[];
+  changed: string[];
+  added: string[];
+  deleted: string[];
+}
+
+/**
+ * Compare cached file evidence with the current vault without reading model bodies.
+ * A hash is authoritative when both sides provide one; otherwise mtime+size is the cheap
+ * warm-start discriminator. Callers may choose to add hashes for suspicious/coarse filesystems.
+ */
+export function planReconciliation(
+  cached: ReadonlyMap<string, FileFingerprint>,
+  current: ReadonlyMap<string, FileFingerprint>,
+): ReconciliationPlan {
+  const unchanged: string[] = [];
+  const changed: string[] = [];
+  const added: string[] = [];
+  const deleted: string[] = [];
+
+  for (const path of [...current.keys()].sort()) {
+    const now = current.get(path) as FileFingerprint;
+    const before = cached.get(path);
+    if (!before) {
+      added.push(path);
+      continue;
+    }
+    const basicSame = before.mtime === now.mtime && before.size === now.size;
+    const hashSame = before.hash !== undefined && now.hash !== undefined ? before.hash === now.hash : true;
+    (basicSame && hashSame ? unchanged : changed).push(path);
+  }
+  for (const path of [...cached.keys()].sort()) if (!current.has(path)) deleted.push(path);
+  return { unchanged, changed, added, deleted };
+}
