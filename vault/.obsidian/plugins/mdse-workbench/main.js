@@ -786,7 +786,7 @@ function schemaSignature(schema) {
 
 // src/core/cache.ts
 var CACHE_FORMAT_VERSION = 1;
-var CACHE_SEMANTIC_VERSION = 2;
+var CACHE_SEMANTIC_VERSION = 3;
 function expectedCompatibility(schema, scope) {
   return {
     formatVersion: CACHE_FORMAT_VERSION,
@@ -1019,7 +1019,7 @@ function strictNullableString(v, field) {
   throw new Error(`Malformed Local Model ${field} cache entry.`);
 }
 var isLocalKind = (v) => v === "part" || v === "endpoint" || v === "connection" || v === "flow";
-var isFingerprint = (v) => isObject(v) && typeof v.mtime === "number" && typeof v.size === "number" && (v.hash === void 0 || typeof v.hash === "string");
+var isFingerprint = (v) => isObject(v) && typeof v.ctime === "number" && typeof v.mtime === "number" && typeof v.size === "number" && (v.hash === void 0 || typeof v.hash === "string");
 var isLink = (v) => isObject(v) && typeof v.text === "string" && typeof v.target === "string" && typeof v.blockId === "string" && (v.alias === void 0 || typeof v.alias === "string");
 function strictLinkOrNull(v, field) {
   if (v === null) return null;
@@ -1130,7 +1130,7 @@ function planReconciliation(cached, current) {
       added.push(path);
       continue;
     }
-    const basicSame = before.mtime === now.mtime && before.size === now.size;
+    const basicSame = before.ctime === now.ctime && before.mtime === now.mtime && before.size === now.size;
     const hashSame = before.hash !== void 0 && now.hash !== void 0 ? before.hash === now.hash : true;
     (basicSame && hashSame ? unchanged : changed).push(path);
   }
@@ -2233,7 +2233,7 @@ var Indexer = class {
   currentFingerprints() {
     const out = /* @__PURE__ */ new Map();
     for (const file of this.app.vault.getMarkdownFiles()) {
-      out.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
+      out.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
     }
     return out;
   }
@@ -2397,7 +2397,7 @@ var Indexer = class {
   }
   /** Awaited variant used by controlled startup reconciliation. */
   async applyAwaited(path, file) {
-    this.fingerprints.set(path, { mtime: file.stat.mtime, size: file.stat.size });
+    this.fingerprints.set(path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
     const rec = this.record(file);
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
@@ -2424,7 +2424,7 @@ var Indexer = class {
     const fingerprints = /* @__PURE__ */ new Map();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      fingerprints.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
+      fingerprints.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
       const rec = this.record(file);
       if (rec) index.upsert(rec);
       if (this.mayHaveLocalModel(file)) local.set(file.path, parseLocalModel(await this.app.vault.cachedRead(file)));
@@ -2445,7 +2445,7 @@ var Indexer = class {
   }
   apply(path) {
     const f = this.app.vault.getAbstractFileByPath(path);
-    if (f instanceof import_obsidian.TFile && f.extension === "md") this.fingerprints.set(path, { mtime: f.stat.mtime, size: f.stat.size });
+    if (f instanceof import_obsidian.TFile && f.extension === "md") this.fingerprints.set(path, { ctime: f.stat.ctime, mtime: f.stat.mtime, size: f.stat.size });
     else this.fingerprints.delete(path);
     const rec = f instanceof import_obsidian.TFile ? this.record(f) : null;
     if (rec) this.index.upsert(rec);
