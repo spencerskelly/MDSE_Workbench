@@ -189,12 +189,13 @@ async function readSlot(
   return joinSemanticCache(manifest, fingerprintShards, noteShards, localShards);
 }
 
-async function writeShardIfChanged(
+async function writeShardIfChanged<T extends { generation: string; index: number }>(
   storage: CacheStorage,
   path: string,
-  desired: { generation: string; index: number; [key: string]: unknown },
+  desired: T,
   payloadKey: "fingerprints" | "notes" | "localRegions",
 ): Promise<string> {
+  const desiredPayload = (desired as unknown as Record<string, unknown>)[payloadKey];
   try {
     const existing = JSON.parse(await storage.read(path)) as unknown;
     if (
@@ -203,7 +204,8 @@ async function writeShardIfChanged(
       typeof existing.index === "number" &&
       existing.index === desired.index &&
       Array.isArray(existing[payloadKey]) &&
-      JSON.stringify(existing[payloadKey]) === JSON.stringify(desired[payloadKey])
+      Array.isArray(desiredPayload) &&
+      JSON.stringify(existing[payloadKey]) === JSON.stringify(desiredPayload)
     ) {
       assertGeneration(existing.generation);
       return existing.generation;
