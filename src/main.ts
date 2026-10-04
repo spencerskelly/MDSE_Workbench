@@ -235,6 +235,7 @@ export default class MdseWorkbench extends Plugin {
     if (!schema || !indexer || indexer.building || !indexer.stats) return;
     const t0 = performance.now();
     try {
+      await indexer.whenLocalSettled();
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
       const cache = serializeSemanticState(
@@ -484,6 +485,7 @@ export default class MdseWorkbench extends Plugin {
     const notice = new Notice("MDSE Workbench: checking Local Model…", 0);
     try {
       const indexer = this.indexer as Indexer;
+      await indexer.whenLocalSettled();
       const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
       const scan = analyzeLocalModel(indexer.index, indexer.local, resolve);
       const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
@@ -560,7 +562,9 @@ export default class MdseWorkbench extends Plugin {
 
   async explore(starts: string[], profile: ViewProfile = STRUCTURE_PROFILE): Promise<void> {
     if (!this.ready()) return;
-    const index = this.indexer!.index;
+    const indexer = this.indexer as Indexer;
+    await indexer.whenLocalSettled();
+    const index = indexer.index;
     const t0 = performance.now();
     if (profile.startTypes) {
       const type = index.notes.get(starts[0])?.type ?? "";
@@ -571,7 +575,7 @@ export default class MdseWorkbench extends Plugin {
     }
     const baseView = traverse(index, starts, profile);
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
-    const view = withLocalOccurrences(index, this.indexer!.local, resolve, baseView, profile);
+    const view = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
       new Notice(`Nothing to show: this note has no links the ${profile.name} view follows (${[...new Set(profile.steps.map((s) => s.field))].join(", ")}).`);
       return;
@@ -672,6 +676,8 @@ export default class MdseWorkbench extends Plugin {
 
   async checkView(): Promise<void> {
     if (!this.ready()) return;
+    const indexer = this.indexer as Indexer;
+    await indexer.whenLocalSettled();
     const f = this.app.workspace.getActiveFile();
     const meta = f ? this.views[f.path] : undefined;
     if (!f || !meta) {
@@ -679,10 +685,10 @@ export default class MdseWorkbench extends Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
-    const index = this.indexer!.index;
+    const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
-    const current = withLocalOccurrences(index, this.indexer!.local, resolve, baseView, profile);
+    const current = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
     const now = signature(current);
     if (now === meta.signature) new Notice("This view is current.");
     else
