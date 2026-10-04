@@ -5557,6 +5557,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.integrationProbe = null;
     this.integrationPluginLoadedAt = null;
     this.integrationMetadataResolvedAt = null;
+    this.integrationMetadataCoverageAt = null;
     this.unloaded = false;
   }
   async onload() {
@@ -5762,6 +5763,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       readableSource,
       metadataResolvedAt,
       metadataResolutionSource,
+      metadataCoverageReadyAt: this.integrationMetadataCoverageAt,
+      launchToMetadataCoverageMs: this.integrationMetadataCoverageAt === null ? null : this.integrationMetadataCoverageAt - probe.launchStartedAt,
       coreReadyAt,
       occurrenceReadyAt: this.indexer?.localHydrationPending ? null : coreReadyAt,
       cacheReadyAt: null,
@@ -5891,13 +5894,23 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
    */
   async whenVaultQuiet() {
     while (!this.unloaded) {
-      if (this.metadataResolved) {
-        await new Promise((r) => window.setTimeout(r, CORE_AFTER_METADATA_DELAY_MS));
-        return;
-      }
-      if (Date.now() - this.lastChange >= QUIET_START_MS) return;
+      if (this.metadataResolved || Date.now() - this.lastChange >= QUIET_START_MS) break;
       await new Promise((r) => window.setTimeout(r, 250));
     }
+    if (this.unloaded) return;
+    const pending = new Set(this.app.vault.getMarkdownFiles().map((file) => file.path));
+    while (!this.unloaded && pending.size) {
+      for (const path of [...pending]) {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof import_obsidian8.TFile) || file.extension !== "md" || this.app.metadataCache.getFileCache(file)) {
+          pending.delete(path);
+        }
+      }
+      if (pending.size) await new Promise((r) => window.setTimeout(r, 250));
+    }
+    if (this.unloaded) return;
+    if (this.integrationProbe) this.integrationMetadataCoverageAt = Date.now();
+    await new Promise((r) => window.setTimeout(r, CORE_AFTER_METADATA_DELAY_MS));
   }
   async saveAll() {
     await this.saveData({ settings: this.settings, views: this.views, runtimeHistory: this.runtimeHistory });
