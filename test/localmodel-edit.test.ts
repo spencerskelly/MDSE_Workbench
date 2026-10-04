@@ -7,6 +7,7 @@ const tokenA = "20261003133512742skellyspencer";
 const tokenB = "20261003133512743skellyspencer";
 const tokenC = "20261003133512744skellyspencer";
 const tokenD = "20261003133512745skellyspencer";
+const tokenE = "20261003133512746skellyspencer";
 
 function note(version = "0.2"): string {
   return [
@@ -69,7 +70,7 @@ test("patches one part without changing identity or surrounding narrative", () =
   assert.match(result.after, /#### K2\n- definition: \[\[Main Contactor\]\]\n- usage: variant/);
   assert.match(result.after, /Narrative before\./);
   assert.match(result.after, /Narrative after\./);
-  assert.equal((result.after.match(new RegExp(id, "g")) ?? []).length, 1);
+  assert.equal((result.after.match(new RegExp("^\\^" + id + "$", "gm")) ?? []).length, 1, "the native block ID is declared once; links may legitimately reference it");
   assert.equal(parseLocalModel(result.after)?.structured, true);
 });
 
@@ -133,8 +134,8 @@ test("creates a first governed region using importer-compatible section formatti
 });
 
 test("creates a missing section in canonical order", () => {
-  const id = "endpoint-" + tokenC;
-  const endpointId = "ep-" + tokenC;
+  const id = "endpoint-" + tokenE;
+  const endpointId = "ep-" + tokenE;
   const result = planLocalRecordCreate(note(), {
     kind: "endpoint",
     localId: endpointId,
