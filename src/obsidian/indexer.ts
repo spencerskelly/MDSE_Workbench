@@ -73,6 +73,8 @@ export class Indexer {
   /** Remaining owners in the active bulk hydration; retained so cancellation can requeue them. */
   private activeHydrationPaths: string[] = [];
   private deferredHydrationPaths: string[] = [];
+  /** Evicted occurrence regions stay cold until an explicit occurrence consumer asks for them. */
+  private readonly coldLocalPaths = new Set<string>();
   private deferredHydrationEpoch = 0;
   /** Background occurrence hydration pauses while foreground activity resumes; explicit consumers promote it. */
   private hydrationDemanded = false;
@@ -186,7 +188,7 @@ export class Indexer {
   }
 
   private removeLocalRegion(path: string): void {
-    this.removeLocalRegion(path);
+    this.local.remove(path);
     this.localRetentionOrder.delete(path);
   }
 
@@ -199,14 +201,11 @@ export class Indexer {
       .sort((a, b) => (this.localRetentionOrder.get(a) ?? 0) - (this.localRetentionOrder.get(b) ?? 0) || a.localeCompare(b));
     const evict = localRegionEvictions(ordered, new Set(protectedPaths), limit);
     if (!evict.length) return 0;
-    const deferred = new Set(this.deferredHydrationPaths);
     for (const path of evict) {
       this.removeLocalRegion(path);
       const file = this.app.vault.getAbstractFileByPath(path);
-      if (file instanceof TFile && file.extension === "md" && this.mayHaveLocalModel(file)) deferred.add(path);
+      if (file instanceof TFile && file.extension === "md" && this.mayHaveLocalModel(file)) this.coldLocalPaths.add(path);
     }
-    this.deferredHydrationPaths = [...deferred].sort();
-    this.deferredHydrationEpoch = this.hydrationEpoch;
     return evict.length;
   }
 
@@ -286,6 +285,11 @@ export class Indexer {
    *   priority from resumed foreground activity.
    */
   async whenLocalSettled(demanded = true): Promise<void> {
+    if (demanded && this.coldLocalPaths.size) {
+      this.deferredHydrationPaths = requeueHydrationPaths(this.deferredHydrationPaths, [...this.coldLocalPaths]);
+      this.coldLocalPaths.clear();
+      this.deferredHydrationEpoch = this.hydrationEpoch;
+    }
     this.beginDeferredLocalHydration(!demanded);
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work: Promise<unknown>[] = [...this.pendingLocalReads];
@@ -309,6 +313,7 @@ export class Indexer {
     while (true) {
       const wanted = new Set(unique);
       this.deferredHydrationPaths = this.deferredHydrationPaths.filter((path) => !wanted.has(path));
+      for (const path of wanted) this.coldLocalPaths.delete(path);
       const epoch = this.hydrationEpoch;
       const budget = new CooperativeBudget(WORK_SLICE_MS);
 
@@ -374,6 +379,7 @@ export class Indexer {
     this.requestedHydrationFlights.clear();
     this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
+    this.coldLocalPaths.clear();
     this.localRetentionOrder.clear();
     this.localRetentionClock = 0;
     this.deferredHydrationPaths = this.app.vault.getMarkdownFiles()
