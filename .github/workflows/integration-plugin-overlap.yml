@@ -87,7 +87,8 @@ jobs:
         run: |
           node <<'NODE'
           const fs=require("fs"), path=require("path");
-          const ids=["baseline","nodian","breadcrumbs","dataview","fileclass","advanced-canvas"];
+          const ids=["warmup","baseline-start","nodian","breadcrumbs","dataview","fileclass","advanced-canvas","baseline-end"];
+          const candidates=["nodian","breadcrumbs","dataview","fileclass","advanced-canvas"];
           const versions={nodian:"1.4.14",breadcrumbs:"4.21.11",dataview:"0.5.68",fileclass:"0.2.15","advanced-canvas":"7.0.0"};
           const rows={};
           for(const id of ids){
@@ -96,17 +97,25 @@ jobs:
               capability:JSON.parse(fs.readFileSync(path.join(process.env.RESULTS,id+"-capability.json"),"utf8")),
             };
           }
-          const b=rows.baseline.startup;
-          const comparison=ids.map(id=>{
+          const start=rows["baseline-start"].startup;
+          const end=rows["baseline-end"].startup;
+          const baseline={
+            readableMs:Math.round((start.launchToReadableMs+end.launchToReadableMs)/2),
+            coreReadyMs:Math.round((start.launchToCoreReadyMs+end.launchToCoreReadyMs)/2),
+            occurrenceReadyMs:Math.round((start.launchToOccurrenceReadyMs+end.launchToOccurrenceReadyMs)/2),
+            start:{readableMs:start.launchToReadableMs,coreReadyMs:start.launchToCoreReadyMs,occurrenceReadyMs:start.launchToOccurrenceReadyMs},
+            end:{readableMs:end.launchToReadableMs,coreReadyMs:end.launchToCoreReadyMs,occurrenceReadyMs:end.launchToOccurrenceReadyMs},
+          };
+          const comparison=candidates.map(id=>{
             const r=rows[id].startup;
             return {
               id,
-              version:versions[id]||null,
+              version:versions[id],
               readableMs:r.launchToReadableMs,
               coreReadyMs:r.launchToCoreReadyMs,
               occurrenceReadyMs:r.launchToOccurrenceReadyMs,
-              coreDeltaMs:r.launchToCoreReadyMs-b.launchToCoreReadyMs,
-              occurrenceDeltaMs:r.launchToOccurrenceReadyMs-b.launchToOccurrenceReadyMs,
+              coreDeltaMs:r.launchToCoreReadyMs-baseline.coreReadyMs,
+              occurrenceDeltaMs:r.launchToOccurrenceReadyMs-baseline.occurrenceReadyMs,
               files:r.files,
               elements:r.elements,
               links:r.links,
@@ -114,7 +123,13 @@ jobs:
               candidateEnabled:rows[id].capability.candidateEnabled,
             };
           });
-          fs.writeFileSync("plugin-overlap-comparison.json",JSON.stringify({baseline:"Workbench only",noteCount:Number(process.env.NOTE_COUNT),comparison},null,2)+"\n");
+          fs.writeFileSync("plugin-overlap-comparison.json",JSON.stringify({
+            baseline:"mean of warmed Workbench-only baseline-start and baseline-end",
+            noteCount:Number(process.env.NOTE_COUNT),
+            baselineReference:baseline,
+            warmup:rows.warmup.startup,
+            comparison
+          },null,2)+"\n");
           console.log(JSON.stringify(comparison,null,2));
           NODE
 
@@ -124,7 +139,9 @@ jobs:
           const c=require("./plugin-overlap-comparison.json");
           console.log("## MDSE Workbench third-party overlap benchmark");
           console.log("");
-          console.log("| Case | Version | Readable | Core ready | Core delta | Occurrence delta | Workbench commands |");
+          console.log("Warmed Workbench-only baseline reference: "+JSON.stringify(c.baselineReference));
+          console.log("");
+          console.log("| Case | Version | Readable | Core ready | Core delta vs bracketed baseline | Occurrence delta | Workbench commands |");
           console.log("|---|---:|---:|---:|---:|---:|---|");
           for(const r of c.comparison){
             const cd=(r.coreDeltaMs>=0?"+":"")+r.coreDeltaMs+" ms";
