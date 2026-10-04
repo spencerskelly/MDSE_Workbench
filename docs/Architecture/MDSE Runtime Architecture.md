@@ -245,4 +245,12 @@ Targets are acceptance budgets, not promises until measured on the real model.
 
 ## Current implementation step
 
-RTA-1 is now in progress. Workbench source exposes explicit runtime status during startup/indexing and keeps the current chunked rebuild as the safe fallback. The next implementation step is RTA-2: cache-format and serialization tests before warm-cache restoration is enabled in production behavior.
+RTA-1 is implemented at source level: Workbench exposes explicit startup/indexing/ready status and retains the current chunked full rebuild as the safe fallback.
+
+RTA-2 foundation is now implemented at source/test-contract level but is **not yet enabled at runtime**:
+- `src/core/cache.ts` defines cache format v1, strict schema/parser compatibility, deterministic serialization/restoration, bounded note/Local Model shards, corruption refusal and file-fingerprint reconciliation planning;
+- `src/core/cache-storage.ts` defines manifest-last generation persistence so a partially written next generation never becomes authoritative;
+- `test/cache.test.ts` and `test/cache-storage.test.ts` cover JSON round-trip, schema invalidation, malformed data, sharding, mixed/partial generations, deterministic reconciliation and manifest-last behavior;
+- generated Base Vaults now ignore `.obsidian/plugins/mdse-workbench/cache/`.
+
+The next step is to run/typecheck this foundation in the standalone Workbench build, then add the thin Obsidian storage adapter and wire **save-only cache generation first**. Warm restore remains disabled until that write path is proven, so no startup behavior depends on unvalidated cached data.
