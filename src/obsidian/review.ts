@@ -5,11 +5,11 @@
  */
 import { ItemView, Modal, Notice, TFile, WorkspaceLeaf, type App } from "obsidian";
 import type { ModelIndex } from "../core/model";
-import type { LocalFinding } from "../core/localmodel";
 import { optionsBetween } from "../core/rules";
 import type { Schema } from "../core/schema";
-import { CATEGORIES, countByCategory, filterFindings, neighbour, toFindings, type Category, type Finding } from "../core/review";
+import { CATEGORIES, countByCategory, filterFindings, neighbour, type Category, type Finding } from "../core/review";
 import type { RelationshipWriter } from "./writer";
+import type { AssuranceSnapshot } from "./assurance";
 
 export const REVIEW_VIEW = "mdse-review";
 const ROW_LIMIT = 200;
@@ -19,13 +19,9 @@ export interface ReviewHost {
   app: App;
   ready(): boolean;
   index(): ModelIndex;
-  /** Monotonic semantic revision; Review recomputes global assurance only when this changes. */
-  revision(): number;
-  /** Wait for asynchronous Local Model body parsing scheduled by recent edits. */
-  settle(): Promise<void>;
   schema(): Schema;
   writer(): RelationshipWriter;
-  localFindings(): LocalFinding[];
+  assurance(force?: boolean): Promise<AssuranceSnapshot>;
 }
 
 const base = (path: string) => path.replace(/^.*\//, "").replace(/\.md$/, "");
@@ -45,7 +41,6 @@ export class ReviewView extends ItemView {
   private type = "";
   private field = "";
   private timer: number | null = null;
-  private computedRevision = -1;
 
   constructor(leaf: WorkspaceLeaf, private readonly host: ReviewHost) {
     super(leaf);
@@ -80,27 +75,19 @@ export class ReviewView extends ItemView {
     }, 1000);
   }
 
-  /** Recompute global assurance only when the semantic model revision changed. */
+  /** Consume the shared assurance snapshot; no view owns its own whole-model validation loop. */
   async refresh(force = false): Promise<void> {
     if (!this.host.ready()) {
       this.contentEl.empty();
       this.contentEl.createEl("p", { text: "Workbench is still indexing. This screen will fill in when it finishes.", cls: "mdse-muted" });
-      // ready() also shows a notice; wait for the index quietly instead.
       this.later();
       return;
     }
-    await this.host.settle();
-    if (!this.host.ready()) {
-      this.later();
-      return;
-    }
-    const revision = this.host.revision();
-    if (force || revision !== this.computedRevision) {
-      this.all = toFindings(this.host.index().findings(), this.host.localFindings());
-      this.computedRevision = revision;
-      this.resolved.clear();
-    }
+    const snapshot = await this.host.assurance(force);
+    this.all = snapshot.all;
+    this.resolved.clear();
     this.render();
+    if (snapshot.stale) this.later();
   }
 
   private visible(): Finding[] {
