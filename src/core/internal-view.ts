@@ -10,10 +10,10 @@ const PART_W=260;
 const PART_H=110;
 const END_W=150;
 const END_H=52;
-const PAD_X=220;
-const PAD_Y=150;
-const COL_GAP=170;
-const ROW_GAP=150;
+const PAD_X=260;
+const PAD_Y=180;
+const COL_GAP=320;
+const ROW_GAP=220;
 const COLS=3;
 
 export interface InternalViewResult {
@@ -106,7 +106,7 @@ export function buildInternalView(
     const id=nodeId(r);
     let x=PAD_X+(side==="left"?0:contentW-PAD_X-END_W),y=PAD_Y;
     if(parentPos){
-      x=side==="left"?parentPos.x-END_W-24:parentPos.x+parentPos.width+24;
+      x=side==="left"?parentPos.x-END_W-40:parentPos.x+parentPos.width+40;
       const n=partEndpointCount.get(parent?.record.localId??"")??1;
       y=parentPos.y+Math.min(parentPos.height-END_H,Math.max(0,(n-1)*58));
     }
