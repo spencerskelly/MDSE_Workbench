@@ -451,6 +451,38 @@ export class Indexer {
     this.bumpRevision();
   }
 
+  /**
+   * Drop any provisional restored/reconciled semantic state before the recovery cold build.
+   *
+   * Warm restore is an optimization only. If it fails or loses its reconciliation race, no
+   * restored graph, reverse dependency evidence, fingerprints, Local Model state, or readiness
+   * statistics may remain observable while authoritative Markdown is rebuilt cooperatively.
+   */
+  discardProvisionalSemanticState(): void {
+    this.cancelOccurrenceHydration();
+    this.index = new ModelIndex(this.schema);
+    this.relationshipDependencies.clear();
+    this.relationshipReresolutionHistoryValue = [];
+    this.local = new LocalModelIndex();
+    this.hydrationCosts.clear();
+    this.coldLocalPaths.clear();
+    this.localRetentionOrder.clear();
+    this.localRetentionClock = 0;
+    this.deferredHydrationPaths = [];
+    this.hydrationRemaining = 0;
+    this.lastHydrationMsValue = null;
+    this.lastHydrationCandidatesValue = 0;
+    this.localReadErrors.clear();
+    this.fingerprints.clear();
+    this.dirty.clear();
+    this.livePending.clear();
+    this.relationshipPathChanges.clear();
+    this.cacheDirtyPaths.clear();
+    this.stats = null;
+    this.metadataBurst.reset();
+    this.bumpRevision();
+  }
+
   relationshipDependentsOf(paths: Iterable<string>): string[] {
     return this.relationshipDependencies.dependentsOf(paths);
   }
