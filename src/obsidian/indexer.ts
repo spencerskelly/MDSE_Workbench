@@ -7,6 +7,7 @@ import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../c
 import type { FileFingerprint, ReconciliationPlan, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
+import { CooperativeBudget } from "../core/cooperative";
 import type { Schema } from "../core/schema";
 
 const CHUNK = 500;
@@ -17,6 +18,8 @@ const BURST_REBUILD = 300;
 const QUIET_MS = 3000;
 /** Coalesce rapid editor/metadata events before reparsing one note body. */
 const LIVE_DEBOUNCE_MS = 250;
+const WORK_SLICE_MS = 12;
+const yieldToUi = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
 export interface BuildStats {
   mode: "full" | "restored" | "reconciled";
@@ -298,6 +301,7 @@ export class Indexer {
       this.bumpRevision(path);
     }
 
+    const reconcileBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < changedOrAdded.length; i++) {
       const path = changedOrAdded[i];
       const f = this.app.vault.getAbstractFileByPath(path);
@@ -305,7 +309,7 @@ export class Indexer {
         throw new Error(`Warm reconciliation expected Markdown file ${path}, but it is unavailable.`);
       }
       await this.applyAwaited(path, f);
-      if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+      await reconcileBudget.checkpoint(yieldToUi);
     }
 
     if (plan.added.length || plan.deleted.length) await this.reResolveAllRelationships();
@@ -325,7 +329,7 @@ export class Indexer {
           break;
         }
         await this.applyAwaited(path, f);
-        if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+        await reconcileBudget.checkpoint(yieldToUi);
       }
       if (needsFull) this.scheduleRebuild();
     }
@@ -341,6 +345,7 @@ export class Indexer {
   private async reResolveAllRelationships(): Promise<number> {
     const notes = [...this.index.notes.values()];
     let changed = 0;
+    const resolveBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < notes.length; i++) {
       const rec = notes[i];
       if (!rec.authoredLinks) throw new Error(`Cached note ${rec.path} has no authored-link evidence; full rebuild required.`);
@@ -362,7 +367,7 @@ export class Indexer {
         this.cacheDirtyPaths.add(rec.path);
         changed++;
       }
-      if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
+      await resolveBudget.checkpoint(yieldToUi);
     }
     if (changed) this.bumpRevision();
     return changed;
@@ -453,6 +458,7 @@ export class Indexer {
     let task: Promise<void>;
     task = (async () => {
       let changed = false;
+      const hydrationBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < files.length; i++) {
         if (epoch !== this.hydrationEpoch) return;
         const file = files[i];
@@ -476,7 +482,7 @@ export class Indexer {
         } finally {
           if (epoch === this.hydrationEpoch) this.hydrationRemaining = Math.max(0, files.length - i - 1);
         }
-        if (i % 50 === 49) await new Promise((r) => window.setTimeout(r, 0));
+        await hydrationBudget.checkpoint(yieldToUi);
       }
       if (changed && epoch === this.hydrationEpoch) this.bumpRevision();
     })().finally(() => {
@@ -517,13 +523,14 @@ export class Indexer {
     const files = this.app.vault.getMarkdownFiles();
     const localCandidates: TFile[] = [];
     const fingerprints = new Map<string, FileFingerprint>();
+    const buildBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       fingerprints.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
       const rec = this.record(file);
       if (rec) index.upsert(rec);
       if (this.mayHaveLocalModel(file)) localCandidates.push(file);
-      if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
+      await buildBudget.checkpoint(yieldToUi);
     }
     this.index = index;
     this.local = local;
@@ -647,7 +654,7 @@ export class Indexer {
         this.apply(path);
         const existsNow = this.fingerprints.has(path);
         if (existed !== existsNow) pathSetChanged = true;
-        if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+        await reconcileBudget.checkpoint(yieldToUi);
       }
       if (pathSetChanged) this.scheduleRelationshipReresolution();
     })().finally(() => {
