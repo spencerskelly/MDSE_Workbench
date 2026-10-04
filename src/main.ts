@@ -87,6 +87,7 @@ export default class MdseWorkbench extends Plugin {
   writer: RelationshipWriter | null = null;
   detail: NoteDetailPanel | null = null;
   private statusEl: HTMLElement | null = null;
+  private startupHandoffTimer: number | null = null;
   private healthRefreshTimer: number | null = null;
   private localBackgroundTimer: number | null = null;
   private cacheWriteTimer: number | null = null;
@@ -220,11 +221,20 @@ export default class MdseWorkbench extends Plugin {
     }));
     this.register(() => {
       this.unloaded = true;
+      if (this.startupHandoffTimer !== null) window.clearTimeout(this.startupHandoffTimer);
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
       if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
       if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     });
-    this.app.workspace.onLayoutReady(() => void this.start(false));
+    this.app.workspace.onLayoutReady(() => {
+      // Startup safety slice: onLayoutReady only schedules Workbench. It does not read schemas,
+      // build indexes, restore caches, hydrate Local Models, or run assurance in the callback.
+      // Obsidian gets the current event-loop turn back before Workbench begins any model work.
+      this.startupHandoffTimer = window.setTimeout(() => {
+        this.startupHandoffTimer = null;
+        if (!this.unloaded) void this.start(false);
+      }, 0);
+    });
   }
 
   private setRuntimeStatus(state: "starting" | "waiting" | "restoring" | "reconciling" | "indexing" | "ready" | "error", detail = ""): void {
@@ -536,6 +546,19 @@ export default class MdseWorkbench extends Plugin {
   private async runStart(rebuild: boolean): Promise<void> {
     const runStartedAt = performance.now();
     this.lastCoreError = null;
+    const firstStart = !this.indexer;
+
+    // First-start safety gate comes before *all* model/schema I/O. Workbench commands and status
+    // are already registered, while Obsidian keeps the startup lane until metadata resolution
+    // (or the bounded quiet fallback) plus a short handoff delay.
+    if (firstStart) {
+      this.setRuntimeStatus("waiting");
+      const waitStarted = performance.now();
+      await this.whenVaultQuiet();
+      this.lastStartupWaitMs = Math.round(performance.now() - waitStarted);
+      if (this.unloaded) return;
+    }
+
     this.setRuntimeStatus("starting");
     try {
       this.schema = await this.loadSchema();
@@ -548,7 +571,6 @@ export default class MdseWorkbench extends Plugin {
     }
 
     const schema = this.schema;
-    const firstStart = !this.indexer;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.indexer.setBackgroundIdleCheck(() => Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS);
@@ -596,14 +618,6 @@ export default class MdseWorkbench extends Plugin {
       );
       this.register(() => this.indexer?.dispose());
 
-      // Obsidian's first metadata-cache pass can emit a changed event for every note.
-      // Do not compete with it. The initial full build or warm reconciliation reads the
-      // current filesystem after the vault becomes quiet.
-      this.setRuntimeStatus("waiting");
-      const waitStarted = performance.now();
-      await this.whenVaultQuiet();
-      this.lastStartupWaitMs = Math.round(performance.now() - waitStarted);
-      if (this.unloaded) return;
     } else {
       this.indexer.setSchema(schema);
     }
