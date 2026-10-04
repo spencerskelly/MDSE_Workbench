@@ -102,6 +102,7 @@ export class Indexer {
   private relationshipResolveTimer: number | null = null;
   private relationshipResolveTask: Promise<void> | null = null;
   private relationshipResolvePending = false;
+  private readonly relationshipPathChanges = new Set<string>();
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -402,6 +403,10 @@ export class Indexer {
     return this.relationshipDependencies.dependentsOf(paths);
   }
 
+  relationshipCandidatesForPathChanges(paths: Iterable<string>): string[] {
+    return this.relationshipDependencies.candidatesForPathChanges(paths);
+  }
+
   private relationshipTargets(rec: NoteRecord): string[] {
     const targets = new Set<string>();
     for (const values of rec.fields.values()) for (const path of values) targets.add(path);
@@ -414,7 +419,7 @@ export class Indexer {
       this.relationshipDependencies.remove(sourcePath);
       return;
     }
-    this.relationshipDependencies.set(sourcePath, this.relationshipTargets(rec));
+    this.relationshipDependencies.set(sourcePath, this.relationshipTargets(rec), (rec.authoredLinks ?? []).map((link) => link.linkpath));
   }
 
   private rebuildRelationshipDependencies(): void {
@@ -614,7 +619,11 @@ export class Indexer {
       await reconcileBudget.checkpoint(yieldToUi);
     }
 
-    if (plan.added.length || plan.deleted.length) await this.reResolveAllRelationships();
+    if (plan.added.length || plan.deleted.length) {
+      const changedPaths = [...plan.added, ...plan.deleted];
+      const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
+      await this.reResolveRelationships(candidates);
+    }
 
     // Changes arriving during reconciliation are replayed once. Concurrent path-set changes
     // deliberately schedule the safe full rebuild; the next startup can remain incremental.
@@ -644,8 +653,11 @@ export class Indexer {
    * Re-resolve relationship links from cached authored evidence after the note path set changes.
    * This is CPU/metadata work only: unchanged Markdown files and Local Model bodies are not read.
    */
-  private async reResolveAllRelationships(): Promise<number> {
-    const notes = [...this.index.notes.values()];
+  private async reResolveRelationships(sourcePaths?: Iterable<string>): Promise<number> {
+    const wanted = sourcePaths ? new Set(sourcePaths) : null;
+    const notes = wanted
+      ? [...wanted].map((path) => this.index.notes.get(path)).filter((rec): rec is NoteRecord => !!rec)
+      : [...this.index.notes.values()];
     let changed = 0;
     const resolveBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < notes.length; i++) {
@@ -681,8 +693,9 @@ export class Indexer {
    * Debounce live add/delete/rename events, then re-resolve authored links from metadata only.
    * This keeps an open vault semantically correct without rereading unchanged Markdown bodies.
    */
-  private scheduleRelationshipReresolution(): void {
+  private scheduleRelationshipReresolution(paths: Iterable<string>): void {
     if (!this.liveChanges) return;
+    for (const path of paths) this.relationshipPathChanges.add(path);
     this.relationshipResolvePending = true;
     if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
     // Prefer Obsidian's metadata "resolved" signal. This timer is only a bounded fallback for
@@ -712,7 +725,10 @@ export class Indexer {
     if (this.relationshipResolveTask) return;
     this.relationshipResolvePending = false;
     let task: Promise<void>;
-    task = this.reResolveAllRelationships()
+    const changedPaths = [...this.relationshipPathChanges];
+    this.relationshipPathChanges.clear();
+    const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
+    task = this.reResolveRelationships(candidates)
       .then(() => undefined)
       .finally(() => {
         if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
@@ -976,17 +992,17 @@ export class Indexer {
     this.livePending.clear();
     let task: Promise<void>;
     task = (async () => {
-      let pathSetChanged = false;
+      const pathSetChanges: string[] = [];
       const liveBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         const existed = this.fingerprints.has(path);
         this.apply(path);
         const existsNow = this.fingerprints.has(path);
-        if (existed !== existsNow) pathSetChanged = true;
+        if (existed !== existsNow) pathSetChanges.push(path);
         await liveBudget.checkpoint(yieldToUi);
       }
-      if (pathSetChanged) this.scheduleRelationshipReresolution();
+      if (pathSetChanges.length) this.scheduleRelationshipReresolution(pathSetChanges);
     })().finally(() => {
       if (this.liveApplyTask === task) this.liveApplyTask = null;
       if (this.livePending.size) this.scheduleLiveApply();
@@ -1012,6 +1028,7 @@ export class Indexer {
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
     this.relationshipResolvePending = false;
+    this.relationshipPathChanges.clear();
     this.hydrationEpoch++;
     this.hydrationTask = null;
     this.deferredHydrationPaths = [];
