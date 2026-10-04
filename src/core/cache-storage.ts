@@ -12,10 +12,13 @@
  * The design therefore has bounded disk usage and fail-closed recovery without rename tricks.
  */
 import {
+  joinCoreSemanticCache,
+  joinLocalSemanticCache,
   joinSemanticCache,
   shardSemanticCache,
-  type LocalCacheShard,
   type CacheDiskManifest,
+  type CoreSemanticCache,
+  type LocalSemanticCache,
   type SemanticCache,
   type ShardedSemanticCache,
 } from "./cache";
@@ -88,43 +91,54 @@ export async function writeSemanticCacheGeneration(
   return sharded.manifest;
 }
 
-export interface LocalCacheGeneration {
-  manifest: CacheDiskManifest;
-  localShards: LocalCacheShard[];
-}
-
-/**
- * Read only the Local Model component of the newest complete cache generation.
- * Core startup can therefore avoid Local Model I/O and defer it until an occurrence consumer asks.
- */
-export async function readLocalCacheGeneration(storage: CacheStorage, root: string): Promise<LocalCacheGeneration> {
-  const clean = cleanRoot(root);
+async function cacheCandidates(storage: CacheStorage, clean: string): Promise<Array<{ slot: 0 | 1; manifest: CacheDiskManifest }>> {
   const manifests = await readManifestSlots(storage, clean);
-  const candidates = manifests
+  return manifests
     .flatMap((x, slot) => x.manifest ? [{ slot: slot as 0 | 1, manifest: x.manifest }] : [])
     .sort((a, b) =>
       b.manifest.sequence - a.manifest.sequence ||
       b.manifest.header.createdAt - a.manifest.header.createdAt ||
       b.manifest.generation.localeCompare(a.manifest.generation),
     );
-  if (!candidates.length) throw new Error("No semantic cache manifest is available.");
+}
 
+/** Read only core note/fingerprint shards; Local Model shards stay cold until requested. */
+export async function readCoreCacheGeneration(storage: CacheStorage, root: string): Promise<CoreSemanticCache> {
+  const clean = cleanRoot(root);
+  const candidates = await cacheCandidates(storage, clean);
+  if (!candidates.length) throw new Error("No semantic cache manifest is available.");
   const errors: string[] = [];
   for (const { slot, manifest } of candidates) {
     try {
       assertGeneration(manifest.generation);
       const slotRoot = cacheSlotPaths(clean)[slot];
-      const raw = await readJsonSeries(
+      const [fingerprintShards, noteShards] = await Promise.all([
+        readJsonSeries(storage, Array.from({ length: manifest.fingerprints.count }, (_, i) => `${slotRoot}/fingerprints-${pad(i)}.json`)),
+        readJsonSeries(storage, Array.from({ length: manifest.notes.count }, (_, i) => `${slotRoot}/notes-${pad(i)}.json`)),
+      ]);
+      return joinCoreSemanticCache(manifest, fingerprintShards, noteShards);
+    } catch (e) {
+      errors.push(`${MANIFEST_NAMES[slot]}: ${(e as Error).message}`);
+    }
+  }
+  throw new Error(`No complete core semantic cache generation is readable. ${errors.join(" | ")}`);
+}
+
+/** Read only Local Model shards from the newest valid cache generation. */
+export async function readLocalCacheGeneration(storage: CacheStorage, root: string): Promise<LocalSemanticCache> {
+  const clean = cleanRoot(root);
+  const candidates = await cacheCandidates(storage, clean);
+  if (!candidates.length) throw new Error("No semantic cache manifest is available.");
+  const errors: string[] = [];
+  for (const { slot, manifest } of candidates) {
+    try {
+      assertGeneration(manifest.generation);
+      const slotRoot = cacheSlotPaths(clean)[slot];
+      const localShards = await readJsonSeries(
         storage,
         Array.from({ length: manifest.localRegions.count }, (_, i) => `${slotRoot}/local-${pad(i)}.json`),
       );
-      const localShards = raw.map((value, index) => {
-        if (!isObject(value) || value.generation !== manifest.generation || value.index !== index || !Array.isArray(value.localRegions)) {
-          throw new Error("Malformed semantic cache Local Model shard.");
-        }
-        return value as unknown as LocalCacheShard;
-      });
-      return { manifest, localShards };
+      return joinLocalSemanticCache(manifest, localShards);
     } catch (e) {
       errors.push(`${MANIFEST_NAMES[slot]}: ${(e as Error).message}`);
     }
@@ -134,14 +148,7 @@ export async function readLocalCacheGeneration(storage: CacheStorage, root: stri
 
 export async function readSemanticCacheGeneration(storage: CacheStorage, root: string): Promise<SemanticCache> {
   const clean = cleanRoot(root);
-  const manifests = await readManifestSlots(storage, clean);
-  const candidates = manifests
-    .flatMap((x, slot) => x.manifest ? [{ slot: slot as 0 | 1, manifest: x.manifest }] : [])
-    .sort((a, b) =>
-      b.manifest.sequence - a.manifest.sequence ||
-      b.manifest.header.createdAt - a.manifest.header.createdAt ||
-      b.manifest.generation.localeCompare(a.manifest.generation),
-    );
+  const candidates = await cacheCandidates(storage, clean);
 
   if (!candidates.length) throw new Error("No semantic cache manifest is available.");
 
