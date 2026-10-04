@@ -26,6 +26,8 @@ export interface AssuranceSource {
   settle(): Promise<void>;
   index(): ModelIndex;
   localFindings(): LocalFinding[];
+  /** Shared foreground-activity policy for automatic/retry assurance work. */
+  waitForBackgroundPermission?(): Promise<void>;
 }
 
 export class AssuranceManager {
@@ -49,7 +51,7 @@ export class AssuranceManager {
       if (cached) return cached;
       if (this.running) return this.running;
     }
-    const task = this.compute();
+    const task = this.compute(force);
     this.running = task;
     try {
       return await task;
@@ -62,11 +64,17 @@ export class AssuranceManager {
     this.cached = null;
   }
 
-  private async compute(): Promise<AssuranceSnapshot> {
+  private async compute(force: boolean): Promise<AssuranceSnapshot> {
     // One retry handles an edit racing the first scan without allowing assurance to become an
     // unbounded foreground loop while the engineer is actively changing the model.
     let last: AssuranceSnapshot | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
+      // Automatic assurance and any stale retry share the same foreground-quiet gate as other
+      // optional background work. A manual force may start immediately, but if it races an edit
+      // its retry yields to the shared policy before scanning again.
+      if ((!force || attempt > 0) && this.source.waitForBackgroundPermission) {
+        await this.source.waitForBackgroundPermission();
+      }
       await this.source.settle();
       const revision = this.source.revision();
       const t0 = performance.now();
