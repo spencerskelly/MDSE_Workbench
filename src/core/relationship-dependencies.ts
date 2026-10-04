@@ -23,6 +23,15 @@ export interface RelationshipDependencyConsistency {
   issues: string[];
 }
 
+export interface RelationshipDependencySize {
+  sources: number;
+  resolvedTargetKeys: number;
+  authoredKeys: number;
+  resolvedAssociations: number;
+  authoredAssociations: number;
+  storedMemberships: number;
+}
+
 export class ReversePathDependencyIndex {
   private readonly byTarget = new Map<string, Set<string>>();
   private readonly byAuthoredKey = new Map<string, Set<string>>();
@@ -102,6 +111,29 @@ export class ReversePathDependencyIndex {
 
   get sourceCount(): number {
     return new Set([...this.bySource.keys(), ...this.authoredBySource.keys()]).size;
+  }
+
+  /**
+   * Exact structural size of the derived accelerator.
+   *
+   * Memory growth is bounded by current source evidence rather than edit history: set() removes a
+   * source's prior entries before replacing them. Each resolved source-target association appears
+   * once in bySource and once in byTarget. Each normalized authored-key association appears once
+   * in authoredBySource and once in byAuthoredKey. linkpathKeys() yields at most two keys.
+   */
+  size(): RelationshipDependencySize {
+    let resolvedAssociations = 0;
+    for (const targets of this.bySource.values()) resolvedAssociations += targets.size;
+    let authoredAssociations = 0;
+    for (const keys of this.authoredBySource.values()) authoredAssociations += keys.size;
+    return {
+      sources: this.sourceCount,
+      resolvedTargetKeys: this.byTarget.size,
+      authoredKeys: this.byAuthoredKey.size,
+      resolvedAssociations,
+      authoredAssociations,
+      storedMemberships: 2 * (resolvedAssociations + authoredAssociations),
+    };
   }
 
   /**
