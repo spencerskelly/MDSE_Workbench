@@ -900,6 +900,45 @@ function nextLocalId(kind, ownerUid, now = /* @__PURE__ */ new Date()) {
   const prefix = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
   return prefix[kind] + stamp + suffix;
 }
+function planLocalRecordDelete(text, localId) {
+  const editable = editableLocalRegion(text);
+  const record = editable.region.records.find((candidate) => candidate.localId === localId);
+  if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
+  if (record.kind !== "part") throw new Error("This deletion slice supports part occurrences only.");
+  const impacts = [];
+  for (const source of editable.region.records) {
+    if (source.localId === localId) continue;
+    for (const [field, value] of source.fields) {
+      for (const link of parseLinks(value)) {
+        if (!link.target && link.blockId === localId) {
+          impacts.push({
+            sourceLocalId: source.localId,
+            sourceKind: source.kind,
+            sourceIdentifier: source.identifier,
+            field
+          });
+        }
+      }
+    }
+  }
+  const range = recordLineRange(editable, record);
+  let end = range.end;
+  while (end < editable.lines.length && editable.lines[end].trim() === "") end++;
+  const nextLines = [...editable.lines.slice(0, range.start), ...editable.lines.slice(end)];
+  const after = nextLines.join(editable.eol);
+  const parsed = parseLocalModel(after);
+  if (!parsed?.structured) throw new Error("Planned deletion would make the Local Model region structurally unreadable.");
+  return {
+    before: text,
+    after,
+    changed: after !== text,
+    localId,
+    kind: record.kind,
+    findings: parsed.findings.slice(),
+    impacts,
+    identifier: record.identifier
+  };
+}
 var SECTION_TITLE = {
   part: "Part Occurrences",
   endpoint: "Local Interfaces",
@@ -1042,12 +1081,14 @@ function assertTargetValid(region, localId) {
 
 // src/core/model-edit.ts
 var ModelEditService = class {
-  constructor(store, ownerUid, transactions) {
+  constructor(store, ownerUid, transactions, externalLocalDeleteImpacts = () => []) {
     this.store = store;
     this.ownerUid = ownerUid;
     this.transactions = transactions;
+    this.externalLocalDeleteImpacts = externalLocalDeleteImpacts;
     this.sequence = 0;
     this.pendingCreates = /* @__PURE__ */ new Map();
+    this.pendingDeletes = /* @__PURE__ */ new Map();
   }
   async patchLocalRecord(path, localId, patch) {
     const before = await this.store.read(path);
@@ -1141,6 +1182,72 @@ var ModelEditService = class {
   requirePendingCreate(transactionId) {
     const pending = this.pendingCreates.get(transactionId);
     if (!pending) throw new Error(`Structural Local Model transaction ${transactionId} does not exist.`);
+    return pending;
+  }
+  async stageLocalRecordDelete(path, localId) {
+    const before = await this.store.read(path);
+    const plan = planLocalRecordDelete(before, localId);
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    const txId = `local-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `delete part ${plan.identifier}`;
+    this.transactions.begin(txId, label, "structural");
+    const transaction = this.transactions.add(txId, {
+      id: txId + "-delete",
+      label,
+      changes: [{
+        kind: "local.delete",
+        summary: label,
+        refs: [localRef(uid, plan.kind, plan.localId)],
+        metadata: { path, localId: plan.localId, localKind: plan.kind }
+      }]
+    });
+    this.pendingDeletes.set(txId, { path, plan, label, ownerUid: uid });
+    return {
+      transaction,
+      plan,
+      path,
+      externalImpacts: this.externalLocalDeleteImpacts(path, localId)
+    };
+  }
+  reviewLocalDelete(transactionId) {
+    const pending = this.requirePendingDelete(transactionId);
+    return {
+      transaction: this.transactions.review(transactionId),
+      plan: pending.plan,
+      path: pending.path,
+      externalImpacts: this.externalLocalDeleteImpacts(pending.path, pending.plan.localId)
+    };
+  }
+  async applyLocalDelete(transactionId) {
+    const pending = this.requirePendingDelete(transactionId);
+    const external = this.externalLocalDeleteImpacts(pending.path, pending.plan.localId);
+    const blockingCount = pending.plan.impacts.length + external.length;
+    if (blockingCount) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blockingCount} dependent model reference${blockingCount === 1 ? "" : "s"} still target this occurrence.`
+      );
+    }
+    const blockingFindings = pending.plan.findings.filter((finding) => finding.severity === "error");
+    if (blockingFindings.length) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blockingFindings.length} blocking Local Model finding${blockingFindings.length === 1 ? "" : "s"}.`
+      );
+    }
+    await this.transactions.apply(transactionId, {
+      apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label)
+    });
+    this.pendingDeletes.delete(transactionId);
+  }
+  cancelLocalDelete(transactionId) {
+    this.requirePendingDelete(transactionId);
+    const cancelled = this.transactions.cancel(transactionId);
+    this.pendingDeletes.delete(transactionId);
+    return cancelled;
+  }
+  requirePendingDelete(transactionId) {
+    const pending = this.pendingDeletes.get(transactionId);
+    if (!pending) throw new Error(`Structural Local Model delete transaction ${transactionId} does not exist.`);
     return pending;
   }
   async applyGuarded(path, before, after, label) {
@@ -4726,6 +4833,122 @@ var LocalPartCreateModal = class extends import_obsidian3.Modal {
     };
   }
 };
+var LocalPartDeleteModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, occurrenceName, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.occurrenceName = occurrenceName;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.titleEl.setText("Review part occurrence deletion");
+    void this.load();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try {
+        this.cancel(staged.transaction.id);
+      } catch {
+      }
+    }
+  }
+  async load() {
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: "Checking structural dependencies before anything is changed\u2026" });
+    try {
+      const staged = await this.stage();
+      this.staged = staged;
+      this.renderReview(staged);
+    } catch (e) {
+      this.contentEl.empty();
+      this.contentEl.createEl("p", { cls: "mdse-warn", text: `Cannot stage deletion: ${e.message}` });
+      const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+      buttons.createEl("button", { text: "Close" }).onclick = () => this.close();
+    }
+  }
+  renderReview(staged) {
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const row = (key2, value) => {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: value || "\u2014" });
+    };
+    row("Owner", this.ownerName);
+    row("Occurrence", this.occurrenceName);
+    row("Transaction", staged.transaction.label);
+    row("Scope", staged.transaction.scope);
+    row("Local ID", staged.plan.localId);
+    const localImpacts = staged.plan.impacts;
+    const externalImpacts = staged.externalImpacts;
+    const blockingFindings = staged.plan.findings.filter((finding) => finding.severity === "error");
+    const blocked = localImpacts.length + externalImpacts.length + blockingFindings.length > 0;
+    const impactBox = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+    if (!blocked) {
+      impactBox.createEl("strong", { text: "Impact review passed" });
+      impactBox.createEl("p", { text: "No Local Model or indexed note-level references depend on this occurrence." });
+    } else {
+      impactBox.createEl("strong", { text: "Deletion blocked by dependencies" });
+      for (const impact of localImpacts) {
+        impactBox.createEl("p", {
+          cls: "mdse-warn",
+          text: `LOCAL: ${impact.sourceKind} "${impact.sourceIdentifier}" uses this occurrence through ${impact.field}.`
+        });
+      }
+      for (const impact of externalImpacts) {
+        impactBox.createEl("p", {
+          cls: "mdse-warn",
+          text: `MODEL: ${impact.path} targets this occurrence through ${impact.field}.`
+        });
+      }
+      for (const finding of blockingFindings) {
+        impactBox.createEl("p", { cls: "mdse-warn", text: `ERROR: ${finding.message}` });
+      }
+    }
+    const warnings = staged.plan.findings.filter((finding) => finding.severity === "warning");
+    if (warnings.length) {
+      const warningBox = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      warningBox.createEl("strong", { text: "Warnings" });
+      for (const finding of warnings) warningBox.createEl("p", { text: finding.message });
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply deletion", cls: "mod-warning" });
+    apply.disabled = blocked;
+    apply.setAttr("title", blocked ? "Remove dependent references before deleting this occurrence." : "Delete this occurrence.");
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied();
+          new import_obsidian3.Notice(`Deleted part occurrence ${this.occurrenceName}.`, 5e3);
+        } catch (e) {
+          new import_obsidian3.Notice(`Not deleted: ${e.message}`, 12e3);
+          apply.disabled = false;
+        }
+      })();
+    };
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -5008,6 +5231,10 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const addPart = head.createEl("button", { text: "Add part occurrence\u2026", cls: "mdse-detail-btn" });
       addPart.onclick = () => this.createPartOccurrence(file);
     }
+    if (this.editing && record.kind === "part") {
+      const deletePart = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
+      deletePart.onclick = () => this.deletePartOccurrence(file, record);
+    }
     const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
     owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
     const occurrence = head.createEl("button", { text: "Open occurrence", cls: "mdse-detail-btn" });
@@ -5093,6 +5320,27 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       text: this.editing ? "Editing context only. Definition identity and structural/topology links remain separate and read-only here." : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data."
     });
     root.scrollTop = 0;
+  }
+  deletePartOccurrence(file, record) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalPartDeleteModal(
+        this.app,
+        file.basename,
+        record.identifier,
+        () => editor.stageLocalRecordDelete(file.path, record.localId),
+        (transactionId) => editor.applyLocalDelete(transactionId),
+        (transactionId) => {
+          editor.cancelLocalDelete(transactionId);
+        },
+        () => {
+          void this.show(file, false);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot delete occurrence: ${e.message}`, 12e3);
+    }
   }
   createPartOccurrence(file) {
     try {
@@ -6798,7 +7046,16 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
           write: (path, text) => this.app.vault.modify(localFile(path), text)
         },
         (path) => this.indexer.index.notes.get(path)?.uid ?? null,
-        this.transactions
+        this.transactions,
+        (ownerPath, localId) => {
+          const impacts = [];
+          for (const note of this.indexer.index.notes.values()) {
+            for (const ref of note.localRefs ?? []) {
+              if (ref.path === ownerPath && ref.localId === localId) impacts.push({ path: note.path, field: ref.field });
+            }
+          }
+          return impacts;
+        }
       );
       this.assurance = new AssuranceManager({
         revision: () => this.indexer.revision,
