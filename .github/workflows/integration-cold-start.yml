@@ -9,6 +9,7 @@ on:
       - "bench/obsidian-e2e-setup.mjs"
       - "bench/obsidian-e2e-observe.mjs"
       - "bench/obsidian-e2e-activate.mjs"
+      - "src/main.ts"
 
 permissions:
   contents: read
@@ -63,6 +64,8 @@ jobs:
           export VAULT NOTE_COUNT
           node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.NOTE_COUNT),label:"setup"},null,2))'
 
+          find "$VAULT" -type f \( -name '*.md' -o -name '*.yaml' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum > "$RUNNER_TEMP/model-state-before.sha256"
+
       - name: One-time Obsidian setup — register vault and enable plugin
         env:
           XDG_CONFIG_HOME: ${{ runner.temp }}/xdg
@@ -101,13 +104,13 @@ jobs:
             cat "$RUNNER_TEMP/obsidian-cold-activate.log"
 
             for i in $(seq 1 360); do
-              if [ -f "$VAULT/.mdse_integration_result.json" ]; then
+              if [ -f "$VAULT/.mdse_integration_result.json" ] && node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync(process.env.VAULT+"/.mdse_integration_result.json","utf8"));process.exit(Number.isFinite(r.occurrenceReadyAt)&&Number.isFinite(r.cacheReadyAt)?0:1)'"'"'; then
                 cat "$VAULT/.mdse_integration_result.json"
                 exit 0
               fi
               sleep 0.5
             done
-            echo "Timed out waiting for Workbench cold-start integration result." >&2
+            echo "Timed out waiting for complete Workbench cold-start/cache evidence." >&2
             tail -200 "$RUNNER_TEMP/obsidian-cold.log" >&2 || true
             exit 1
           '
@@ -121,12 +124,92 @@ jobs:
           const fail = (m) => { throw new Error(m); };
           if (r.label !== "cold-real-obsidian") fail("wrong measurement label");
           if (r.mode !== "full") fail("cold measurement did not use full rebuild");
+          if (!Number.isFinite(r.launchToReadableMs)) fail("readable timestamp missing");
           if (!Number.isFinite(r.launchToMetadataResolvedMs)) fail("metadata-resolution timestamp missing");
           if (!Number.isFinite(r.launchToCoreReadyMs)) fail("core-ready timestamp missing");
+          if (!Number.isFinite(r.launchToOccurrenceReadyMs)) fail("occurrence-ready timestamp missing");
+          if (!Number.isFinite(r.cacheReadyAt)) fail("semantic cache was not committed");
           if (r.launchToCoreReadyMs < r.launchToMetadataResolvedMs) fail("core-ready preceded metadata resolution");
+          if (r.launchToOccurrenceReadyMs < r.launchToCoreReadyMs) fail("occurrence-ready preceded core-ready");
           if (r.files < Number(process.env.NOTE_COUNT)) fail("not all generated Markdown files were parsed");
           console.log("Validated real-Obsidian cold-start evidence:", r);
           fs.copyFileSync(p, "obsidian-cold-start-result.json");
+          NODE
+
+      - name: Measure warm launch against identical model state
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg
+        run: |
+          rm -f "$VAULT/.mdse_integration_result.json" "$VAULT/.mdse_integration_metadata.json" "$VAULT/.mdse_integration_readable.json"
+          mkdir -p "$VAULT/.obsidian/plugins/mdse-workbench"
+          cat > "$VAULT/.obsidian/plugins/mdse-workbench/data.json" <<'EOF'
+          {"settings":{"warmCachePreview":true}}
+          EOF
+          export VAULT NOTE_COUNT
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.NOTE_COUNT),label:"warm-real-obsidian"},null,2))'
+
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9224 >"$RUNNER_TEMP/obsidian-warm.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9224 >"$RUNNER_TEMP/obsidian-warm-activate.log" 2>&1
+            cat "$RUNNER_TEMP/obsidian-warm-activate.log"
+
+            for i in $(seq 1 360); do
+              if [ -f "$VAULT/.mdse_integration_result.json" ] && node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync(process.env.VAULT+"/.mdse_integration_result.json","utf8"));process.exit(Number.isFinite(r.occurrenceReadyAt)?0:1)'"'"'; then
+                cat "$VAULT/.mdse_integration_result.json"
+                exit 0
+              fi
+              sleep 0.5
+            done
+            echo "Timed out waiting for Workbench warm-start integration result." >&2
+            tail -200 "$RUNNER_TEMP/obsidian-warm.log" >&2 || true
+            exit 1
+          '
+
+      - name: Validate and compare warm-start evidence
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const cold = JSON.parse(fs.readFileSync("obsidian-cold-start-result.json", "utf8"));
+          const p = process.env.VAULT + "/.mdse_integration_result.json";
+          const warm = JSON.parse(fs.readFileSync(p, "utf8"));
+          const fail = (m) => { throw new Error(m); };
+          if (warm.label !== "warm-real-obsidian") fail("wrong warm measurement label");
+          if (!["restored","reconciled"].includes(warm.mode)) fail("warm measurement did not use semantic-cache restore");
+          for (const key of ["launchToReadableMs","launchToMetadataResolvedMs","launchToCoreReadyMs","launchToOccurrenceReadyMs"]) {
+            if (!Number.isFinite(warm[key])) fail("warm " + key + " missing");
+          }
+          if (warm.files !== cold.files || warm.elements !== cold.elements || warm.links !== cold.links) fail("cold/warm semantic counts differ");
+          const modelAfter = require("child_process").execSync(
+            'find "$VAULT" -type f \\( -name \'*.md\' -o -name \'*.yaml\' \\) -print0 | sort -z | xargs -0 sha256sum | sha256sum',
+            { env: process.env, shell: "/bin/bash", encoding: "utf8" }
+          ).trim();
+          const modelBefore = fs.readFileSync(process.env.RUNNER_TEMP + "/model-state-before.sha256", "utf8").trim();
+          if (modelAfter !== modelBefore) fail("Markdown/YAML model state changed between cold and warm measurement");
+          const comparison = {
+            cold: {
+              readableMs: cold.launchToReadableMs,
+              coreReadyMs: cold.launchToCoreReadyMs,
+              occurrenceReadyMs: cold.launchToOccurrenceReadyMs,
+              mode: cold.mode,
+            },
+            warm: {
+              readableMs: warm.launchToReadableMs,
+              coreReadyMs: warm.launchToCoreReadyMs,
+              occurrenceReadyMs: warm.launchToOccurrenceReadyMs,
+              mode: warm.mode,
+            },
+            deltaMs: {
+              readable: warm.launchToReadableMs - cold.launchToReadableMs,
+              coreReady: warm.launchToCoreReadyMs - cold.launchToCoreReadyMs,
+              occurrenceReady: warm.launchToOccurrenceReadyMs - cold.launchToOccurrenceReadyMs,
+            },
+            modelStateIdentical: true,
+          };
+          fs.copyFileSync(p, "obsidian-warm-start-result.json");
+          fs.writeFileSync("obsidian-startup-comparison.json", JSON.stringify(comparison, null, 2) + "\n");
+          console.log("Validated warm/cold real-Obsidian comparison:", comparison);
           NODE
 
       - name: Write job summary
@@ -135,7 +218,7 @@ jobs:
           if [ -f obsidian-cold-start-result.json ]; then
             node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
           const r=require("./obsidian-cold-start-result.json");
-          console.log("## Real Obsidian cold-start integration");
+          console.log("## Real Obsidian startup integration");
           console.log("");
           console.log("| Metric | Value |");
           console.log("|---|---:|");
@@ -148,7 +231,17 @@ jobs:
           console.log("| Launch → Workbench core ready | "+r.launchToCoreReadyMs+" ms |");
           console.log("| Plugin load → core ready | "+r.pluginToCoreReadyMs+" ms |");
           console.log("| Workbench core work | "+r.workbenchCoreWorkMs+" ms |");
+          console.log("| Cold launch → readable | "+r.launchToReadableMs+" ms |");
+          console.log("| Cold launch → occurrence ready | "+r.launchToOccurrenceReadyMs+" ms |");
           console.log("| Index mode | "+r.mode+" |");
+          if (require("fs").existsSync("obsidian-startup-comparison.json")) {
+            const c=require("./obsidian-startup-comparison.json");
+            console.log("| Warm launch → readable | "+c.warm.readableMs+" ms |");
+            console.log("| Warm launch → core ready | "+c.warm.coreReadyMs+" ms |");
+            console.log("| Warm launch → occurrence ready | "+c.warm.occurrenceReadyMs+" ms |");
+            console.log("| Warm core delta vs cold | "+c.deltaMs.coreReady+" ms |");
+            console.log("| Warm occurrence delta vs cold | "+c.deltaMs.occurrenceReady+" ms |");
+          }
           NODE
           fi
 
@@ -158,8 +251,12 @@ jobs:
           name: obsidian-cold-start-evidence
           path: |
             obsidian-cold-start-result.json
+            obsidian-warm-start-result.json
+            obsidian-startup-comparison.json
             ${{ runner.temp }}/obsidian-setup.log
             ${{ runner.temp }}/obsidian-cold.log
             ${{ runner.temp }}/obsidian-cold-observe.log
             ${{ runner.temp }}/obsidian-cold-activate.log
+            ${{ runner.temp }}/obsidian-warm.log
+            ${{ runner.temp }}/obsidian-warm-activate.log
           if-no-files-found: warn
