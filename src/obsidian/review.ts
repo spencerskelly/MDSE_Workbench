@@ -21,6 +21,8 @@ export interface ReviewHost {
   index(): ModelIndex;
   /** Monotonic semantic revision; Review recomputes global assurance only when this changes. */
   revision(): number;
+  /** Wait for asynchronous Local Model body parsing scheduled by recent edits. */
+  settle(): Promise<void>;
   schema(): Schema;
   writer(): RelationshipWriter;
   localFindings(): LocalFinding[];
@@ -64,7 +66,7 @@ export class ReviewView extends ItemView {
     this.registerEvent(this.app.metadataCache.on("changed", () => this.later()));
     this.registerEvent(this.app.vault.on("delete", () => this.later()));
     this.registerEvent(this.app.vault.on("rename", () => this.later()));
-    this.refresh();
+    void this.refresh();
   }
   async onClose(): Promise<void> {
     if (this.timer !== null) window.clearTimeout(this.timer);
@@ -74,16 +76,21 @@ export class ReviewView extends ItemView {
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = window.setTimeout(() => {
       this.timer = null;
-      this.refresh();
+      void this.refresh();
     }, 1000);
   }
 
   /** Recompute global assurance only when the semantic model revision changed. */
-  refresh(force = false): void {
+  async refresh(force = false): Promise<void> {
     if (!this.host.ready()) {
       this.contentEl.empty();
       this.contentEl.createEl("p", { text: "Workbench is still indexing. This screen will fill in when it finishes.", cls: "mdse-muted" });
       // ready() also shows a notice; wait for the index quietly instead.
+      this.later();
+      return;
+    }
+    await this.host.settle();
+    if (!this.host.ready()) {
       this.later();
       return;
     }
@@ -107,7 +114,7 @@ export class ReviewView extends ItemView {
     const counts = countByCategory(this.all.filter((f) => !this.resolved.has(f.key)));
     const head = el.createDiv({ cls: "mdse-review-head" });
     head.createEl("h3", { text: "Review" });
-    head.createEl("button", { text: "Refresh" }).onclick = () => this.refresh(true);
+    head.createEl("button", { text: "Refresh" }).onclick = () => void this.refresh(true);
 
     const cats = el.createDiv({ cls: "mdse-review-cats" });
     for (const c of CATEGORIES) {
