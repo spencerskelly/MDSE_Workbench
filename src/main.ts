@@ -8,8 +8,8 @@ import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { scheduleStartupHandoff } from "./core/startup-handoff";
-import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
-import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
+import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreCoreSemanticState, restoreSemanticState, serializeSemanticState } from "./core/cache";
+import { readCoreCacheGeneration, readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
@@ -713,13 +713,13 @@ export default class MdseWorkbench extends Plugin {
       try {
         this.setRuntimeStatus("restoring");
         const scope = { vaultUid: await this.loadVaultUid() };
-        const cache = await readSemanticCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
-        const restored = restoreSemanticState(cache, schema, scope);
+        const cache = await readCoreCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
+        const restored = restoreCoreSemanticState(cache, schema, scope);
         const initialPlan = planReconciliation(restored.fingerprints, indexer.currentFingerprints());
         const initialMode = reconciliationMode(initialPlan);
 
         if (initialMode !== "full") {
-          stats = indexer.installRestored(restored, cache.header.createdAt);
+          stats = indexer.installRestoredCore(restored, cache.header.createdAt);
           this.lastCachedRevision = indexer.revision;
           const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
           this.lastWarmRestore = initialChanges
