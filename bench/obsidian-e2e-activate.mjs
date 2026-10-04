@@ -22,6 +22,12 @@ for (let attempt = 0; attempt < 180; attempt++) {
       if (probe.result.value?.base !== expectedVaultPath) { await client.close(); continue; }
       const activated = await client.Runtime.evaluate({
         expression: `(async () => {
+          const readablePath = ".mdse_integration_readable.json";
+          try {
+            if (!(await app.vault.adapter.exists(readablePath))) {
+              await app.vault.adapter.write(readablePath, JSON.stringify({ at: Date.now(), source: "controller-renderer-vault-ready" }) + "\\n");
+            }
+          } catch {}
           const path = ".mdse_integration_metadata.json";
           const record = async (source) => {
             try { await app.vault.adapter.write(path, JSON.stringify({ at: Date.now(), source }) + "\\n"); } catch {}
