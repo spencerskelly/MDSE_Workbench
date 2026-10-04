@@ -45,10 +45,11 @@ Workbench uses explicit runtime states rather than one blocking startup operatio
 
 1. **Starting** — commands, settings, listeners and status UI are registered. No vault-wide model traversal is required.
 2. **Restoring** — a compatible persistent derived cache is loaded when available.
-3. **Ready** — useful model queries can run from restored state.
-4. **Reconciling** — changed files since the cached state are parsed incrementally in bounded batches.
-5. **Verified** — requested or scheduled global checks are current.
-6. **Rebuild required** — cache/schema/tool incompatibility requires a disposable cache rebuild.
+3. **Ready (core)** — reusable-note/relationship queries can run from restored state or the metadata-only cold-build core.
+4. **Hydrating Local Model** — only candidate note bodies are parsed in bounded background batches; occurrence-aware consumers wait explicitly for this phase.
+5. **Reconciling** — changed files since the cached state are parsed incrementally in bounded batches.
+6. **Verified** — requested or scheduled global checks are current.
+7. **Rebuild required** — cache/schema/tool incompatibility requires a disposable cache rebuild.
 
 Ready and Verified are intentionally different. Engineers may work while reconciliation or global verification continues.
 
@@ -291,3 +292,16 @@ Cache container v3 now uses deterministic path-hash buckets for:
 - file fingerprints.
 
 The manifest contains only bounded bucket metadata rather than the full fingerprint table. Bucket identity remains stable when unrelated files are added. The current A/B writer still writes a complete inactive slot for the strongest recovery behavior while acceptance testing is underway. The stable bucket contract is the prerequisite for a later dirty-bucket writer; that optimization must preserve the same manifest-last and fail-closed recovery guarantees.
+
+
+## W-352 staged cold-build readiness
+
+A cold/full rebuild no longer needs to serialize ordinary note navigation behind every Local Model body read.
+
+The full-build path now:
+1. builds file fingerprints and reusable-note/relationship semantics from Obsidian metadata;
+2. publishes that core state as usable;
+3. collects only notes that metadata indicates may contain a governed Local Model;
+4. hydrates those bodies in bounded background batches.
+
+Occurrence-aware views, global assurance and semantic-cache persistence call the Local Model settle barrier before consuming contextual semantics. The status surface reports pending Local Model hydration while the core graph remains usable. Epoch/revision guards prevent stale asynchronous reads from overwriting a later edit/rebuild.
