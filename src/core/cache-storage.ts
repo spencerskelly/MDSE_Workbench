@@ -119,19 +119,30 @@ async function readSlot(
 ): Promise<SemanticCache> {
   assertGeneration(manifest.generation);
   const slotRoot = cacheSlotPaths(clean)[slot];
-  const fingerprintShards: unknown[] = [];
-  for (let i = 0; i < manifest.fingerprints.count; i++) {
-    fingerprintShards.push(JSON.parse(await storage.read(`${slotRoot}/fingerprints-${pad(i)}.json`)) as unknown);
-  }
-  const noteShards: unknown[] = [];
-  for (let i = 0; i < manifest.notes.count; i++) {
-    noteShards.push(JSON.parse(await storage.read(`${slotRoot}/notes-${pad(i)}.json`)) as unknown);
-  }
-  const localShards: unknown[] = [];
-  for (let i = 0; i < manifest.localRegions.count; i++) {
-    localShards.push(JSON.parse(await storage.read(`${slotRoot}/local-${pad(i)}.json`)) as unknown);
-  }
+
+  // Warm restore is latency-sensitive, but issuing every shard read at once can create its own
+  // filesystem/adapter spike. Read with bounded parallelism and preserve deterministic order.
+  const [fingerprintShards, noteShards, localShards] = await Promise.all([
+    readJsonSeries(storage, Array.from({ length: manifest.fingerprints.count }, (_, i) => `${slotRoot}/fingerprints-${pad(i)}.json`)),
+    readJsonSeries(storage, Array.from({ length: manifest.notes.count }, (_, i) => `${slotRoot}/notes-${pad(i)}.json`)),
+    readJsonSeries(storage, Array.from({ length: manifest.localRegions.count }, (_, i) => `${slotRoot}/local-${pad(i)}.json`)),
+  ]);
   return joinSemanticCache(manifest, fingerprintShards, noteShards, localShards);
+}
+
+async function readJsonSeries(storage: CacheStorage, paths: readonly string[], concurrency = 4): Promise<unknown[]> {
+  if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Cache read concurrency must be a positive integer.");
+  const out = new Array<unknown>(paths.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= paths.length) return;
+      out[i] = JSON.parse(await storage.read(paths[i])) as unknown;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, () => worker()));
+  return out;
 }
 
 interface ManifestSlot {
