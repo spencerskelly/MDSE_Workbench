@@ -1,0 +1,200 @@
+name: Integrated recovery acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/integration-recovery.yml"
+      - "bench/obsidian-recovery-probe.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NOTE_COUNT: "12000"
+      BACKGROUND_COUNT: "300"
+      OBSIDIAN_VERSION: "1.13.7"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Verify exact accepted candidate and install harness deps
+        run: |
+          sha256sum -c artifact-sha256.txt
+          npm ci
+          npm install --no-save chrome-remote-interface
+
+      - name: Install Obsidian
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          curl -L --retry 3 -o "$RUNNER_TEMP/obsidian.deb" \
+            "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian_${OBSIDIAN_VERSION}_amd64.deb"
+          sudo apt-get install -y "$RUNNER_TEMP/obsidian.deb"
+
+      - name: Prepare disposable recovery vault
+        run: |
+          VAULT="$RUNNER_TEMP/mdse-recovery"
+          echo "VAULT=$VAULT" >> "$GITHUB_ENV"
+          rm -rf "$VAULT"
+          mkdir -p "$VAULT/.obsidian/plugins/mdse-workbench" "$VAULT/Background"
+          cp -R vault/99_System "$VAULT/99_System"
+          npm run bench:generate -- "$NOTE_COUNT" "$VAULT/IntegrationData"
+          cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/mdse-workbench/"
+          printf '%s\n' '["mdse-workbench"]' > "$VAULT/.obsidian/community-plugins.json"
+          cat > "$VAULT/.obsidian/plugins/mdse-workbench/data.json" <<'EOF'
+          {"settings":{"warmCachePreview":true}}
+          EOF
+          cat > "$VAULT/.vault.yaml" <<'EOF'
+          vault_uid: 20261004230000000recoveryaccept
+          vault_name: MDSE Recovery Acceptance
+          default_branch: main
+          EOF
+          cat > "$VAULT/Background/Target.md" <<'EOF'
+          ---
+          type: Object
+          id: BG-TARGET
+          uid: 20261004230000001recoverytarget
+          ---
+          # Target
+          EOF
+          for i in $(seq 1 "$BACKGROUND_COUNT"); do
+            cat > "$VAULT/Background/Owner $i.md" <<EOF
+          ---
+          type: Object
+          id: BG-OWNER-$i
+          uid: 20261004230$(printf "%07d" "$i")recoveryx
+          ---
+          # Owner $i
+
+          ## Local Model
+          <!-- MDSE:LOCAL-MODEL START schema=0.2 -->
+
+          ### Part Occurrences
+
+          #### Child $i
+          - definition: [[Target]]
+          ^part-20261004230$(printf "%07d" "$i")recoveryx
+
+          <!-- MDSE:LOCAL-MODEL END -->
+          EOF
+          done
+
+      - name: Register vault
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
+        run: |
+          mkdir -p "$XDG_CONFIG_HOME/obsidian"
+          export VAULT
+          node -e 'const fs=require("fs"),p=require("path");fs.writeFileSync(p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json"),JSON.stringify({vaults:{recovery:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
+
+      - name: Seed valid semantic cache
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
+        run: |
+          export VAULT
+          rm -rf "$VAULT/.obsidian/plugins/mdse-workbench/cache"
+          rm -f "$VAULT/.mdse_integration_result.json"
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"recovery-seed"},null,2))'
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9243 >"$RUNNER_TEMP/recovery-seed.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9243 >"$RUNNER_TEMP/recovery-seed-activate.log" 2>&1
+            for i in $(seq 1 240); do
+              if ls "$VAULT/.obsidian/plugins/mdse-workbench/cache"/manifest-*.json >/dev/null 2>&1; then
+                cp "$VAULT/.mdse_integration_result.json" recovery-seed.json || true
+                exit 0
+              fi
+              sleep 0.5
+            done
+            echo "semantic cache was not committed" >&2
+            exit 1
+          '
+
+      - name: Corrupt both cache manifests
+        run: |
+          printf '{' > "$VAULT/.obsidian/plugins/mdse-workbench/cache/manifest-a.json"
+          printf '{' > "$VAULT/.obsidian/plugins/mdse-workbench/cache/manifest-b.json"
+
+      - name: Prove bad-cache fallback and plugin reload recovery
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
+        run: |
+          export VAULT
+          rm -f "$VAULT/.mdse_integration_result.json"
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"bad-cache-recovery"},null,2))'
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9243 >"$RUNNER_TEMP/recovery-bad-cache.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9243 >"$RUNNER_TEMP/recovery-bad-cache-activate.log" 2>&1
+            node bench/obsidian-recovery-probe.mjs "$VAULT" 9243 | tee recovery-probe.json
+          '
+
+      - name: Prove clean Obsidian restart after recovery
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-recovery
+        run: |
+          export VAULT
+          rm -f "$VAULT/.mdse_integration_result.json"
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),label:"post-recovery-restart"},null,2))'
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9243 >"$RUNNER_TEMP/recovery-restart.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9243 >"$RUNNER_TEMP/recovery-restart-activate.log" 2>&1
+            for i in $(seq 1 240); do
+              if [ -f "$VAULT/.mdse_integration_result.json" ]; then
+                node -e '"'"'const fs=require("fs");const r=JSON.parse(fs.readFileSync(process.env.VAULT+"/.mdse_integration_result.json","utf8"));process.exit(Number.isFinite(r.launchToCoreReadyMs)?0:1)'"'"' && {
+                  cp "$VAULT/.mdse_integration_result.json" recovery-restart.json
+                  exit 0
+                }
+              fi
+              sleep 0.5
+            done
+            exit 1
+          '
+
+      - name: Validate integrated recovery acceptance
+        run: |
+          node <<'NODE'
+          const fs=require("fs");
+          const probe=JSON.parse(fs.readFileSync("recovery-probe.json","utf8"));
+          const restart=JSON.parse(fs.readFileSync("recovery-restart.json","utf8"));
+          const fail=(m)=>{throw new Error(m)};
+          if(!probe.accepted) fail("recovery probe did not accept");
+          if(probe.badCacheFallback.mode!=="full") fail("bad cache did not fall back to full build");
+          if(!String(probe.badCacheFallback.warmRestore||"").startsWith("not used:")) fail("bad cache failure was not recorded");
+          if(!(probe.pluginReload.activeBeforeReload>0)) fail("plugin reload was not performed during active background work");
+          if(!probe.pluginReload.enabledAfter) fail("plugin did not re-enable");
+          if(probe.pluginReload.sourcePendingAfter) fail("source remained pending after plugin reload");
+          if(probe.pluginReload.occurrencePendingAfter!==0) fail("occurrence remained pending after plugin reload");
+          if(probe.pluginReload.localReadErrorsAfter!==0) fail("Local Model read errors remained after plugin reload");
+          if(!Number.isFinite(restart.launchToCoreReadyMs)) fail("Obsidian restart did not reach core-ready");
+          if(restart.files<Number(process.env.NOTE_COUNT)) fail("restart lost source coverage");
+          const out={accepted:true,probe,restart};
+          fs.writeFileSync("recovery-acceptance.json",JSON.stringify(out,null,2)+"\n");
+          console.log(JSON.stringify(out,null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recovery-evidence
+          path: |
+            recovery-seed.json
+            recovery-probe.json
+            recovery-restart.json
+            recovery-acceptance.json
+            ${{ runner.temp }}/recovery-*.log
+          if-no-files-found: warn
