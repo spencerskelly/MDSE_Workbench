@@ -32,7 +32,6 @@ for (let attempt = 0; attempt < 180; attempt++) {
           expression: `(async () => {
             await app.plugins.setEnable(true);
             await app.plugins.enablePlugin("mdse-workbench");
-            if ("${extraPlugin}") {}
             const extraPlugin = ${JSON.stringify(extraPlugin)};
             if (extraPlugin) await app.plugins.enablePlugin(extraPlugin);
             return {
