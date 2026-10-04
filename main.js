@@ -4095,7 +4095,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   setRuntimeStatus(state, detail = "") {
     if (!this.statusEl) return;
-    const label = state === "starting" ? "MDSE Workbench: starting" : state === "waiting" ? "MDSE Workbench: waiting for vault" : state === "indexing" ? "MDSE Workbench: indexing" : state === "ready" ? "MDSE Workbench: ready" : "MDSE Workbench: attention";
+    const label = state === "starting" ? "MDSE Workbench: starting" : state === "waiting" ? "MDSE Workbench: waiting for vault" : state === "restoring" ? "MDSE Workbench: restoring cache" : state === "reconciling" ? "MDSE Workbench: reconciling" : state === "indexing" ? "MDSE Workbench: indexing" : state === "ready" ? "MDSE Workbench: ready" : "MDSE Workbench: attention";
     this.statusEl.setText(detail ? `${label} \xB7 ${detail}` : label);
     this.statusEl.setAttr("aria-label", "MDSE Workbench runtime status");
   }
@@ -4262,28 +4262,31 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     let stats = null;
     if (firstStart && !rebuild && this.settings.warmCachePreview) {
       try {
+        this.setRuntimeStatus("restoring");
         const scope = { vaultUid: await this.loadVaultUid() };
         const cache = await readSemanticCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
         const restored = restoreSemanticState(cache, schema, scope);
         const initialPlan = planReconciliation(restored.fingerprints, indexer.currentFingerprints());
         const initialMode = reconciliationMode(initialPlan);
         if (initialMode !== "full") {
-          indexer.installRestored(restored, cache.header.createdAt);
+          stats = indexer.installRestored(restored, cache.header.createdAt);
           const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
           this.lastWarmRestore = initialChanges ? `restored; ${initialChanges} path change(s) to reconcile` : "restored; cache matched current file fingerprints";
           indexer.enableLiveChanges();
-          this.setRuntimeStatus("indexing", initialChanges ? `reconciling ${initialChanges} path change(s)` : "validating cached state");
-          stats = await indexer.reconcilePlan(initialPlan);
+          if (initialMode === "incremental") {
+            this.setRuntimeStatus("reconciling", `${initialChanges} path change(s)`);
+            stats = await indexer.reconcilePlan(initialPlan);
+          }
           let after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
           let afterMode = reconciliationMode(after);
           if (afterMode === "incremental") {
+            const retryChanges = after.changed.length + after.added.length + after.deleted.length;
+            this.setRuntimeStatus("reconciling", `${retryChanges} newer path change(s)`);
             stats = await indexer.reconcilePlan(after);
             after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
             afterMode = reconciliationMode(after);
           }
-          if (afterMode !== "none") {
-            stats = null;
-          }
+          if (afterMode !== "none") stats = null;
         }
       } catch (e) {
         this.lastWarmRestore = `not used: ${e.message}`;
