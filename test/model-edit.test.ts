@@ -233,3 +233,109 @@ test("structural Apply is blocked when staged Local Model findings contain error
   assert.doesNotMatch(store.text, /#### K2/);
   service.cancelLocalCreate(staged.transaction.id);
 });
+
+
+function noteWithEndpointDependency(): string {
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Main Contactor]]",
+    "^" + localId,
+    "",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + localId + "|K1]]",
+    "^ep-20261003133512743skellyspencer",
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("clean part deletion is staged, applied, and joins shared undo/redo history", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(staged.plan.impacts.length, 0);
+  assert.equal(staged.externalImpacts.length, 0);
+  assert.match(store.text, /#### K1/, "staging must not mutate the source");
+
+  await service.applyLocalDelete(staged.transaction.id);
+  assert.doesNotMatch(store.text, /#### K1/);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.delete");
+
+  await transactions.undo();
+  assert.match(store.text, /#### K1/);
+  await transactions.redo();
+  assert.doesNotMatch(store.text, /#### K1/);
+});
+
+test("same-note Local Model dependency blocks part deletion", async () => {
+  const store = new MemoryStore(noteWithEndpointDependency());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  assert.ok(staged.plan.impacts.some((impact) => impact.sourceKind === "endpoint" && impact.field === "part"));
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  assert.match(store.text, /#### K1/);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalDelete(staged.transaction.id);
+});
+
+test("indexed note-level local reference blocks part deletion", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(
+    store,
+    () => ownerUid,
+    transactions,
+    () => [{ path: "Requirements/REQ-1.md", field: "appliesTo" }],
+  );
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  assert.deepEqual(staged.externalImpacts, [{ path: "Requirements/REQ-1.md", field: "appliesTo" }]);
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  assert.match(store.text, /#### K1/);
+  service.cancelLocalDelete(staged.transaction.id);
+});
+
+test("Apply rechecks cross-note dependencies added after delete Review", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  let external: Array<{ path: string; field: string }> = [];
+  const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  assert.equal(staged.externalImpacts.length, 0);
+  external = [{ path: "Requirements/REQ-2.md", field: "appliesTo" }];
+
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  assert.match(store.text, /#### K1/);
+  assert.equal(service.reviewLocalDelete(staged.transaction.id).externalImpacts.length, 1);
+  service.cancelLocalDelete(staged.transaction.id);
+});
+
+test("cancelled part deletion leaves source and semantic history untouched", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const before = store.text;
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  const cancelled = service.cancelLocalDelete(staged.transaction.id);
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(store.text, before);
+  assert.equal(transactions.history().length, 0);
+});
