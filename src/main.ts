@@ -58,6 +58,7 @@ export default class MdseWorkbench extends Plugin {
   writer: RelationshipWriter | null = null;
   lastFindingsMs = 0;
   detail: NoteDetailPanel | null = null;
+  private statusEl: HTMLElement | null = null;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
   private lastChange = Date.now();
   private unloaded = false;
@@ -67,6 +68,8 @@ export default class MdseWorkbench extends Plugin {
     this.settings = { ...DEFAULTS, ...(stored.settings ?? {}) };
     this.views = stored.views ?? {};
     this.addSettingTab(new WorkbenchSettings(this.app, this));
+    this.statusEl = this.addStatusBarItem();
+    this.setRuntimeStatus("starting");
     this.detail = new NoteDetailPanel(this.app, {
       schema: () => this.schema,
       writer: () => this.writer,
@@ -166,6 +169,18 @@ export default class MdseWorkbench extends Plugin {
     this.app.workspace.onLayoutReady(() => void this.start(false));
   }
 
+  private setRuntimeStatus(state: "starting" | "waiting" | "indexing" | "ready" | "error", detail = ""): void {
+    if (!this.statusEl) return;
+    const label =
+      state === "starting" ? "MDSE Workbench: starting" :
+      state === "waiting" ? "MDSE Workbench: waiting for vault" :
+      state === "indexing" ? "MDSE Workbench: indexing" :
+      state === "ready" ? "MDSE Workbench: ready" :
+      "MDSE Workbench: attention";
+    this.statusEl.setText(detail ? `${label} · ${detail}` : label);
+    this.statusEl.setAttr("aria-label", "MDSE Workbench runtime status");
+  }
+
   /** Resolves once the layout is ready and no note has changed for QUIET_START_MS. */
   private async whenVaultQuiet(): Promise<void> {
     while (!this.unloaded && Date.now() - this.lastChange < QUIET_START_MS) {
@@ -191,9 +206,11 @@ export default class MdseWorkbench extends Plugin {
 
   /** Load schema, build the index, then follow vault changes (WB-033, WB-086). */
   async start(rebuild: boolean): Promise<void> {
+    this.setRuntimeStatus("starting");
     try {
       this.schema = await this.loadSchema();
     } catch (e) {
+      this.setRuntimeStatus("error", "schema");
       new Notice(`MDSE Workbench: could not read the schema files. ${(e as Error).message} Check the paths in settings.`);
       return;
     }
@@ -225,12 +242,15 @@ export default class MdseWorkbench extends Plugin {
       // Do nothing until Obsidian's own cache has finished and the vault has been quiet.
       // On a large vault that first caching takes minutes; indexing alongside it made the app
       // look frozen (0.0.4). No fixed timeout: a slow vault just starts later.
+      this.setRuntimeStatus("waiting");
       await this.whenVaultQuiet();
       if (this.unloaded) return;
     } else {
       this.indexer.setSchema(schema);
     }
+    this.setRuntimeStatus("indexing");
     const stats = await this.indexer.build();
+    this.setRuntimeStatus("ready", `${stats.elements} elements`);
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
     }
