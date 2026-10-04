@@ -46,7 +46,8 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
   }
 
   const rows: Array<[string, string, boolean?]> = [];
-  const hardAttention = input.localReadErrors > 0 || !!input.cacheWriteError || input.schemaWarnings > 0;
+  const assuranceError = input.assurance?.current ? input.assurance.error ?? null : null;
+  const hardAttention = input.localReadErrors > 0 || !!input.cacheWriteError || input.schemaWarnings > 0 || !!assuranceError;
   rows.push(["Model service", input.livePending ? `${input.livePending} live update(s) pending` : "ready"]);
   rows.push([
     "Local Model",
@@ -68,6 +69,8 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
     rows.push(["Global assurance", "not run for current model revision"]);
   } else if (!input.assurance.current) {
     rows.push(["Global assurance", "stale; recomputes on demand"]);
+  } else if (input.assurance.error) {
+    rows.push(["Global assurance", `unavailable: ${input.assurance.error}`, true]);
   } else {
     rows.push([
       "Global assurance",
@@ -77,7 +80,7 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
   }
 
   if (hardAttention) {
-    const issues = input.localReadErrors + input.schemaWarnings + (input.cacheWriteError ? 1 : 0);
+    const issues = input.localReadErrors + input.schemaWarnings + (input.cacheWriteError ? 1 : 0) + (assuranceError ? 1 : 0);
     return {
       level: "attention",
       label: `Workbench · ${issues} issue${issues === 1 ? "" : "s"}`,
