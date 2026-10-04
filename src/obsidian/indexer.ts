@@ -7,6 +7,7 @@ import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../c
 import type { FileFingerprint, ReconciliationPlan, RestoredCoreSemanticState, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
+import { ReversePathDependencyIndex } from "../core/relationship-dependencies";
 import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative";
 import { MetadataChangeBurst } from "../core/metadata-burst";
 import { requeueHydrationPaths } from "../core/hydration-cancel";
@@ -95,6 +96,8 @@ export class Indexer {
   private readonly livePending = new Set<string>();
   private liveApplyTimer: number | null = null;
   private liveApplyTask: Promise<void> | null = null;
+  /** Derived target-path → source-note lookup for targeted relationship re-resolution. */
+  private readonly relationshipDependencies = new ReversePathDependencyIndex();
   /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
   private relationshipResolveTimer: number | null = null;
   private relationshipResolveTask: Promise<void> | null = null;
@@ -395,6 +398,30 @@ export class Indexer {
     this.schema = schema;
   }
 
+  relationshipDependentsOf(paths: Iterable<string>): string[] {
+    return this.relationshipDependencies.dependentsOf(paths);
+  }
+
+  private relationshipTargets(rec: NoteRecord): string[] {
+    const targets = new Set<string>();
+    for (const values of rec.fields.values()) for (const path of values) targets.add(path);
+    for (const ref of rec.localRefs ?? []) targets.add(ref.path);
+    return [...targets];
+  }
+
+  private syncRelationshipDependency(rec: NoteRecord | null, sourcePath: string): void {
+    if (!rec) {
+      this.relationshipDependencies.remove(sourcePath);
+      return;
+    }
+    this.relationshipDependencies.set(sourcePath, this.relationshipTargets(rec));
+  }
+
+  private rebuildRelationshipDependencies(): void {
+    this.relationshipDependencies.clear();
+    for (const rec of this.index.notes.values()) this.syncRelationshipDependency(rec, rec.path);
+  }
+
   /**
    * Install only the core semantic cache. Local Model regions remain deferred and are discovered
    * from Obsidian metadata without reading note bodies.
@@ -423,6 +450,7 @@ export class Indexer {
     this.lastHydrationCandidatesValue = this.deferredHydrationPaths.length;
     this.localReadErrors.clear();
     this.index = state.index;
+    this.rebuildRelationshipDependencies();
     this.fingerprints.clear();
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
@@ -450,6 +478,7 @@ export class Indexer {
     this.lastHydrationCandidatesValue = 0;
     this.localReadErrors.clear();
     this.index = state.index;
+    this.rebuildRelationshipDependencies();
     this.local = state.local;
     this.fingerprints.clear();
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
@@ -566,6 +595,7 @@ export class Indexer {
 
     for (const path of deleted) {
       this.index.remove(path);
+      this.relationshipDependencies.remove(path);
       this.removeLocalRegion(path);
       this.localReadErrors.delete(path);
       this.fingerprints.delete(path);
@@ -628,14 +658,16 @@ export class Indexer {
         (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path,
       );
       if (!sameResolvedEvidence(rec, resolved)) {
-        this.index.upsert({
+        const next = {
           ...rec,
           fields: resolved.fields,
           unresolved: resolved.unresolved,
           broken: resolved.broken,
           repeat: resolved.repeat,
           localRefs: resolved.localRefs,
-        });
+        };
+        this.index.upsert(next);
+        this.syncRelationshipDependency(next, rec.path);
         this.cacheDirtyPaths.add(rec.path);
         changed++;
       }
@@ -695,6 +727,7 @@ export class Indexer {
     const rec = this.record(file);
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
+    this.syncRelationshipDependency(rec, path);
 
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
@@ -823,6 +856,7 @@ export class Indexer {
       await buildBudget.checkpoint(yieldToUi);
     }
     this.index = index;
+    this.rebuildRelationshipDependencies();
     this.local = local;
     this.fingerprints.clear();
     this.cacheDirtyPaths.clear();
@@ -863,6 +897,7 @@ export class Indexer {
     const rec = f instanceof TFile ? this.record(f) : null;
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
+    this.syncRelationshipDependency(rec, path);
     this.applyLocal(path, f instanceof TFile ? f : null);
     this.bumpRevision(path);
   }
