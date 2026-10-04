@@ -365,11 +365,17 @@ export default class MdseWorkbench extends Plugin {
       }
       indexer.beginDeferredLocalHydration();
       this.scheduleRuntimeHealthRefresh();
-      void indexer.whenLocalSettled().then(() => {
-        if (this.unloaded || this.indexer !== indexer) return;
-        this.refreshRuntimeHealth();
-        this.scheduleSemanticCacheWrite();
-      });
+      void indexer.whenLocalSettled()
+        .then(() => {
+          if (this.unloaded || this.indexer !== indexer) return;
+          this.refreshRuntimeHealth();
+          this.scheduleSemanticCacheWrite();
+        })
+        .catch((e) => {
+          if (this.unloaded || this.indexer !== indexer) return;
+          this.lastCacheWriteError = `background occurrence processing failed: ${(e as Error).message}`;
+          this.refreshRuntimeHealth();
+        });
     }, LOCAL_BACKGROUND_DELAY_MS);
   }
 
@@ -483,6 +489,10 @@ export default class MdseWorkbench extends Plugin {
     this.startPromise = this.runStart(rebuild);
     try {
       await this.startPromise;
+    } catch (e) {
+      const message = (e as Error).message || String(e);
+      this.setRuntimeStatus("error", "core model unavailable");
+      new Notice(`MDSE Workbench: core model startup failed. Obsidian remains usable. ${message} Use “Rebuild index” after correcting the issue.`, 12000);
     } finally {
       this.startPromise = null;
     }
