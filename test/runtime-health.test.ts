@@ -7,6 +7,8 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
     summarizeRuntimeHealth({
       ready: false,
       building: false,
+      coreError: null,
+      occurrenceError: null,
       localPending: 0,
       livePending: 0,
       localReadErrors: 0,
@@ -21,6 +23,8 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
   const syncing = summarizeRuntimeHealth({
     ready: true,
     building: false,
+    coreError: null,
+    occurrenceError: null,
     localPending: 12,
     livePending: 0,
     localReadErrors: 0,
@@ -35,6 +39,8 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
   const healthy = summarizeRuntimeHealth({
     ready: true,
     building: false,
+    coreError: null,
+    occurrenceError: null,
     localPending: 0,
     livePending: 0,
     localReadErrors: 0,
@@ -50,6 +56,8 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
   const attention = summarizeRuntimeHealth({
     ready: true,
     building: false,
+    coreError: null,
+    occurrenceError: null,
     localPending: 0,
     livePending: 0,
     localReadErrors: 2,
@@ -66,6 +74,8 @@ test("engineering findings do not turn runtime health into a runtime failure", (
   const h = summarizeRuntimeHealth({
     ready: true,
     building: false,
+    coreError: null,
+    occurrenceError: null,
     localPending: 0,
     livePending: 0,
     localReadErrors: 0,
@@ -84,6 +94,8 @@ test("coalesced live edits appear as syncing rather than runtime failure", () =>
   const h = summarizeRuntimeHealth({
     ready: true,
     building: false,
+    coreError: null,
+    occurrenceError: null,
     localPending: 0,
     livePending: 3,
     localReadErrors: 0,
@@ -95,4 +107,40 @@ test("coalesced live edits appear as syncing rather than runtime failure", () =>
   assert.equal(h.level, "syncing");
   assert.match(h.label, /applying 3/);
   assert.match(h.detail, /coalesced live edits/);
+});
+
+
+test("core and occurrence failures are reported as scoped runtime attention", () => {
+  const core = summarizeRuntimeHealth({
+    ready: false,
+    building: false,
+    coreError: "schema parser crashed",
+    occurrenceError: null,
+    localPending: 0,
+    livePending: 0,
+    localReadErrors: 0,
+    schemaWarnings: 0,
+    cacheWriteError: null,
+    cacheCurrent: false,
+    assurance: null,
+  });
+  assert.equal(core.level, "attention");
+  assert.match(core.label, /core unavailable/);
+  assert.match(core.rows.map((r) => r[1]).join(" "), /schema parser crashed/);
+
+  const occurrence = summarizeRuntimeHealth({
+    ready: true,
+    building: false,
+    coreError: null,
+    occurrenceError: "background failure",
+    localPending: 0,
+    livePending: 0,
+    localReadErrors: 0,
+    schemaWarnings: 0,
+    cacheWriteError: null,
+    cacheCurrent: false,
+    assurance: null,
+  });
+  assert.equal(occurrence.level, "attention");
+  assert.match(occurrence.rows.map((r) => r[1]).join(" "), /background failure/);
 });
