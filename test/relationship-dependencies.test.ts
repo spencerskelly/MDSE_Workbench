@@ -43,3 +43,32 @@ test("duplicate target evidence stays canonical and self-dependencies are ignore
   assert.deepEqual(index.targetsOf("A.md"), ["B.md"]);
   assert.deepEqual(index.dependentsOf(["B.md"]), ["A.md"]);
 });
+
+
+test("path-change candidates include previously unresolved authored linkpaths", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", [], ["Target"]);
+
+  assert.deepEqual(index.candidatesForPathChanges(["Target.md"]), ["Source.md"]);
+  assert.deepEqual(index.candidatesForPathChanges(["Folder/Target.md"]), ["Source.md"]);
+});
+
+test("path-change candidates union resolved dependencies with authored basename matches", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Resolved.md", ["Folder/Controller.md"], ["Folder/Controller"]);
+  index.set("Broken.md", [], ["Controller"]);
+
+  assert.deepEqual(
+    index.candidatesForPathChanges(["Folder/Controller.md"]),
+    ["Broken.md", "Resolved.md"],
+  );
+});
+
+test("updating authored linkpaths removes stale add candidates", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", [], ["Old"]);
+  index.set("Source.md", [], ["New"]);
+
+  assert.deepEqual(index.candidatesForPathChanges(["Old.md"]), []);
+  assert.deepEqual(index.candidatesForPathChanges(["New.md"]), ["Source.md"]);
+});
