@@ -64,6 +64,9 @@ export class Indexer {
   private hydrationTask: Promise<void> | null = null;
   private deferredHydrationPaths: string[] = [];
   private deferredHydrationEpoch = 0;
+  /** Background occurrence hydration pauses while foreground activity resumes; explicit consumers promote it. */
+  private hydrationDemanded = false;
+  private backgroundIdle = () => true;
   private hydrationRemaining = 0;
   private hydrationStartedAt: number | null = null;
   private lastHydrationMsValue: number | null = null;
@@ -156,12 +159,24 @@ export class Indexer {
     this.liveChanges = true;
   }
 
-  /** Start deferred occurrence parsing when an occurrence-aware consumer actually needs it. */
-  beginDeferredLocalHydration(): void {
-    if (this.hydrationTask || !this.deferredHydrationPaths.length) return;
+  setBackgroundIdleCheck(check: () => boolean): void {
+    this.backgroundIdle = check;
+  }
+
+  /**
+   * Start deferred occurrence parsing. Background starts may pause again if foreground activity
+   * resumes; an explicit occurrence-aware consumer promotes the same task to demanded work.
+   */
+  beginDeferredLocalHydration(background = false): void {
+    if (this.hydrationTask) {
+      if (!background) this.hydrationDemanded = true;
+      return;
+    }
+    if (!this.deferredHydrationPaths.length) return;
     const paths = this.deferredHydrationPaths;
     const epoch = this.deferredHydrationEpoch;
     this.deferredHydrationPaths = [];
+    this.hydrationDemanded = !background;
     // Deferred queues store paths, not TFile objects, so rename/delete activity cannot leave
     // stale file handles waiting in memory. Resolve against the vault at the moment work begins.
     const files = paths
@@ -172,7 +187,7 @@ export class Indexer {
 
   /** Wait until all asynchronous semantic work that can affect occurrence-aware queries has settled. */
   async whenLocalSettled(): Promise<void> {
-    this.beginDeferredLocalHydration();
+    this.beginDeferredLocalHydration(false);
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work: Promise<unknown>[] = [...this.pendingLocalReads];
       if (this.liveApplyTask) work.push(this.liveApplyTask);
@@ -204,6 +219,7 @@ export class Indexer {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
     this.hydrationEpoch++;
     this.hydrationTask = null;
+    this.hydrationDemanded = false;
     this.deferredHydrationPaths = [];
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
@@ -474,6 +490,10 @@ export class Indexer {
       const hydrationBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < files.length; i++) {
         if (epoch !== this.hydrationEpoch) return;
+        while (!this.hydrationDemanded && (!this.backgroundIdle() || this.liveUpdatePending > 0)) {
+          await new Promise((r) => window.setTimeout(r, 250));
+          if (epoch !== this.hydrationEpoch) return;
+        }
         const file = files[i];
         const path = file.path;
         const revision = (this.localRevision.get(path) ?? 0) + 1;
@@ -501,6 +521,7 @@ export class Indexer {
     })().finally(() => {
       if (this.hydrationTask === task) {
         this.hydrationTask = null;
+        this.hydrationDemanded = false;
         this.hydrationRemaining = 0;
         if (this.hydrationStartedAt !== null) {
           this.lastHydrationMsValue = Math.round(performance.now() - this.hydrationStartedAt);
