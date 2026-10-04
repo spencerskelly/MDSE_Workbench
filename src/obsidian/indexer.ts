@@ -9,6 +9,7 @@ import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/loc
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
 import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative";
 import { MetadataChangeBurst } from "../core/metadata-burst";
+import { hasPendingSourceReconciliation } from "../core/source-reconciliation";
 import type { Schema } from "../core/schema";
 
 const CHUNK = 500;
@@ -117,6 +118,31 @@ export class Indexer {
 
   get liveUpdatePending(): number {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
+  }
+
+  get sourceReconciliationPending(): boolean {
+    return hasPendingSourceReconciliation({
+      building: this.building,
+      rebuildPending: this.rebuildPending,
+      livePending: this.livePending.size,
+      liveApplyTimerPending: this.liveApplyTimer !== null,
+      liveApplyActive: this.liveApplyTask !== null,
+      relationshipResolvePending: this.relationshipResolvePending,
+      relationshipResolveTimerPending: this.relationshipResolveTimer !== null,
+      relationshipResolveActive: this.relationshipResolveTask !== null,
+    });
+  }
+
+  /** Wait until note/path semantics and relationship resolution are stable before deriving a view. */
+  async whenSourceSettled(): Promise<void> {
+    while (this.sourceReconciliationPending) {
+      const work: Promise<unknown>[] = [];
+      if (this.running) work.push(this.running);
+      if (this.liveApplyTask) work.push(this.liveApplyTask);
+      if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
+      if (work.length) await Promise.all(work);
+      else await new Promise((r) => window.setTimeout(r, 50));
+    }
   }
 
   get lastLocalHydrationMs(): number | null {
