@@ -115,6 +115,11 @@ function summarizeRuntimeHealth(input) {
   };
 }
 
+// src/core/background.ts
+function canRunBackgroundWork(state) {
+  return !state.unloaded && state.ready && !state.building && !state.rebuildPending && state.liveUpdatePending === 0 && state.quietForMs >= state.minimumQuietMs;
+}
+
 // src/core/localmodel.ts
 var READABLE_VERSIONS = ["0.1", "0.2"];
 var PREFIX = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
@@ -4657,7 +4662,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.startupRunStartedAt = null;
     this.startPromise = null;
     this.pendingRebuild = false;
-    /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
+    /** Last foreground model/UI activity; background subsystems share this preemption signal. */
     this.lastChange = Date.now();
     /** Latched once Obsidian says its metadata/link-resolution pass is complete. */
     this.metadataResolved = false;
@@ -4763,7 +4768,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
     this.addCommand({ id: "local-model-findings", name: "Check Local Model (write findings report)", callback: () => void this.checkLocalModel() });
     this.addRibbonIcon("list-checks", "Workbench Review", () => void this.openReview());
-    this.registerEvent(this.app.metadataCache.on("changed", () => this.lastChange = Date.now()));
+    this.registerEvent(this.app.metadataCache.on("changed", () => this.markForegroundActivity()));
     this.registerEvent(this.app.metadataCache.on("resolved", () => {
       this.metadataResolved = true;
       this.indexer?.linkResolutionSettled();
@@ -4825,6 +4830,22 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       "This view is lightweight: it reports already-known runtime state and does not trigger a whole-model assurance scan.",
       "Engineering findings are not treated as a runtime failure; open Review when you want the current global assurance results."
     ]).open();
+  }
+  markForegroundActivity() {
+    this.lastChange = Date.now();
+  }
+  /** Single policy gate used by every optional/background Workbench subsystem. */
+  backgroundWorkAllowed(indexer = this.indexer) {
+    if (!indexer || this.indexer !== indexer) return false;
+    return canRunBackgroundWork({
+      unloaded: this.unloaded,
+      ready: this.isReady(),
+      building: indexer.building,
+      rebuildPending: indexer.rebuildPending,
+      liveUpdatePending: indexer.liveUpdatePending,
+      quietForMs: Date.now() - this.lastChange,
+      minimumQuietMs: LOCAL_BACKGROUND_DELAY_MS
+    });
   }
   scheduleRuntimeHealthRefresh() {
     this.refreshRuntimeHealth();
@@ -4908,7 +4929,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.localBackgroundTimer = window.setTimeout(() => {
       this.localBackgroundTimer = null;
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
-      if (Date.now() - this.lastChange < LOCAL_BACKGROUND_DELAY_MS || indexer.liveUpdatePending > 0) {
+      if (!this.backgroundWorkAllowed(indexer)) {
         this.scheduleBackgroundLocalHydration();
         return;
       }
@@ -4943,7 +4964,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (current.building || current.rebuildPending || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+      if (!this.backgroundWorkAllowed(current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -5088,7 +5109,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const schema = this.schema;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
-      this.indexer.setBackgroundIdleCheck(() => Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS);
+      this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed(this.indexer));
       this.writer = new RelationshipWriter(this.app, () => this.schema, () => this.indexer.index);
       this.assurance = new AssuranceManager({
         revision: () => this.indexer.revision,
@@ -5261,6 +5282,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   /** WB-111: validate the shared Local Model index, write the report and open it. */
   async checkLocalModel() {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const notice = new import_obsidian8.Notice("MDSE Workbench: checking Local Model\u2026", 0);
     try {
@@ -5280,6 +5302,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
   }
   async openReview() {
+    this.markForegroundActivity();
     const existing = this.app.workspace.getLeavesOfType(REVIEW_VIEW)[0];
     const leaf = existing ?? this.app.workspace.getLeaf("tab");
     if (!existing) await leaf.setViewState({ type: REVIEW_VIEW, active: true });
@@ -5299,6 +5322,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     return snapshot;
   }
   async diagnostics() {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const s = this.indexer.stats;
     const schema = this.schema;
@@ -5341,6 +5365,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   /** Lists the views that can start from this note's type and opens the one chosen. */
   pickView(path) {
+    this.markForegroundActivity();
     if (!this.isReady()) {
       new import_obsidian8.Notice("MDSE Workbench is still indexing. Try again in a moment.");
       return;
@@ -5351,6 +5376,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     new ViewPicker(this.app, fits, rec?.name ?? "this note", (p) => void this.explore([path], p)).open();
   }
   async explore(starts, profile = STRUCTURE_PROFILE) {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer;
     if (profileNeedsLocalOccurrences(profile)) {
@@ -5461,6 +5487,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     else if (missing) this.detail?.showUndefined(missing);
   }
   async checkView() {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer;
     const f = this.app.workspace.getActiveFile();
@@ -5502,6 +5529,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     ).open();
   }
   relate(firstPath, secondPath) {
+    this.markForegroundActivity();
     if (!this.ready()) return;
     const index = this.indexer.index;
     const a = index.notes.get(firstPath);
@@ -5522,6 +5550,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }).open();
   }
   async undo() {
+    this.markForegroundActivity();
     if (!this.writer) return;
     new import_obsidian8.Notice(await this.writer.undo(), 15e3);
   }
