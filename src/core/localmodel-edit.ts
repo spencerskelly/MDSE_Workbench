@@ -7,6 +7,7 @@
 import {
   WRITABLE_VERSION,
   parseLocalModel,
+  parseLinks,
   type LocalFinding,
   type LocalKind,
   type LocalRecord,
@@ -152,6 +153,61 @@ export function nextLocalId(kind: LocalKind, ownerUid: string, now = new Date())
     pad(now.getUTCMilliseconds(), 3);
   const prefix: Record<LocalKind, string> = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
   return prefix[kind] + stamp + suffix;
+}
+
+export interface LocalDeleteImpact {
+  sourceLocalId: string;
+  sourceKind: LocalKind;
+  sourceIdentifier: string;
+  field: string;
+}
+
+export interface PlannedLocalDelete extends PlannedLocalEdit {
+  impacts: LocalDeleteImpact[];
+  identifier: string;
+}
+
+export function planLocalRecordDelete(text: string, localId: string): PlannedLocalDelete {
+  const editable = editableLocalRegion(text);
+  const record = editable.region.records.find((candidate) => candidate.localId === localId);
+  if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
+  if (record.kind !== "part") throw new Error("This deletion slice supports part occurrences only.");
+
+  const impacts: LocalDeleteImpact[] = [];
+  for (const source of editable.region.records) {
+    if (source.localId === localId) continue;
+    for (const [field, value] of source.fields) {
+      for (const link of parseLinks(value)) {
+        if (!link.target && link.blockId === localId) {
+          impacts.push({
+            sourceLocalId: source.localId,
+            sourceKind: source.kind,
+            sourceIdentifier: source.identifier,
+            field,
+          });
+        }
+      }
+    }
+  }
+
+  const range = recordLineRange(editable, record);
+  let end = range.end;
+  while (end < editable.lines.length && editable.lines[end].trim() === "") end++;
+  const nextLines = [...editable.lines.slice(0, range.start), ...editable.lines.slice(end)];
+  const after = nextLines.join(editable.eol);
+  const parsed = parseLocalModel(after);
+  if (!parsed?.structured) throw new Error("Planned deletion would make the Local Model region structurally unreadable.");
+
+  return {
+    before: text,
+    after,
+    changed: after !== text,
+    localId,
+    kind: record.kind,
+    findings: parsed.findings.slice(),
+    impacts,
+    identifier: record.identifier,
+  };
 }
 
 export interface NewLocalRecord {
