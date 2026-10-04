@@ -121,6 +121,11 @@ export class Indexer {
 
   private async doBuild(): Promise<BuildStats> {
     const t0 = performance.now();
+    // A full build reads the vault's current state. Events queued before the build started are
+    // therefore already represented by what it is about to read. Keep only events that arrive
+    // during the build; otherwise Obsidian's first-start metadata burst can trigger a redundant
+    // second whole-vault rebuild immediately after the first one (W-343 / RTA-1).
+    this.dirty.clear();
     const index = new ModelIndex(this.schema);
     const local = new LocalModelIndex();
     const files = this.app.vault.getMarkdownFiles();
