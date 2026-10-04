@@ -4892,6 +4892,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.scheduleSemanticCacheWrite();
         return;
       }
+      if (current.localHydrationPending > 0) {
+        this.scheduleBackgroundLocalHydration();
+        this.scheduleSemanticCacheWrite();
+        return;
+      }
       if (this.cacheWriteTask) return;
       let task;
       task = this.persistSemanticCache().finally(() => {
