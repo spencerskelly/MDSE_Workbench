@@ -11,7 +11,7 @@ import { schemaSignature, type Schema } from "./schema";
 
 export const CACHE_FORMAT_VERSION = 1;
 /** Bump when semantic parsing/resolution meaning changes even if the JSON shape does not. */
-export const CACHE_SEMANTIC_VERSION = 1;
+export const CACHE_SEMANTIC_VERSION = 2;
 
 export interface CacheScope {
   /** Binds disposable state to one initialized MDSE vault identity. */
@@ -45,6 +45,7 @@ export interface CacheHeader extends CacheCompatibility {
 interface CachedNoteRecord {
   path: string;
   name: string;
+  authoredLinks: Array<{ field: string; link: string; linkpath: string }>;
   type?: string;
   id?: string;
   uid?: string;
@@ -163,6 +164,7 @@ function serializeNote(n: NoteRecord): CachedNoteRecord {
     ...(n.type !== undefined ? { type: n.type } : {}),
     ...(n.id !== undefined ? { id: n.id } : {}),
     ...(n.uid !== undefined ? { uid: n.uid } : {}),
+    authoredLinks: (n.authoredLinks ?? []).map((x) => ({ ...x })),
     fields: [...n.fields.entries()].map(([k, v]) => [k, [...v]]),
     unresolved: n.unresolved,
     ...(n.broken ? { broken: n.broken.map((x) => ({ ...x })) } : {}),
@@ -174,7 +176,7 @@ function serializeNote(n: NoteRecord): CachedNoteRecord {
 }
 
 function deserializeNote(raw: unknown): NoteRecord {
-  if (!isObject(raw) || typeof raw.path !== "string" || typeof raw.name !== "string" || typeof raw.unresolved !== "number" || !Array.isArray(raw.fields)) {
+  if (!isObject(raw) || typeof raw.path !== "string" || typeof raw.name !== "string" || typeof raw.unresolved !== "number" || !Array.isArray(raw.fields) || !arrayOfAuthoredLinks(raw.authoredLinks)) {
     throw new Error("Malformed note cache entry.");
   }
   const fields = new Map<string, string[]>();
@@ -206,6 +208,7 @@ function deserializeNote(raw: unknown): NoteRecord {
     ...(type !== undefined ? { type } : {}),
     ...(id !== undefined ? { id } : {}),
     ...(uid !== undefined ? { uid } : {}),
+    authoredLinks: raw.authoredLinks.map((x) => ({ ...x })),
     fields,
     unresolved: raw.unresolved,
     ...(broken ? { broken } : {}),
@@ -355,6 +358,7 @@ function strictLinks(v: unknown, field: string): LinkRef[] {
 const isFinding = (v: unknown): v is LocalFinding => isObject(v) && typeof v.code === "string" && (v.severity === "error" || v.severity === "warning") && typeof v.message === "string";
 const arrayOfBroken = (v: unknown): v is Array<{ field: string; link: string }> => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.link === "string");
 const arrayOfLocalRefs = (v: unknown): v is Array<{ field: string; path: string; localId: string }> => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.path === "string" && typeof x.localId === "string");
+const arrayOfAuthoredLinks = (v: unknown): v is Array<{ field: string; link: string; linkpath: string }> => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.link === "string" && typeof x.linkpath === "string");
 
 function pairsNumber(v: unknown, label: string): Map<string, number> {
   if (!Array.isArray(v)) throw new Error(`Malformed cached ${label}.`);
