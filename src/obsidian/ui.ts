@@ -3,7 +3,7 @@ import type { NoteRecord } from "../core/model";
 import type { RelationshipOption } from "../core/rules";
 import type { ViewProfile } from "../core/views";
 import type { NewLocalRecord } from "../core/localmodel-edit";
-import type { StagedLocalCreate } from "../core/model-edit";
+import type { StagedLocalCreate, StagedLocalDelete } from "../core/model-edit";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -267,6 +267,130 @@ export class LocalPartCreateModal extends Modal {
           new Notice(`Created part occurrence ${values.heading}.`, 5000);
         } catch (e) {
           new Notice(`Not applied: ${(e as Error).message}`, 12000);
+          apply.disabled = false;
+        }
+      })();
+    };
+  }
+}
+
+
+export class LocalPartDeleteModal extends Modal {
+  private staged: StagedLocalDelete | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly occurrenceName: string,
+    private readonly stage: () => Promise<StagedLocalDelete>,
+    private readonly apply: (transactionId: string) => Promise<void>,
+    private readonly cancel: (transactionId: string) => void,
+    private readonly onApplied: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText("Review part occurrence deletion");
+    void this.load();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try { this.cancel(staged.transaction.id); } catch { /* already cancelled */ }
+    }
+  }
+
+  private async load(): Promise<void> {
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: "Checking structural dependencies before anything is changed…" });
+    try {
+      const staged = await this.stage();
+      this.staged = staged;
+      this.renderReview(staged);
+    } catch (e) {
+      this.contentEl.empty();
+      this.contentEl.createEl("p", { cls: "mdse-warn", text: `Cannot stage deletion: ${(e as Error).message}` });
+      const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+      buttons.createEl("button", { text: "Close" }).onclick = () => this.close();
+    }
+  }
+
+  private renderReview(staged: StagedLocalDelete): void {
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const row = (key: string, value: string) => {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value || "—" });
+    };
+    row("Owner", this.ownerName);
+    row("Occurrence", this.occurrenceName);
+    row("Transaction", staged.transaction.label);
+    row("Scope", staged.transaction.scope);
+    row("Local ID", staged.plan.localId);
+
+    const localImpacts = staged.plan.impacts;
+    const externalImpacts = staged.externalImpacts;
+    const blockingFindings = staged.plan.findings.filter((finding) => finding.severity === "error");
+    const blocked = localImpacts.length + externalImpacts.length + blockingFindings.length > 0;
+
+    const impactBox = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+    if (!blocked) {
+      impactBox.createEl("strong", { text: "Impact review passed" });
+      impactBox.createEl("p", { text: "No Local Model or indexed note-level references depend on this occurrence." });
+    } else {
+      impactBox.createEl("strong", { text: "Deletion blocked by dependencies" });
+      for (const impact of localImpacts) {
+        impactBox.createEl("p", {
+          cls: "mdse-warn",
+          text: `LOCAL: ${impact.sourceKind} "${impact.sourceIdentifier}" uses this occurrence through ${impact.field}.`,
+        });
+      }
+      for (const impact of externalImpacts) {
+        impactBox.createEl("p", {
+          cls: "mdse-warn",
+          text: `MODEL: ${impact.path} targets this occurrence through ${impact.field}.`,
+        });
+      }
+      for (const finding of blockingFindings) {
+        impactBox.createEl("p", { cls: "mdse-warn", text: `ERROR: ${finding.message}` });
+      }
+    }
+
+    const warnings = staged.plan.findings.filter((finding) => finding.severity === "warning");
+    if (warnings.length) {
+      const warningBox = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      warningBox.createEl("strong", { text: "Warnings" });
+      for (const finding of warnings) warningBox.createEl("p", { text: finding.message });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply deletion", cls: "mod-warning" });
+    apply.disabled = blocked;
+    apply.setAttr("title", blocked ? "Remove dependent references before deleting this occurrence." : "Delete this occurrence.");
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied();
+          new Notice(`Deleted part occurrence ${this.occurrenceName}.`, 5000);
+        } catch (e) {
+          new Notice(`Not deleted: ${(e as Error).message}`, 12000);
           apply.disabled = false;
         }
       })();
