@@ -164,9 +164,28 @@ jobs:
             if(r.kind==="warm" && !String(r.warmRestore||"").startsWith("restored;")) fail(`cycle ${r.cycle} did not use warm restore: ${r.warmRestore}`);
             if(!Number.isFinite(r.launchToCoreReadyMs)) fail(`cycle ${r.cycle} never recorded core readiness`);
           }
+          const stableJson=(value)=>JSON.stringify(value??null);
+          for(const r of rows){
+            if(r.relationshipHistory!==baseline.relationshipHistory) fail(`cycle ${r.cycle} relationship history drifted`);
+            if(stableJson(r.dependencySize)!==stableJson(baseline.dependencySize)) fail(`cycle ${r.cycle} reverse dependency index size drifted`);
+            for(const metric of ["Nodes","Documents","JSEventListeners"]){
+              if(r.metrics?.[metric]!==baseline.metrics?.[metric]) fail(`cycle ${r.cycle} renderer ${metric} drifted`);
+            }
+          }
           const summarize=(kind)=>{
             const s=rows.filter(r=>r.kind===kind);
-            return {count:s.length,heapUsedBytes:s.map(r=>r.jsHeapUsedBytes),coreReadyMs:s.map(r=>r.launchToCoreReadyMs),modes:s.map(r=>r.mode),warmRestore:s.map(r=>r.warmRestore)};
+            const first=s[0], last=s[s.length-1];
+            if(last.jsHeapUsedBytes > first.jsHeapUsedBytes * 1.10) fail(`${kind} heap grew more than 10% from first to last cycle`);
+            if(last.launchToCoreReadyMs > first.launchToCoreReadyMs * 1.20) fail(`${kind} core readiness degraded more than 20% from first to last cycle`);
+            return {
+              count:s.length,
+              heapUsedBytes:s.map(r=>r.jsHeapUsedBytes),
+              coreReadyMs:s.map(r=>r.launchToCoreReadyMs),
+              heapEndVsStartRatio:last.jsHeapUsedBytes/first.jsHeapUsedBytes,
+              coreReadyEndVsStartRatio:last.launchToCoreReadyMs/first.launchToCoreReadyMs,
+              modes:s.map(r=>r.mode),
+              warmRestore:s.map(r=>r.warmRestore)
+            };
           };
           const out={accepted:true,semanticBaseline:{files:baseline.files,elements:baseline.elements,links:baseline.links},cold:summarize("cold"),warm:summarize("warm"),cycles:rows};
           fs.writeFileSync("restart-acceptance.json",JSON.stringify(out,null,2)+"\n");
