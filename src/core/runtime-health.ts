@@ -12,6 +12,7 @@ export interface RuntimeHealthInput {
   coreError: string | null;
   occurrenceError: string | null;
   localPending: number;
+  localQueued: number;
   livePending: number;
   localReadErrors: number;
   schemaWarnings: number;
@@ -54,7 +55,7 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
       detail: "Model service is not ready yet.",
       rows: [
         ["Model service", input.building ? "indexing" : "starting"],
-        ["Local Model", input.localPending ? `${input.localPending} pending` : "not yet available"],
+        ["Local Model", input.localQueued ? `${input.localQueued} queued` : input.localPending ? `${input.localPending} pending` : "not yet available"],
       ],
     };
   }
@@ -63,15 +64,18 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
   const assuranceError = input.assurance?.current ? input.assurance.error ?? null : null;
   const hardAttention = input.localReadErrors > 0 || !!input.occurrenceError || !!input.cacheWriteError || input.schemaWarnings > 0 || !!assuranceError;
   rows.push(["Model service", input.livePending ? `${input.livePending} live update(s) pending` : "ready"]);
+  const activeLocal = Math.max(0, input.localPending - input.localQueued);
   rows.push([
     "Local Model",
     input.occurrenceError
       ? `background processing issue: ${input.occurrenceError}`
       : input.localReadErrors
         ? `${input.localReadErrors} read error(s)`
-        : input.localPending
-          ? `${input.localPending} note(s) hydrating`
-          : "settled",
+        : activeLocal
+          ? `${activeLocal} note(s) hydrating`
+          : input.localQueued
+            ? `${input.localQueued} note(s) queued for later`
+            : "settled",
     !!input.occurrenceError || input.localReadErrors > 0,
   ]);
   rows.push(["Schema", input.schemaWarnings ? `${input.schemaWarnings} warning(s)` : "compatible", input.schemaWarnings > 0]);
@@ -107,14 +111,19 @@ export function summarizeRuntimeHealth(input: RuntimeHealthInput): RuntimeHealth
 
   const pending = input.livePending + input.localPending;
   if (pending > 0) {
+    const activeOccurrence = Math.max(0, input.localPending - input.localQueued);
     return {
       level: "syncing",
       label: input.livePending
         ? `Workbench ✓ · applying ${input.livePending}`
-        : "Workbench ✓ · occurrence data loading",
+        : activeOccurrence
+          ? "Workbench ✓ · occurrence data loading"
+          : "Workbench ✓ · occurrence data queued",
       detail: input.livePending
         ? "Core model remains usable while coalesced live edits finish."
-        : "Core model is ready; occurrence-aware capabilities are loading in the background.",
+        : activeOccurrence
+          ? "Core model is ready; occurrence-aware capabilities are loading in the background."
+          : "Core model is ready; occurrence-aware capabilities are intentionally deferred until the vault is quiet or one is requested.",
       rows,
     };
   }
