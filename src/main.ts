@@ -128,6 +128,7 @@ export default class MdseWorkbench extends Plugin {
   private integrationProbe: { launchStartedAt: number; noteCount?: number; label?: string } | null = null;
   private integrationPluginLoadedAt: number | null = null;
   private integrationMetadataResolvedAt: number | null = null;
+  private integrationMetadataCoverageAt: number | null = null;
   private unloaded = false;
 
   async onload(): Promise<void> {
@@ -350,6 +351,8 @@ export default class MdseWorkbench extends Plugin {
       readableSource,
       metadataResolvedAt,
       metadataResolutionSource,
+      metadataCoverageReadyAt: this.integrationMetadataCoverageAt,
+      launchToMetadataCoverageMs: this.integrationMetadataCoverageAt === null ? null : this.integrationMetadataCoverageAt - probe.launchStartedAt,
       coreReadyAt,
       occurrenceReadyAt: this.indexer?.localHydrationPending ? null : coreReadyAt,
       cacheReadyAt: null,
@@ -503,16 +506,32 @@ export default class MdseWorkbench extends Plugin {
    */
   private async whenVaultQuiet(): Promise<void> {
     while (!this.unloaded) {
-      if (this.metadataResolved) {
-        // Give Obsidian/UI and other lightweight plugin onload work one short lane before
-        // Workbench starts core indexing/restoration. Workbench readiness may come later;
-        // vault usability wins over minimum feature latency.
-        await new Promise((r) => window.setTimeout(r, CORE_AFTER_METADATA_DELAY_MS));
-        return;
-      }
-      if (Date.now() - this.lastChange >= QUIET_START_MS) return;
+      if (this.metadataResolved || Date.now() - this.lastChange >= QUIET_START_MS) break;
       await new Promise((r) => window.setTimeout(r, 250));
     }
+    if (this.unloaded) return;
+
+    // Obsidian's global "resolved" event can precede completion of per-file metadata entries in
+    // large vaults. Workbench's core graph depends on those entries for frontmatter and authored
+    // links, so do not publish/build authoritative core state until every current Markdown file
+    // has a metadata cache entry.
+    const pending = new Set(this.app.vault.getMarkdownFiles().map((file) => file.path));
+    while (!this.unloaded && pending.size) {
+      for (const path of [...pending]) {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile) || file.extension !== "md" || this.app.metadataCache.getFileCache(file)) {
+          pending.delete(path);
+        }
+      }
+      if (pending.size) await new Promise((r) => window.setTimeout(r, 250));
+    }
+    if (this.unloaded) return;
+    if (this.integrationProbe) this.integrationMetadataCoverageAt = Date.now();
+
+    // Give Obsidian/UI and other lightweight plugin onload work one short lane before
+    // Workbench starts core indexing/restoration. Workbench readiness may come later;
+    // vault usability wins over minimum feature latency.
+    await new Promise((r) => window.setTimeout(r, CORE_AFTER_METADATA_DELAY_MS));
   }
 
   async saveAll(): Promise<void> {
