@@ -24,6 +24,7 @@ export interface RuntimeHealthInput {
         current: boolean;
         findings: number;
         computedAt: number;
+        error?: string | null;
       };
 }
 
