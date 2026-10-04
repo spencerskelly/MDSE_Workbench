@@ -49,12 +49,20 @@ for (let attempt = 0; attempt < 240; attempt++) {
           await waitFor(() => indexer.localHydrationActive > 0, 5000, "background occurrence active");
           const activeBeforeReload = indexer.localHydrationActive;
 
-          await app.plugins.disablePlugin("mdse-workbench");
-          await waitFor(() => !app.plugins.enabledPlugins.has("mdse-workbench"), 5000, "plugin disabled");
+          if (typeof app.plugins.disablePluginAndSave === "function") {
+            await app.plugins.disablePluginAndSave("mdse-workbench");
+          } else {
+            await app.plugins.disablePlugin("mdse-workbench");
+          }
+          await waitFor(() => !app.plugins.enabledPlugins.has("mdse-workbench") && !app.plugins.plugins?.["mdse-workbench"], 10000, "plugin disabled");
 
           app.vault.cachedRead = originalCachedRead;
-          await app.plugins.enablePlugin("mdse-workbench");
-          await waitFor(() => app.plugins.enabledPlugins.has("mdse-workbench"), 5000, "plugin re-enabled");
+          if (typeof app.plugins.enablePluginAndSave === "function") {
+            await app.plugins.enablePluginAndSave("mdse-workbench");
+          } else {
+            await app.plugins.enablePlugin("mdse-workbench");
+          }
+          await waitFor(() => app.plugins.enabledPlugins.has("mdse-workbench") && !!app.plugins.plugins?.["mdse-workbench"], 10000, "plugin re-enabled");
           await waitFor(() => {
             const p = app.plugins.plugins?.["mdse-workbench"];
             return !!p?.isReady?.() && !!p?.indexer?.stats;
