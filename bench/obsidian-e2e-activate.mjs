@@ -43,10 +43,11 @@ for (let attempt = 0; attempt < 180; attempt++) {
       await client.close();
       const value = activated.result.value;
       console.log("Cold-run controlled plugin activation:", value);
-      if (!value?.restrictedModeOff || !value?.pluginEnabled) process.exit(2);
-      process.exit(0);
+      if (value?.restrictedModeOff && value?.pluginEnabled) process.exit(0);
+      // The renderer can become reachable before Restricted Mode/plugin activation has fully
+      // settled. Treat that as transient and retry rather than failing the measured run.
     } catch {}
   }
   await sleep(250);
 }
-throw new Error("Could not activate mdse-workbench in the measured cold vault");
+throw new Error("Could not confirm mdse-workbench activation in the measured cold vault");
