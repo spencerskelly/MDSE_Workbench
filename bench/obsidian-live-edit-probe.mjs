@@ -34,6 +34,23 @@ for (let attempt = 0; attempt < 480; attempt++) {
           const edges = (path) => indexer.index.out(path).map((e) => ({ field: e.field, to: e.to }));
           const localCount = (path) => indexer.local.recordsOf(path).length;
           const results = [];
+          const progress = async (stage, extra = {}) => {
+            try {
+              await app.vault.adapter.write(".mdse_live_edit_progress.json", JSON.stringify({
+                stage,
+                at: Date.now(),
+                sourcePending: indexer.sourceReconciliationPending,
+                livePending: indexer.liveUpdatePending,
+                occurrencePending: indexer.localHydrationPending,
+                occurrenceActive: indexer.localHydrationActive,
+                ...extra,
+              }, null, 2) + "\\n");
+            } catch {}
+          };
+          const withTimeout = async (promise, timeout, label) => await Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for " + label)), timeout)),
+          ]);
 
           // Slow only the disposable background Local Model fixtures so background occurrence
           // work is observably active while foreground edits arrive.
@@ -55,8 +72,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
           };
 
           const settleSource = async (label) => {
-            await indexer.whenSourceSettled();
+            await progress(label + ":source-wait");
+            await withTimeout(indexer.whenSourceSettled(), 15000, label + " source barrier");
             await waitFor(() => indexer.liveUpdatePending === 0 && !indexer.sourceReconciliationPending, 10000, label + " source settled");
+            await progress(label + ":source-settled");
           };
 
           try {
@@ -69,6 +88,7 @@ for (let attempt = 0; attempt < 480; attempt++) {
 
             // ADD: unresolved authored hasPart must become resolved while background occurrence
             // hydration is active.
+            await progress("add:begin");
             const addBg = await ensureBackgroundActive("add");
             const targetText = [
               "---",
@@ -98,9 +118,11 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await indexer.hydrateLocalOwners([added]);
             if (localCount(added) !== 1) throw new Error("added Local Model occurrence was not published");
             results.push({ op: "add", background: addBg, path: added, relationshipResolved: true, localRecords: localCount(added) });
+            await progress("add:done");
 
             // EDIT: semantic frontmatter relationship must update, and the Local Model body must
             // remain authoritative after the edit cancels/requeues background work.
+            await progress("edit:begin");
             const editBg = await ensureBackgroundActive("edit");
             const file1 = app.vault.getAbstractFileByPath(added);
             const edited = targetText.replace("status: Draft", "status: Active\\nperforms:\\n  - \\"[[Live Function]]\\"").replace("#### Nested occurrence", "#### Nested occurrence edited");
@@ -110,9 +132,11 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await indexer.hydrateLocalOwners([added]);
             if (localCount(added) !== 1) throw new Error("edited Local Model occurrence disappeared");
             results.push({ op: "edit", background: editBg, path: added, performsResolved: true, localRecords: localCount(added) });
+            await progress("edit:done");
 
             // RENAME: old path must disappear, new path must own the same semantic note/local
             // region after source reconciliation.
+            await progress("rename:begin");
             const renameBg = await ensureBackgroundActive("rename");
             const file2 = app.vault.getAbstractFileByPath(added);
             await app.fileManager.renameFile(file2, renamed);
@@ -121,8 +145,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await indexer.hydrateLocalOwners([renamed]);
             if (localCount(added) !== 0 || localCount(renamed) !== 1) throw new Error("Local Model did not migrate cleanly on rename");
             results.push({ op: "rename", background: renameBg, oldPathRemoved: true, newPath: renamed, localRecords: localCount(renamed) });
+            await progress("rename:done");
 
             // MOVE: folder-qualified path change must converge without a stale old path.
+            await progress("move:begin");
             const moveBg = await ensureBackgroundActive("move");
             if (!app.vault.getAbstractFileByPath("Acceptance/Moved")) await app.vault.createFolder("Acceptance/Moved");
             const file3 = app.vault.getAbstractFileByPath(renamed);
@@ -132,8 +158,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await indexer.hydrateLocalOwners([moved]);
             if (localCount(renamed) !== 0 || localCount(moved) !== 1) throw new Error("Local Model did not migrate cleanly on move");
             results.push({ op: "move", background: moveBg, oldPathRemoved: true, newPath: moved, localRecords: localCount(moved) });
+            await progress("move:done");
 
             // DELETE: note, occurrence region, and resolved graph target must all disappear.
+            await progress("delete:begin");
             const deleteBg = await ensureBackgroundActive("delete");
             const file4 = app.vault.getAbstractFileByPath(moved);
             await app.vault.delete(file4);
@@ -142,13 +170,16 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await waitFor(() => !edges(anchor).some((e) => e.field === "hasPart" && e.to === moved), 10000, "deleted relationship removed");
             if (localCount(moved) !== 0) throw new Error("deleted Local Model region remained published");
             results.push({ op: "delete", background: deleteBg, pathRemoved: true, relationshipRemoved: true, localRecords: localCount(moved) });
+            await progress("delete:done");
 
             // Let the interrupted/requeued background work finish after the edit sequence and
             // prove no source lane or occurrence lane was stranded.
             app.vault.cachedRead = originalCachedRead;
             indexer.setBackgroundIdleCheck(() => true);
-            await indexer.whenLocalSettled(true);
-            await indexer.whenSourceSettled();
+            await progress("final:settle-begin");
+            await withTimeout(indexer.whenLocalSettled(true), 30000, "final occurrence settlement");
+            await withTimeout(indexer.whenSourceSettled(), 15000, "final source settlement");
+            await progress("final:settled");
 
             return {
               accepted: true,
