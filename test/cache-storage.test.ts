@@ -143,3 +143,19 @@ test("cache paths reject traversal and unsafe generation names", async () => {
   await assert.rejects(() => writeSemanticCacheGeneration(storage, "../cache", cache, "g"));
   await assert.rejects(() => writeSemanticCacheGeneration(storage, "runtime/cache", cache, "../g"));
 });
+
+
+test("cache commit order is monotonic even if the system clock moves backward", async () => {
+  const newerClock = sampleCache(200).cache;
+  const rolledBackClock = sampleCache(100).cache;
+  rolledBackClock.header.producerVersion = "after-clock-rollback";
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", newerClock, "before-rollback", { notesPerShard: 1, regionsPerShard: 1 });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", rolledBackClock, "after-rollback", { notesPerShard: 1, regionsPerShard: 1 });
+
+  const [a, b] = cacheManifestPaths("runtime/cache");
+  const manifests = [a, b].map((path) => JSON.parse(storage.files.get(path) ?? "{}"));
+  assert.deepEqual(manifests.map((m) => m.sequence).sort((x, y) => x - y), [1, 2]);
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "after-clock-rollback");
+});
