@@ -2520,6 +2520,22 @@ var SingleFlightByKey = class {
   }
 };
 
+// src/core/local-retention.ts
+var DEFAULT_LOCAL_REGION_RETENTION_LIMIT = 256;
+function localRegionEvictions(oldestToNewest, protectedPaths, limit = DEFAULT_LOCAL_REGION_RETENTION_LIMIT) {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error("Local region retention limit must be a positive integer.");
+  let retained = oldestToNewest.length;
+  if (retained <= limit) return [];
+  const evict = [];
+  for (const path of oldestToNewest) {
+    if (retained <= limit) break;
+    if (protectedPaths.has(path)) continue;
+    evict.push(path);
+    retained--;
+  }
+  return evict;
+}
+
 // src/core/source-reconciliation.ts
 function hasPendingSourceReconciliation(state) {
   return state.building || state.rebuildPending || state.livePending > 0 || state.liveApplyTimerPending || state.liveApplyActive || state.relationshipResolvePending || state.relationshipResolveTimerPending || state.relationshipResolveActive;
@@ -2566,6 +2582,8 @@ var Indexer = class {
     /** Remaining owners in the active bulk hydration; retained so cancellation can requeue them. */
     this.activeHydrationPaths = [];
     this.deferredHydrationPaths = [];
+    /** Evicted occurrence regions stay cold until an explicit occurrence consumer asks for them. */
+    this.coldLocalPaths = /* @__PURE__ */ new Set();
     this.deferredHydrationEpoch = 0;
     /** Background occurrence hydration pauses while foreground activity resumes; explicit consumers promote it. */
     this.hydrationDemanded = false;
@@ -2576,6 +2594,9 @@ var Indexer = class {
     this.lastHydrationCandidatesValue = 0;
     /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
     this.localReadErrors = /* @__PURE__ */ new Map();
+    /** Hydration/use recency for bounded steady-state Local Model retention. */
+    this.localRetentionOrder = /* @__PURE__ */ new Map();
+    this.localRetentionClock = 0;
     /** Rapid live edits are coalesced so one keystroke burst does not trigger repeated Local Model body reads. */
     this.livePending = /* @__PURE__ */ new Set();
     this.liveApplyTimer = null;
@@ -2650,6 +2671,33 @@ var Indexer = class {
       path
     }));
   }
+  setLocalRegion(path, region) {
+    this.local.set(path, region);
+    if (region) this.localRetentionOrder.set(path, ++this.localRetentionClock);
+    else this.localRetentionOrder.delete(path);
+  }
+  removeLocalRegion(path) {
+    this.local.remove(path);
+    this.localRetentionOrder.delete(path);
+  }
+  /**
+   * Return steady-state occurrence memory to a bounded size. Evicted regions remain discoverable
+   * from authoritative Markdown and are requeued for future hydration.
+   */
+  trimLocalRetention(protectedPaths = [], limit = DEFAULT_LOCAL_REGION_RETENTION_LIMIT) {
+    const ordered = [...this.local.regions.keys()].sort((a, b) => (this.localRetentionOrder.get(a) ?? 0) - (this.localRetentionOrder.get(b) ?? 0) || a.localeCompare(b));
+    const evict = localRegionEvictions(ordered, new Set(protectedPaths), limit);
+    if (!evict.length) return 0;
+    for (const path of evict) {
+      this.removeLocalRegion(path);
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof import_obsidian.TFile && file.extension === "md" && this.mayHaveLocalModel(file)) this.coldLocalPaths.add(path);
+    }
+    return evict.length;
+  }
+  get localRetainedRegionCount() {
+    return this.local.regions.size;
+  }
   bumpRevision(path) {
     this.semanticRevision++;
     if (path) this.cacheDirtyPaths.add(path);
@@ -2710,6 +2758,11 @@ var Indexer = class {
    *   priority from resumed foreground activity.
    */
   async whenLocalSettled(demanded = true) {
+    if (demanded && this.coldLocalPaths.size) {
+      this.deferredHydrationPaths = requeueHydrationPaths(this.deferredHydrationPaths, [...this.coldLocalPaths]);
+      this.coldLocalPaths.clear();
+      this.deferredHydrationEpoch = this.hydrationEpoch;
+    }
     this.beginDeferredLocalHydration(!demanded);
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work = [...this.pendingLocalReads];
@@ -2731,6 +2784,7 @@ var Indexer = class {
     while (true) {
       const wanted = new Set(unique);
       this.deferredHydrationPaths = this.deferredHydrationPaths.filter((path) => !wanted.has(path));
+      for (const path of wanted) this.coldLocalPaths.delete(path);
       const epoch = this.hydrationEpoch;
       const budget = new CooperativeBudget(WORK_SLICE_MS);
       for (const path of unique) {
@@ -2744,7 +2798,7 @@ var Indexer = class {
           try {
             const text = await this.app.vault.cachedRead(file);
             if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-            this.local.set(path, parseLocalModel(text));
+            this.setLocalRegion(path, parseLocalModel(text));
             this.localReadErrors.delete(path);
             this.bumpRevision(path);
           } catch (e) {
@@ -2791,6 +2845,9 @@ var Indexer = class {
     this.requestedHydrationFlights.clear();
     this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
+    this.coldLocalPaths.clear();
+    this.localRetentionOrder.clear();
+    this.localRetentionClock = 0;
     this.deferredHydrationPaths = this.app.vault.getMarkdownFiles().filter((file) => this.mayHaveLocalModel(file)).map((file) => file.path).sort();
     this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
@@ -2933,7 +2990,7 @@ var Indexer = class {
     const deleted = [...new Set(plan.deleted)].sort();
     for (const path of deleted) {
       this.index.remove(path);
-      this.local.remove(path);
+      this.removeLocalRegion(path);
       this.localReadErrors.delete(path);
       this.fingerprints.delete(path);
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
@@ -3049,12 +3106,12 @@ var Indexer = class {
     else this.index.remove(path);
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.local.remove(path);
+    this.removeLocalRegion(path);
     if (this.mayHaveLocalModel(file)) {
       try {
         const text = await this.app.vault.cachedRead(file);
         if (this.localRevision.get(path) === revision) {
-          this.local.set(path, parseLocalModel(text));
+          this.setLocalRegion(path, parseLocalModel(text));
           this.localReadErrors.delete(path);
         }
       } catch (e) {
@@ -3096,7 +3153,7 @@ var Indexer = class {
         try {
           const text = await this.app.vault.cachedRead(file);
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
-            this.local.set(path, parseLocalModel(text));
+            this.setLocalRegion(path, parseLocalModel(text));
             this.localReadErrors.delete(path);
             this.cacheDirtyPaths.add(path);
             changed = true;
@@ -3199,7 +3256,7 @@ var Indexer = class {
   applyLocal(path, file) {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.local.remove(path);
+    this.removeLocalRegion(path);
     if (!file || !this.mayHaveLocalModel(file)) {
       this.localReadErrors.delete(path);
       return;
@@ -3207,7 +3264,7 @@ var Indexer = class {
     let task;
     task = this.app.vault.cachedRead(file).then((text) => {
       if (this.localRevision.get(path) !== revision) return;
-      this.local.set(path, parseLocalModel(text));
+      this.setLocalRegion(path, parseLocalModel(text));
       this.localReadErrors.delete(path);
       this.bumpRevision(path);
     }).catch((e) => {
@@ -5344,6 +5401,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.lastCachedRevision = revision;
         indexer.markCacheCommitted(revision);
       } else this.scheduleSemanticCacheWrite();
+      indexer.trimLocalRetention();
       this.refreshRuntimeHealth();
     } catch (e) {
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
@@ -5611,6 +5669,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       void this.markOccurrenceReady(indexer);
       const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
       const scan = analyzeLocalModel(indexer.index, indexer.local, resolve);
+      indexer.trimLocalRetention();
       const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
       const errors = scan.findings.filter((f) => f.severity === "error").length;
       new import_obsidian8.Notice(`Local Model: ${scan.notesWithRegion} notes, ${scan.records} records, ${errors} errors, ${scan.findings.length - errors} warnings (${(scan.ms / 1e3).toFixed(1)} s).`, 1e4);
@@ -5759,6 +5818,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       return;
     }
     const canvas = toCanvas(index, view, profile);
+    if (profileNeedsLocalOccurrences(profile)) indexer.trimLocalRetention();
     const name = (index.notes.get(starts[0])?.name ?? "view").replace(/[\\/:*?"<>|#^[\]]/g, "_");
     const folder = (0, import_obsidian8.normalizePath)(this.settings.viewsFolder);
     if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
@@ -5870,6 +5930,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
     const current = profileNeedsLocalOccurrences(profile) ? withLocalOccurrences(index, indexer.local, resolve, baseView, profile) : baseView;
     const now = signature(current);
+    if (profileNeedsLocalOccurrences(profile)) indexer.trimLocalRetention();
     if (now === meta.signature) new import_obsidian8.Notice("This view is current.");
     else
       new ConfirmModal(this.app, "The model changed since this view was generated.", "Refresh view", () => void this.explore(meta.starts, profile)).open();
