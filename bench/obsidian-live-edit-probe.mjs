@@ -111,11 +111,11 @@ for (let attempt = 0; attempt < 480; attempt++) {
               "<!-- MDSE:LOCAL-MODEL END -->",
               "",
             ].join("\\n");
-            await app.vault.create(added, targetText);
+            await withTimeout(app.vault.create(added, targetText), 10000, "add vault create");
             await settleSource("add");
             await waitFor(() => note(added), 10000, "added note indexed");
             await waitFor(() => edges(anchor).some((e) => e.field === "hasPart" && e.to === added), 10000, "anchor add relationship resolved");
-            await indexer.hydrateLocalOwners([added]);
+            await withTimeout(indexer.hydrateLocalOwners([added]), 10000, "add targeted occurrence hydration");
             if (localCount(added) !== 1) throw new Error("added Local Model occurrence was not published");
             results.push({ op: "add", background: addBg, path: added, relationshipResolved: true, localRecords: localCount(added) });
             await progress("add:done");
@@ -126,10 +126,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
             const editBg = await ensureBackgroundActive("edit");
             const file1 = app.vault.getAbstractFileByPath(added);
             const edited = targetText.replace("status: Draft", "status: Active\\nperforms:\\n  - \\"[[Live Function]]\\"").replace("#### Nested occurrence", "#### Nested occurrence edited");
-            await app.vault.modify(file1, edited);
+            await withTimeout(app.vault.modify(file1, edited), 10000, "edit vault modify");
             await settleSource("edit");
             await waitFor(() => edges(added).some((e) => e.field === "performs" && e.to === fn), 10000, "edited relationship indexed");
-            await indexer.hydrateLocalOwners([added]);
+            await withTimeout(indexer.hydrateLocalOwners([added]), 10000, "edit targeted occurrence hydration");
             if (localCount(added) !== 1) throw new Error("edited Local Model occurrence disappeared");
             results.push({ op: "edit", background: editBg, path: added, performsResolved: true, localRecords: localCount(added) });
             await progress("edit:done");
@@ -139,10 +139,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await progress("rename:begin");
             const renameBg = await ensureBackgroundActive("rename");
             const file2 = app.vault.getAbstractFileByPath(added);
-            await app.fileManager.renameFile(file2, renamed);
+            await withTimeout(app.fileManager.renameFile(file2, renamed), 10000, "rename file");
             await settleSource("rename");
             await waitFor(() => !note(added) && !!note(renamed), 10000, "rename path convergence");
-            await indexer.hydrateLocalOwners([renamed]);
+            await withTimeout(indexer.hydrateLocalOwners([renamed]), 10000, "rename targeted occurrence hydration");
             if (localCount(added) !== 0 || localCount(renamed) !== 1) throw new Error("Local Model did not migrate cleanly on rename");
             results.push({ op: "rename", background: renameBg, oldPathRemoved: true, newPath: renamed, localRecords: localCount(renamed) });
             await progress("rename:done");
@@ -152,10 +152,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
             const moveBg = await ensureBackgroundActive("move");
             if (!app.vault.getAbstractFileByPath("Acceptance/Moved")) await app.vault.createFolder("Acceptance/Moved");
             const file3 = app.vault.getAbstractFileByPath(renamed);
-            await app.fileManager.renameFile(file3, moved);
+            await withTimeout(app.fileManager.renameFile(file3, moved), 10000, "move file");
             await settleSource("move");
             await waitFor(() => !note(renamed) && !!note(moved), 10000, "move path convergence");
-            await indexer.hydrateLocalOwners([moved]);
+            await withTimeout(indexer.hydrateLocalOwners([moved]), 10000, "move targeted occurrence hydration");
             if (localCount(renamed) !== 0 || localCount(moved) !== 1) throw new Error("Local Model did not migrate cleanly on move");
             results.push({ op: "move", background: moveBg, oldPathRemoved: true, newPath: moved, localRecords: localCount(moved) });
             await progress("move:done");
@@ -164,7 +164,7 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await progress("delete:begin");
             const deleteBg = await ensureBackgroundActive("delete");
             const file4 = app.vault.getAbstractFileByPath(moved);
-            await app.vault.delete(file4);
+            await withTimeout(app.vault.delete(file4), 10000, "delete file");
             await settleSource("delete");
             await waitFor(() => !note(moved), 10000, "deleted note removed");
             await waitFor(() => !edges(anchor).some((e) => e.field === "hasPart" && e.to === moved), 10000, "deleted relationship removed");
