@@ -16,6 +16,7 @@ import { ModelIndex, type NoteRecord } from "../src/core/model";
 import { fixtureSchema } from "./helpers";
 
 const schema = fixtureSchema();
+const scope = { vaultUid: "20261003190000001skellyspencer" };
 const T = "20261003170000001skellyspencer";
 const P = "part-20261003170000002skellyspencer";
 const E = "ep-20261003170000003skellyspencer";
@@ -77,13 +78,13 @@ function state() {
 
 test("semantic cache JSON round-trip restores notes, edges, maps, Local Model and fingerprints", () => {
   const { index, local, fingerprints } = state();
-  const cache = serializeSemanticState(index, local, fingerprints, schema, "0.1.17", 999);
+  const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17", 999);
   assert.equal(cache.header.formatVersion, CACHE_FORMAT_VERSION);
   assert.equal(cache.header.createdAt, 999);
 
   // Prove the contract survives actual JSON storage rather than object identity.
   const parsed: unknown = JSON.parse(JSON.stringify(cache));
-  const restored = restoreSemanticState(parsed, schema);
+  const restored = restoreSemanticState(parsed, schema, scope);
 
   assert.equal(restored.index.size, 2);
   assert.deepEqual(restored.index.out("Assembly.md"), [{ from: "Assembly.md", to: "Target.md", field: "dependsOn" }]);
@@ -103,9 +104,9 @@ test("semantic cache JSON round-trip restores notes, edges, maps, Local Model an
 });
 
 test("cache compatibility is exact for format and semantic parser/schema inputs", () => {
-  const expected = expectedCompatibility(schema);
+  const expected = expectedCompatibility(schema, scope);
   const { index, local, fingerprints } = state();
-  const cache = serializeSemanticState(index, local, fingerprints, schema, "0.1.17");
+  const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
 
   assert.equal(cacheCompatibilityProblem(cache, expected), null);
 
@@ -128,22 +129,22 @@ test("cache compatibility is exact for format and semantic parser/schema inputs"
 
 test("malformed/corrupt cache fails closed instead of partially restoring semantics", () => {
   const { index, local, fingerprints } = state();
-  const base = serializeSemanticState(index, local, fingerprints, schema, "0.1.17");
+  const base = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
 
   const badField = JSON.parse(JSON.stringify(base));
   badField.notes[0].fields = [["dependsOn", 7]];
-  assert.throws(() => restoreSemanticState(badField, schema), /Malformed cached fields/);
+  assert.throws(() => restoreSemanticState(badField, schema, scope), /Malformed cached fields/);
 
   const badFingerprint = JSON.parse(JSON.stringify(base));
   badFingerprint.fingerprints["Assembly.md"].mtime = "yesterday";
-  assert.throws(() => restoreSemanticState(badFingerprint, schema), /Malformed fingerprint/);
+  assert.throws(() => restoreSemanticState(badFingerprint, schema, scope), /Malformed fingerprint/);
 
   const badLocal = JSON.parse(JSON.stringify(base));
   badLocal.localRegions[0][1].records[0].fields = [["definition", 99]];
-  assert.throws(() => restoreSemanticState(badLocal, schema), /Malformed Local Model field/);
+  assert.throws(() => restoreSemanticState(badLocal, schema, scope), /Malformed Local Model field/);
 
   const missingPayload = { header: base.header };
-  assert.throws(() => restoreSemanticState(missingPayload, schema), /Malformed semantic cache payload/);
+  assert.throws(() => restoreSemanticState(missingPayload, schema, scope), /Malformed semantic cache payload/);
 });
 
 test("serialization is deterministic for paths regardless of insertion order", () => {
@@ -155,8 +156,8 @@ test("serialization is deterministic for paths regardless of insertion order", (
   bLocal.set("Assembly.md", parseLocalModel(localText()));
   const bFingerprints = new Map([...a.fingerprints.entries()].reverse());
 
-  const ca = serializeSemanticState(a.index, a.local, a.fingerprints, schema, "0.1.17", 1);
-  const cb = serializeSemanticState(bIndex, bLocal, bFingerprints, schema, "0.1.17", 1);
+  const ca = serializeSemanticState(a.index, a.local, a.fingerprints, schema, scope, "0.1.17", 1);
+  const cb = serializeSemanticState(bIndex, bLocal, bFingerprints, schema, scope, "0.1.17", 1);
   assert.deepEqual(ca, cb);
 });
 
@@ -192,7 +193,7 @@ test("bounded sharding reassembles one complete generation and rejects partial/m
 
 test("invalid shard sizing and empty generation are refused before anything can be persisted", () => {
   const { index, local, fingerprints } = state();
-  const cache = serializeSemanticState(index, local, fingerprints, schema, "0.1.17");
+  const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
   assert.throws(() => shardSemanticCache(cache, "", 10, 10), /generation/);
   assert.throws(() => shardSemanticCache(cache, "g", 0, 10), /positive integers/);
 });
