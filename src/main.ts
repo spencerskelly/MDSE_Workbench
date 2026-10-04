@@ -6,7 +6,7 @@
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
-import { canRunBackgroundWork } from "./core/background";
+import { canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
@@ -304,9 +304,20 @@ export default class MdseWorkbench extends Plugin {
   }
 
   /** Single policy gate used by every optional/background Workbench subsystem. */
-  private backgroundWorkAllowed(indexer: Indexer | null = this.indexer): boolean {
+  private activeRuntimeWork(indexer: Indexer): RuntimeWorkKind[] {
+    const active: RuntimeWorkKind[] = [];
+    if (indexer.building || indexer.rebuildPending) active.push("indexing");
+    if (indexer.localHydrationActive > 0) {
+      active.push(indexer.localHydrationDemanded ? "requestedHydration" : "backgroundHydration");
+    }
+    if (this.assurance?.active) active.push("assurance");
+    if (this.cacheWriteTask) active.push("cacheWrite");
+    return active;
+  }
+
+  private backgroundWorkAllowed(kind: "backgroundHydration" | "cacheWrite", indexer: Indexer | null = this.indexer): boolean {
     if (!indexer || this.indexer !== indexer) return false;
-    return canRunBackgroundWork({
+    const base = canRunBackgroundWork({
       unloaded: this.unloaded,
       ready: this.isReady(),
       building: indexer.building,
@@ -315,6 +326,7 @@ export default class MdseWorkbench extends Plugin {
       quietForMs: Date.now() - this.lastChange,
       minimumQuietMs: LOCAL_BACKGROUND_DELAY_MS,
     });
+    return base && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
   }
 
   private scheduleRuntimeHealthRefresh(): void {
@@ -416,7 +428,7 @@ export default class MdseWorkbench extends Plugin {
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
       // Background occurrence parsing must yield to active use. If the engineer just edited
       // something or live semantic updates are pending, leave the capability queued and try later.
-      if (!this.backgroundWorkAllowed(indexer)) {
+      if (!this.backgroundWorkAllowed("backgroundHydration", indexer)) {
         this.scheduleBackgroundLocalHydration();
         return;
       }
@@ -454,7 +466,7 @@ export default class MdseWorkbench extends Plugin {
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (!this.backgroundWorkAllowed(current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -619,7 +631,9 @@ export default class MdseWorkbench extends Plugin {
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
-        settle: () => (this.indexer as Indexer).whenLocalSettled(),
+        // Assurance ranks below background occurrence hydration. It waits for occurrence work
+        // without promoting deferred hydration into the requested/foreground priority lane.
+        settle: () => (this.indexer as Indexer).whenLocalSettled(false),
         index: () => (this.indexer as Indexer).index,
         localFindings: () => {
           const indexer = this.indexer as Indexer;
