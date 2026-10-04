@@ -5754,6 +5754,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
+    /** Context-edit service used by occurrence details; structural edits remain staged separately. */
     this.modelEditor = null;
     /** One semantic history stack for every Workbench model writer (WB-114). */
     this.transactions = new TransactionManager();
