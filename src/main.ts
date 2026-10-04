@@ -18,7 +18,7 @@ import { NoteDetailPanel } from "./obsidian/detail";
 import { nodeAt, parseTranslate, undefinedName, type CanvasNodeJson } from "./core/detail";
 import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
-import { scanLocalModel, writeFindingsReport } from "./obsidian/localmodel";
+import { analyzeLocalModel, writeFindingsReport } from "./obsidian/localmodel";
 import { ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from "./obsidian/cache";
 
 /** Quiet time with no cache activity before the first index build starts. */
@@ -449,12 +449,14 @@ export default class MdseWorkbench extends Plugin {
     }
   }
 
-  /** WB-111: read every Local Model region, run the WB-106 checks, write the report and open it. */
+  /** WB-111: validate the shared Local Model index, write the report and open it. */
   async checkLocalModel(): Promise<void> {
     if (!this.ready()) return;
-    const notice = new Notice("MDSE Workbench: reading Local Model regions…", 0);
+    const notice = new Notice("MDSE Workbench: checking Local Model…", 0);
     try {
-      const scan = await scanLocalModel(this.app, (this.indexer as Indexer).index);
+      const indexer = this.indexer as Indexer;
+      const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+      const scan = analyzeLocalModel(indexer.index, indexer.local, resolve);
       const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
       const errors = scan.findings.filter((f) => f.severity === "error").length;
       new Notice(`Local Model: ${scan.notesWithRegion} notes, ${scan.records} records, ${errors} errors, ${scan.findings.length - errors} warnings (${(scan.ms / 1000).toFixed(1)} s).`, 10000);
