@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextLocalId, planLocalRecordCreate, planLocalRecordPatch } from "../src/core/localmodel-edit";
+import { nextLocalId, planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch } from "../src/core/localmodel-edit";
 import { parseLocalModel } from "../src/core/localmodel";
 
 const tokenA = "20261003133512742skellyspencer";
@@ -204,5 +204,33 @@ test("refuses Local Model ID generation when the owner UID has no governed autho
   assert.throws(
     () => nextLocalId("part", "bad-owner-uid", new Date("2026-10-04T23:30:45.123Z")),
     /governed 30-character identity/,
+  );
+});
+
+
+test("plans clean deletion of an unreferenced part occurrence", () => {
+  const result = planLocalRecordDelete(note(), "part-" + tokenB);
+  assert.equal(result.kind, "part");
+  assert.equal(result.identifier, "K2");
+  assert.equal(result.impacts.length, 0);
+  assert.doesNotMatch(result.after, /#### K2/);
+  assert.match(result.after, /#### K1/);
+  assert.equal(parseLocalModel(result.after)?.structured, true);
+});
+
+test("part deletion reports same-note endpoint dependencies", () => {
+  const result = planLocalRecordDelete(note(), "part-" + tokenA);
+  assert.ok(result.impacts.some((impact) =>
+    impact.sourceKind === "endpoint" &&
+    impact.sourceIdentifier === "J1" &&
+    impact.field === "part"
+  ));
+  assert.doesNotMatch(result.after, /#### K1/);
+});
+
+test("deletion slice refuses non-part Local Model records", () => {
+  assert.throws(
+    () => planLocalRecordDelete(note(), "ep-" + tokenC),
+    /part occurrences only/,
   );
 });
