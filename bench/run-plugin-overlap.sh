@@ -73,7 +73,7 @@ if(result.elements!==Number(process.env.NOTE_COUNT)) fail("element count mismatc
 if(!Number.isFinite(result.launchToReadableMs)||!Number.isFinite(result.launchToCoreReadyMs)||!Number.isFinite(result.launchToOccurrenceReadyMs)) fail("startup milestone missing");
 if(!capability.workbenchEnabled||!capability.workbenchCoreReady||!capability.commandsReady) fail("Workbench capability unavailable");
 if(candidate && !capability.candidateEnabled) fail("candidate plugin not enabled");
-const after=cp.execSync('find "$VAULT" -type f \\( -name \'*.md\' -o -name \'*.yaml\' \\) -print0 | sort -z | xargs -0 sha256sum | sha256sum',{env:process.env,shell:"/bin/bash",encoding:"utf8"}).trim();
+const after=cp.execSync('(cd "$VAULT" && find . -type f \\( -name \'*.md\' -o -name \'*.yaml\' \\) -print0 | sort -z | xargs -0 sha256sum | sha256sum)',{env:process.env,shell:"/bin/bash",encoding:"utf8"}).trim();
 const before=fs.readFileSync(process.env.RUNNER_TEMP+"/model-template.sha256","utf8").trim();
 if(after!==before) fail("governed Markdown/YAML model was mutated");
 fs.copyFileSync(vault+"/.mdse_integration_result.json",process.env.RESULTS+"/"+caseName+"-startup.json");
