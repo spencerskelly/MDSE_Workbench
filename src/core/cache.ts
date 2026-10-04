@@ -9,7 +9,7 @@ import { LocalModelIndex, READABLE_VERSIONS, type LinkRef, type LocalFinding, ty
 import { ModelIndex, type NoteRecord } from "./model";
 import { schemaSignature, type Schema } from "./schema";
 
-export const CACHE_FORMAT_VERSION = 1;
+export const CACHE_FORMAT_VERSION = 2;
 /** Bump when semantic parsing/resolution meaning changes even if the JSON shape does not. */
 export const CACHE_SEMANTIC_VERSION = 3;
 
@@ -266,6 +266,7 @@ function deserializeNote(raw: unknown): NoteRecord {
 
 function serializeRegion(r: LocalRegion): CachedLocalRegion {
   return {
+    sourceFingerprint: r.sourceFingerprint,
     schemaVersion: r.schemaVersion,
     startLine: r.startLine,
     endLine: r.endLine,
@@ -319,10 +320,12 @@ function deserializeRegion(raw: unknown): LocalRegion {
     if (!isFinding(finding)) throw new Error("Malformed Local Model finding cache entry.");
     return { ...finding };
   });
+  if (typeof raw.sourceFingerprint !== "string" || !/^[0-9a-f]{8}$/.test(raw.sourceFingerprint)) throw new Error("Malformed Local Model source fingerprint in cache.");
   if (!(raw.schemaVersion === null || typeof raw.schemaVersion === "string")) throw new Error("Malformed Local Model schema version in cache.");
   if (!(raw.startLine === null || typeof raw.startLine === "number")) throw new Error("Malformed Local Model start line in cache.");
   if (!(raw.endLine === null || typeof raw.endLine === "number")) throw new Error("Malformed Local Model end line in cache.");
   return {
+    sourceFingerprint: raw.sourceFingerprint,
     schemaVersion: raw.schemaVersion,
     startLine: raw.startLine,
     endLine: raw.endLine,
