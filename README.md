@@ -48,6 +48,16 @@ See `docs/Architecture/MDSE Runtime Architecture.md` for the governing runtime p
 | Can Canvas editing work without unsupported patching? | **Check Canvas support** reports what Obsidian exposes; right-click two selected notes on a canvas to see whether **Relate selected notes (Workbench)** appears (WB-080 gate). |
 | Does the build and release pipeline produce an installable plugin? | Tagging `v*` runs `.github/workflows/release.yml`, which tests, builds and publishes `main.js`, `manifest.json`, `styles.css`. |
 
+### Paired cold/warm core-startup measurement (CI, 60,000 notes)
+
+On 2026-10-04, `npm run bench:startup -- 60000` compared both paths against the exact same synthetic repository fingerprint state; reconciliation reported `none` and both paths produced 60,000 notes / 59,999 links.
+
+- Cold core rebuild: **168.2 ms**
+- Warm core restore + fingerprint validation: **538.0 ms**
+- Cold/warm ratio: **0.31x** (the warm core path was about 3.2× slower in this isolated benchmark)
+
+This does **not** measure total Obsidian startup or filesystem/frontmatter work. It shows only that semantic-cache restore is not yet justified as a core-graph performance optimization by itself; any warm-start benefit must come from avoided source-read/parse work and must be proven in integrated vault startup measurements before promotion.
+
 ### First measurements (Node, synthetic vault)
 
 `npm run bench:generate && npm run bench` on a generated vault of 60,000 notes and 107,526 authored links (240 MB on disk):
