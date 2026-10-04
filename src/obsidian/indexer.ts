@@ -408,7 +408,7 @@ export class Indexer {
         if (this.localRevision.get(path) === revision) this.localReadErrors.set(path, (e as Error).message);
       }
     } else this.localReadErrors.delete(path);
-    this.bumpRevision();
+    this.bumpRevision(path);
   }
 
   /**
