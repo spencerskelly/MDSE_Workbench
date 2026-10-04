@@ -282,3 +282,136 @@ function pairsNumber(v: unknown, label: string): Map<string, number> {
   }
   return out;
 }
+
+
+/** On-disk cache container version. Independent from the semantic payload format. */
+export const CACHE_MANIFEST_VERSION = 1;
+
+export interface CacheShardSet {
+  count: number;
+  total: number;
+}
+
+export interface CacheDiskManifest {
+  manifestVersion: number;
+  generation: string;
+  header: CacheHeader;
+  fingerprints: Record<string, FileFingerprint>;
+  notes: CacheShardSet;
+  localRegions: CacheShardSet;
+}
+
+export interface NoteCacheShard {
+  generation: string;
+  index: number;
+  notes: CachedNoteRecord[];
+}
+
+export interface LocalCacheShard {
+  generation: string;
+  index: number;
+  localRegions: Array<[string, CachedLocalRegion]>;
+}
+
+export interface ShardedSemanticCache {
+  manifest: CacheDiskManifest;
+  noteShards: NoteCacheShard[];
+  localShards: LocalCacheShard[];
+}
+
+/**
+ * Split a semantic cache into bounded deterministic shards. The manifest is intended to be
+ * committed last by the storage adapter, so an interrupted new generation cannot make a
+ * partially written generation authoritative.
+ */
+export function shardSemanticCache(
+  cache: SemanticCache,
+  generation: string,
+  notesPerShard = 2000,
+  regionsPerShard = 500,
+): ShardedSemanticCache {
+  if (!generation.trim()) throw new Error("Cache generation must not be empty.");
+  if (!Number.isInteger(notesPerShard) || notesPerShard < 1 || !Number.isInteger(regionsPerShard) || regionsPerShard < 1) {
+    throw new Error("Cache shard sizes must be positive integers.");
+  }
+  const noteShards: NoteCacheShard[] = [];
+  for (let i = 0; i < cache.notes.length; i += notesPerShard) {
+    noteShards.push({ generation, index: noteShards.length, notes: cache.notes.slice(i, i + notesPerShard) });
+  }
+  const localShards: LocalCacheShard[] = [];
+  for (let i = 0; i < cache.localRegions.length; i += regionsPerShard) {
+    localShards.push({ generation, index: localShards.length, localRegions: cache.localRegions.slice(i, i + regionsPerShard) });
+  }
+  return {
+    manifest: {
+      manifestVersion: CACHE_MANIFEST_VERSION,
+      generation,
+      header: cache.header,
+      fingerprints: { ...cache.fingerprints },
+      notes: { count: noteShards.length, total: cache.notes.length },
+      localRegions: { count: localShards.length, total: cache.localRegions.length },
+    },
+    noteShards,
+    localShards,
+  };
+}
+
+/**
+ * Reassemble one complete generation. Any missing, duplicate, out-of-generation or miscounted
+ * shard fails closed; callers discard that generation and rebuild from the vault.
+ */
+export function joinSemanticCache(
+  manifest: unknown,
+  noteShards: readonly unknown[],
+  localShards: readonly unknown[],
+): SemanticCache {
+  if (!isDiskManifest(manifest)) throw new Error("Malformed semantic cache manifest.");
+  if (manifest.manifestVersion !== CACHE_MANIFEST_VERSION) throw new Error(`Unsupported cache manifest version ${manifest.manifestVersion}.`);
+  const notes = joinNoteShards(manifest, noteShards);
+  const localRegions = joinLocalShards(manifest, localShards);
+  return {
+    header: manifest.header,
+    fingerprints: { ...manifest.fingerprints },
+    notes,
+    localRegions,
+  };
+}
+
+function joinNoteShards(manifest: CacheDiskManifest, shards: readonly unknown[]): CachedNoteRecord[] {
+  if (shards.length !== manifest.notes.count) throw new Error("Semantic cache note shard count mismatch.");
+  const ordered = new Array<NoteCacheShard>(shards.length);
+  for (const raw of shards) {
+    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.notes)) {
+      throw new Error("Malformed semantic cache note shard.");
+    }
+    if (ordered[raw.index]) throw new Error("Duplicate semantic cache note shard index.");
+    ordered[raw.index] = raw as unknown as NoteCacheShard;
+  }
+  const notes = ordered.flatMap((s) => s.notes);
+  if (notes.length !== manifest.notes.total) throw new Error("Semantic cache note total mismatch.");
+  return notes;
+}
+
+function joinLocalShards(manifest: CacheDiskManifest, shards: readonly unknown[]): Array<[string, CachedLocalRegion]> {
+  if (shards.length !== manifest.localRegions.count) throw new Error("Semantic cache Local Model shard count mismatch.");
+  const ordered = new Array<LocalCacheShard>(shards.length);
+  for (const raw of shards) {
+    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.localRegions)) {
+      throw new Error("Malformed semantic cache Local Model shard.");
+    }
+    if (ordered[raw.index]) throw new Error("Duplicate semantic cache Local Model shard index.");
+    ordered[raw.index] = raw as unknown as LocalCacheShard;
+  }
+  const regions = ordered.flatMap((s) => s.localRegions);
+  if (regions.length !== manifest.localRegions.total) throw new Error("Semantic cache Local Model total mismatch.");
+  return regions;
+}
+
+function isDiskManifest(v: unknown): v is CacheDiskManifest {
+  if (!isObject(v) || typeof v.manifestVersion !== "number" || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
+  return isShardSet(v.notes) && isShardSet(v.localRegions);
+}
+
+function isShardSet(v: unknown): v is CacheShardSet {
+  return isObject(v) && Number.isInteger(v.count) && Number.isInteger(v.total) && (v.count as number) >= 0 && (v.total as number) >= 0;
+}
