@@ -71,6 +71,8 @@ export default class MdseWorkbench extends Plugin {
   private lastCacheWriteError: string | null = null;
   private lastWarmRestore: string | null = null;
   private lastStartupWaitMs: number | null = null;
+  private startPromise: Promise<void> | null = null;
+  private pendingRebuild = false;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
   private lastChange = Date.now();
   private unloaded = false;
@@ -279,8 +281,31 @@ export default class MdseWorkbench extends Plugin {
     return uid.trim();
   }
 
-  /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
+  /**
+   * Serialize startup/rebuild requests. Schema edits or a manual Rebuild command may arrive
+   * while startup is still waiting/indexing; they queue one follow-up rebuild instead of
+   * running two model initializations concurrently.
+   */
   async start(rebuild: boolean): Promise<void> {
+    if (this.startPromise) {
+      if (rebuild) this.pendingRebuild = true;
+      await this.startPromise;
+      return;
+    }
+    this.startPromise = this.runStart(rebuild);
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+    if (this.pendingRebuild && !this.unloaded) {
+      this.pendingRebuild = false;
+      await this.start(true);
+    }
+  }
+
+  /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
+  private async runStart(rebuild: boolean): Promise<void> {
     this.setRuntimeStatus("starting");
     try {
       this.schema = await this.loadSchema();
