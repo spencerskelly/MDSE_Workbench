@@ -30,7 +30,7 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
     assurance: null,
   });
   assert.equal(syncing.level, "syncing");
-  assert.match(syncing.label, /12/);
+  assert.match(syncing.label, /occurrence data loading/);
 
   const healthy = summarizeRuntimeHealth({
     ready: true,
@@ -93,6 +93,6 @@ test("coalesced live edits appear as syncing rather than runtime failure", () =>
     assurance: null,
   });
   assert.equal(h.level, "syncing");
-  assert.match(h.label, /3/);
+  assert.match(h.label, /applying 3/);
   assert.match(h.detail, /coalesced live edits/);
 });
