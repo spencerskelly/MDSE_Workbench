@@ -339,3 +339,80 @@ test("cancelled part deletion leaves source and semantic history untouched", asy
   assert.equal(store.text, before);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged endpoint creation stays unwritten until Apply and preserves part binding", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const endpointId = "ep-20261004234800000skellyspencer";
+  const before = store.text;
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "endpoint",
+    localId: endpointId,
+    heading: "J1",
+    fields: {
+      definition: "[[CAN Port]]",
+      part: "[[#^" + localId + "|K1]]",
+      kind: "physical",
+    },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, before);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalCreate(staged.transaction.id);
+  assert.match(store.text, /#### J1/);
+  assert.ok(store.text.includes("- part: [[#^" + localId + "|K1]]"));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.create");
+
+  await transactions.undo();
+  assert.equal(store.text, before);
+  await transactions.redo();
+  assert.match(store.text, /#### J1/);
+});
+
+test("staged endpoint creation with a missing part is blocked at Apply", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const endpointId = "ep-20261004234800001skellyspencer";
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "endpoint",
+    localId: endpointId,
+    heading: "JX",
+    fields: {
+      definition: "[[CAN Port]]",
+      part: "[[#^part-20261004234800099skellyspencer|Missing]]",
+    },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.severity === "error"));
+  await assert.rejects(service.applyLocalCreate(staged.transaction.id), /blocking Local Model finding/);
+  assert.doesNotMatch(store.text, /#### JX/);
+  service.cancelLocalCreate(staged.transaction.id);
+});
+
+test("cancelled endpoint creation leaves source and semantic history untouched", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const before = store.text;
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "endpoint",
+    localId: "ep-20261004234800002skellyspencer",
+    heading: "J2",
+    fields: {
+      definition: "[[CAN Port]]",
+      part: "[[#^" + localId + "|K1]]",
+    },
+  });
+  service.cancelLocalCreate(staged.transaction.id);
+
+  assert.equal(store.text, before);
+  assert.equal(transactions.history().length, 0);
+});
