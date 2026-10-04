@@ -1018,7 +1018,9 @@ export default class MdseWorkbench extends Plugin {
     // barrier again so traversal never writes a derived canvas from a half-reconciled revision.
     await indexer.whenSourceSettled();
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
-    const view = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
+    const view = profileNeedsLocalOccurrences(profile)
+      ? withLocalOccurrences(index, indexer.local, resolve, baseView, profile)
+      : baseView;
     if (view.depthOf.size <= 1 && view.omitted.size === 0) {
       new Notice(`Nothing to show: this note has no links the ${profile.name} view follows (${[...new Set(profile.steps.map((s) => s.field))].join(", ")}).`);
       return;
@@ -1142,7 +1144,9 @@ export default class MdseWorkbench extends Plugin {
     }
     await indexer.whenSourceSettled();
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
-    const current = withLocalOccurrences(index, indexer.local, resolve, baseView, profile);
+    const current = profileNeedsLocalOccurrences(profile)
+      ? withLocalOccurrences(index, indexer.local, resolve, baseView, profile)
+      : baseView;
     const now = signature(current);
     if (now === meta.signature) new Notice("This view is current.");
     else
