@@ -88,7 +88,7 @@ export class Indexer {
   currentFingerprints(): Map<string, FileFingerprint> {
     const out = new Map<string, FileFingerprint>();
     for (const file of this.app.vault.getMarkdownFiles()) {
-      out.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
+      out.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
     }
     return out;
   }
@@ -269,7 +269,7 @@ export class Indexer {
 
   /** Awaited variant used by controlled startup reconciliation. */
   private async applyAwaited(path: string, file: TFile): Promise<void> {
-    this.fingerprints.set(path, { mtime: file.stat.mtime, size: file.stat.size });
+    this.fingerprints.set(path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
     const rec = this.record(file);
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
@@ -303,7 +303,7 @@ export class Indexer {
     const fingerprints = new Map<string, FileFingerprint>();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      fingerprints.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
+      fingerprints.set(file.path, { ctime: file.stat.ctime, mtime: file.stat.mtime, size: file.stat.size });
       const rec = this.record(file);
       if (rec) index.upsert(rec);
       if (this.mayHaveLocalModel(file)) local.set(file.path, parseLocalModel(await this.app.vault.cachedRead(file)));
@@ -327,7 +327,7 @@ export class Indexer {
 
   private apply(path: string): void {
     const f = this.app.vault.getAbstractFileByPath(path);
-    if (f instanceof TFile && f.extension === "md") this.fingerprints.set(path, { mtime: f.stat.mtime, size: f.stat.size });
+    if (f instanceof TFile && f.extension === "md") this.fingerprints.set(path, { ctime: f.stat.ctime, mtime: f.stat.mtime, size: f.stat.size });
     else this.fingerprints.delete(path);
     const rec = f instanceof TFile ? this.record(f) : null;
     if (rec) this.index.upsert(rec);
