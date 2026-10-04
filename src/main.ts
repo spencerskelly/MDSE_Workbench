@@ -20,6 +20,7 @@ import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
 import { analyzeLocalModel, writeFindingsReport } from "./obsidian/localmodel";
 import { clearWorkbenchCache, ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from "./obsidian/cache";
+import { AssuranceManager, type AssuranceSnapshot } from "./obsidian/assurance";
 
 /** Quiet time with no cache activity before the first index build starts. */
 const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
@@ -64,7 +65,6 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  lastFindingsMs = 0;
   detail: NoteDetailPanel | null = null;
   private statusEl: HTMLElement | null = null;
   private cacheWriteTimer: number | null = null;
@@ -73,6 +73,7 @@ export default class MdseWorkbench extends Plugin {
   private lastCacheWriteError: string | null = null;
   private lastCachedRevision: number | null = null;
   private lastWarmRestore: string | null = null;
+  private assurance: AssuranceManager | null = null;
   private lastStartupWaitMs: number | null = null;
   private startPromise: Promise<void> | null = null;
   private pendingRebuild = false;
@@ -101,7 +102,7 @@ export default class MdseWorkbench extends Plugin {
     this.addChild(this.detail);
     this.registerDetailClicks();
 
-    this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => this.diagnostics() });
+    this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => void this.diagnostics() });
     this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
     this.addCommand({ id: "clear-semantic-cache", name: "Clear semantic cache", callback: () => this.confirmClearSemanticCache() });
     this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
@@ -173,15 +174,9 @@ export default class MdseWorkbench extends Plugin {
           app: this.app,
           ready: () => this.isReady(),
           index: () => (this.indexer as Indexer).index,
-          revision: () => (this.indexer as Indexer).revision,
-          settle: () => (this.indexer as Indexer).whenLocalSettled(),
           schema: () => this.schema as Schema,
           writer: () => this.writer as RelationshipWriter,
-          localFindings: () => {
-            const indexer = this.indexer as Indexer;
-            const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
-            return validateLocalModels({ index: indexer.index, local: indexer.local, resolve });
-          },
+          assurance: (force = false) => this.getAssurance(force),
         }),
     );
     this.addCommand({ id: "open-review", name: "Open Review", callback: () => void this.openReview() });
@@ -355,6 +350,16 @@ export default class MdseWorkbench extends Plugin {
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
+      this.assurance = new AssuranceManager({
+        revision: () => (this.indexer as Indexer).revision,
+        settle: () => (this.indexer as Indexer).whenLocalSettled(),
+        index: () => (this.indexer as Indexer).index,
+        localFindings: () => {
+          const indexer = this.indexer as Indexer;
+          const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
+          return validateLocalModels({ index: indexer.index, local: indexer.local, resolve });
+        },
+      });
       const schemaPaths = () => [normalizePath(this.settings.relationshipsPath), normalizePath(this.settings.elementTypesPath)];
 
       this.registerEvent(
@@ -562,13 +567,17 @@ export default class MdseWorkbench extends Plugin {
     return true;
   }
 
-  diagnostics(): void {
+  private async getAssurance(force = false): Promise<AssuranceSnapshot> {
+    if (!this.assurance || !this.indexer || !this.schema) throw new Error("Workbench assurance is not ready.");
+    return this.assurance.get(force);
+  }
+
+  async diagnostics(): Promise<void> {
     if (!this.ready()) return;
     const s = this.indexer!.stats!;
     const schema = this.schema!;
-    const t0 = performance.now();
-    const f = this.indexer!.index.findings();
-    this.lastFindingsMs = Math.round(performance.now() - t0);
+    const assurance = await this.getAssurance(false);
+    const f = assurance.model;
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     const rows: Array<[string, string, boolean?]> = [
       ["Index mode", s.mode],
@@ -578,7 +587,7 @@ export default class MdseWorkbench extends Plugin {
       ["Authored links", String(s.links)],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
-      ["Findings scan", `${this.lastFindingsMs} ms`],
+      ["Assurance snapshot", `${assurance.ms} ms · revision ${assurance.revision}${assurance.stale ? " · stale/retrying" : ""}`],
       ["Missing inverses", String(f.missingInverse.length), f.missingInverse.length > 0],
       ["Inverses with no forward link", String(f.orphanInverse.length), f.orphanInverse.length > 0],
       ["Links that break endpoint rules", String(f.offRule.length)],
