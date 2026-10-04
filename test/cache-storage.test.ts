@@ -4,6 +4,8 @@ import { serializeSemanticState } from "../src/core/cache";
 import {
   cacheManifestPaths,
   cacheSlotPaths,
+  readCoreCacheGeneration,
+  readLocalCacheGeneration,
   readSemanticCacheGeneration,
   writeSemanticCacheGeneration,
   type CacheStorage,
@@ -186,4 +188,25 @@ test("warm restore reads cache shards with bounded parallelism", async () => {
   assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), cache);
   assert.ok(storage.maxActiveReads > 1, "warm restore should overlap independent shard reads");
   assert.ok(storage.maxActiveReads <= 12, `bounded read concurrency exceeded: ${storage.maxActiveReads}`);
+});
+
+
+test("core and Local Model cache components can be read independently", async () => {
+  const { cache } = sampleCache();
+  const storage = new MemoryStorage();
+  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "split", { noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2 });
+
+  storage.operations.length = 0;
+  const core = await readCoreCacheGeneration(storage, "runtime/cache");
+  assert.deepEqual(core.header, cache.header);
+  assert.deepEqual(core.notes, cache.notes);
+  assert.deepEqual(core.fingerprints, cache.fingerprints);
+  assert.equal(storage.operations.some((x) => x.includes("/local-")), false, "core restore must not read Local Model shards");
+
+  storage.operations.length = 0;
+  const local = await readLocalCacheGeneration(storage, "runtime/cache");
+  assert.deepEqual(local.header, cache.header);
+  assert.deepEqual(local.localRegions, cache.localRegions);
+  assert.equal(storage.operations.some((x) => x.includes("/notes-")), false, "Local Model restore must not read note shards");
+  assert.equal(storage.operations.some((x) => x.includes("/fingerprints-")), false, "Local Model restore must not read fingerprint shards");
 });
