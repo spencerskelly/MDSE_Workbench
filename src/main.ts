@@ -6,6 +6,7 @@
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
+import { canRunBackgroundWork } from "./core/background";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
@@ -304,16 +305,16 @@ export default class MdseWorkbench extends Plugin {
 
   /** Single policy gate used by every optional/background Workbench subsystem. */
   private backgroundWorkAllowed(indexer: Indexer | null = this.indexer): boolean {
-    return !!(
-      !this.unloaded &&
-      indexer &&
-      this.indexer === indexer &&
-      this.isReady() &&
-      !indexer.building &&
-      !indexer.rebuildPending &&
-      indexer.liveUpdatePending === 0 &&
-      Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS
-    );
+    if (!indexer || this.indexer !== indexer) return false;
+    return canRunBackgroundWork({
+      unloaded: this.unloaded,
+      ready: this.isReady(),
+      building: indexer.building,
+      rebuildPending: indexer.rebuildPending,
+      liveUpdatePending: indexer.liveUpdatePending,
+      quietForMs: Date.now() - this.lastChange,
+      minimumQuietMs: LOCAL_BACKGROUND_DELAY_MS,
+    });
   }
 
   private scheduleRuntimeHealthRefresh(): void {
