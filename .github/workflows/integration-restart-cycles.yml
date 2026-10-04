@@ -128,7 +128,9 @@ jobs:
             if(r.livePending!==0) fail(`cycle ${r.cycle} live updates remained pending`);
             if(r.occurrencePending!==0 || r.occurrenceQueued!==0 || r.occurrenceActive!==0) fail(`cycle ${r.cycle} occurrence work did not settle`);
             if(r.localReadErrors!==0) fail(`cycle ${r.cycle} Local Model read errors remained`);
-            if(r.kind==="cold" && r.mode!=="full") fail(`cycle ${r.cycle} cold launch was not full mode`);\n            if(r.kind==="cold" && !r.cacheManifestReady) fail(`cycle ${r.cycle} did not persist a cache before restart`);\n            if(r.kind==="warm" && !String(r.warmRestore||"").startsWith("restored;")) fail(`cycle ${r.cycle} did not use warm restore: ${r.warmRestore}`);
+            if(r.kind==="cold" && r.mode!=="full") fail(`cycle ${r.cycle} cold launch was not full mode`);
+            if(r.kind==="cold" && !r.cacheManifestReady) fail(`cycle ${r.cycle} did not persist a cache before restart`);
+            if(r.kind==="warm" && !String(r.warmRestore||"").startsWith("restored;")) fail(`cycle ${r.cycle} did not use warm restore: ${r.warmRestore}`);
             if(!Number.isFinite(r.launchToCoreReadyMs)) fail(`cycle ${r.cycle} never recorded core readiness`);
           }
           const summarize=(kind)=>{
