@@ -3271,6 +3271,7 @@ var ReviewView = class extends import_obsidian5.ItemView {
     this.type = "";
     this.field = "";
     this.timer = null;
+    this.computedRevision = -1;
   }
   getViewType() {
     return REVIEW_VIEW;
@@ -3298,16 +3299,20 @@ var ReviewView = class extends import_obsidian5.ItemView {
       this.refresh();
     }, 1e3);
   }
-  /** Recomputes findings from the index and redraws. */
-  refresh() {
+  /** Recompute global assurance only when the semantic model revision changed. */
+  refresh(force = false) {
     if (!this.host.ready()) {
       this.contentEl.empty();
       this.contentEl.createEl("p", { text: "Workbench is still indexing. This screen will fill in when it finishes.", cls: "mdse-muted" });
       this.later();
       return;
     }
-    this.all = toFindings(this.host.index().findings(), this.host.localFindings());
-    this.resolved.clear();
+    const revision = this.host.revision();
+    if (force || revision !== this.computedRevision) {
+      this.all = toFindings(this.host.index().findings(), this.host.localFindings());
+      this.computedRevision = revision;
+      this.resolved.clear();
+    }
     this.render();
   }
   visible() {
@@ -3320,7 +3325,7 @@ var ReviewView = class extends import_obsidian5.ItemView {
     const counts = countByCategory(this.all.filter((f) => !this.resolved.has(f.key)));
     const head = el.createDiv({ cls: "mdse-review-head" });
     head.createEl("h3", { text: "Review" });
-    head.createEl("button", { text: "Refresh" }).onclick = () => this.refresh();
+    head.createEl("button", { text: "Refresh" }).onclick = () => this.refresh(true);
     const cats = el.createDiv({ cls: "mdse-review-cats" });
     for (const c of CATEGORIES) {
       const b = cats.createEl("button", { cls: c.id === this.category ? "mdse-cat is-active" : "mdse-cat" });
@@ -4094,6 +4099,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         app: this.app,
         ready: () => this.isReady(),
         index: () => this.indexer.index,
+        revision: () => this.indexer.revision,
         schema: () => this.schema,
         writer: () => this.writer,
         localFindings: () => {
