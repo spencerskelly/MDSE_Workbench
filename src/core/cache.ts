@@ -372,7 +372,7 @@ function pairsNumber(v: unknown, label: string): Map<string, number> {
 
 
 /** On-disk cache container version. Independent from the semantic payload format. */
-export const CACHE_MANIFEST_VERSION = 1;
+export const CACHE_MANIFEST_VERSION = 2;
 
 export interface CacheShardSet {
   count: number;
@@ -381,6 +381,8 @@ export interface CacheShardSet {
 
 export interface CacheDiskManifest {
   manifestVersion: number;
+  /** Monotonic commit order inside this local cache, independent of wall-clock changes. */
+  sequence: number;
   generation: string;
   header: CacheHeader;
   fingerprints: Record<string, FileFingerprint>;
@@ -432,6 +434,7 @@ export function shardSemanticCache(
   return {
     manifest: {
       manifestVersion: CACHE_MANIFEST_VERSION,
+      sequence: 0,
       generation,
       header: cache.header,
       fingerprints: { ...cache.fingerprints },
@@ -495,7 +498,7 @@ function joinLocalShards(manifest: CacheDiskManifest, shards: readonly unknown[]
 }
 
 function isDiskManifest(v: unknown): v is CacheDiskManifest {
-  if (!isObject(v) || typeof v.manifestVersion !== "number" || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
+  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || (v.sequence as number) < 0 || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
   return isShardSet(v.notes) && isShardSet(v.localRegions);
 }
 
