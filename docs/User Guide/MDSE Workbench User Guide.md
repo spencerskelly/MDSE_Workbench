@@ -33,14 +33,21 @@ Workbench normally updates its semantic index incrementally as files change. The
 
 ### Runtime status
 
-Candidate Workbench builds expose startup state in the status bar:
+Candidate Workbench builds expose staged startup state in the status bar:
 
 - **starting** — schemas/runtime are being prepared;
-- **waiting for vault** — Workbench is deliberately letting Obsidian finish its own metadata-cache activity;
+- **waiting for vault** — Workbench is deliberately giving Obsidian its own startup lane;
 - **restoring cache** — a compatible disposable semantic cache is being loaded;
 - **reconciling** — cached state is being brought up to date from changed/added/deleted paths;
-- **indexing** — Workbench is performing the full chunked rebuild path;
-- **ready** — Workbench queries/views can be used.
+- **indexing** — Workbench is performing the full cooperative rebuild path;
+- **Workbench ✓** — the core semantic graph is usable;
+- **Workbench ✓ · occurrence data queued/loading** — core Workbench is usable while Local Model occurrence capabilities intentionally finish later;
+- **Workbench ✓ · applying N** — a small set of live edits is being reconciled;
+- **Workbench · N issues** or **core unavailable** — one runtime subsystem needs attention.
+
+The status indicator is clickable. **Show runtime health** gives the same lightweight detail without running a whole-model Review scan.
+
+Core readiness does not mean every derived capability must already be complete. Internal/Structure/Interfaces/Where Used/Requirements may wait briefly for Local Model occurrence hydration when first requested; Functional, Design, Verification, Scenario, Behavior, Failure/risk and Evidence do not currently depend on occurrence hydration.
 
 A missing or invalid Workbench cache is a performance/recovery condition, not a model failure. Workbench must be able to rebuild from the vault. **Clear semantic cache** is the supported reset path; engineers should not delete arbitrary files under `.obsidian`.
 
@@ -216,6 +223,8 @@ Current finding categories include:
 - Local Model findings.
 
 Review is not only cleanup. It is the mechanism that keeps ambiguity visible instead of silently forcing a questionable semantic decision.
+
+Review/global assurance is demand-driven and revision-scoped. A validator failure is reported as **assurance unavailable** rather than as zero findings; ordinary notes and the core semantic model remain usable. Engineering findings do not mean the Workbench runtime itself is unhealthy.
 
 ## 10. Undo and Git
 
