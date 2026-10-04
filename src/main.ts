@@ -28,6 +28,8 @@ import { AssuranceManager, type AssuranceSnapshot } from "./obsidian/assurance";
 const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
 const CORE_AFTER_METADATA_DELAY_MS = 1000;
 const LOCAL_BACKGROUND_DELAY_MS = 3000;
+/** Foreground activity must stay quiet this long before paused background work may resume. */
+const BACKGROUND_RESUME_QUIET_MS = 3000;
 const CACHE_QUIET_MS = 8000;
 const MIN_CACHE_WRITE_INTERVAL_MS = 30000;
 
@@ -324,7 +326,7 @@ export default class MdseWorkbench extends Plugin {
       rebuildPending: indexer.rebuildPending,
       liveUpdatePending: indexer.liveUpdatePending,
       quietForMs: Date.now() - this.lastChange,
-      minimumQuietMs: LOCAL_BACKGROUND_DELAY_MS,
+      minimumQuietMs: BACKGROUND_RESUME_QUIET_MS,
     });
     return base && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
   }
