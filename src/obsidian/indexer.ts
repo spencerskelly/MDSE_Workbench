@@ -8,12 +8,14 @@ import type { FileFingerprint, ReconciliationPlan, RestoredSemanticState } from 
 import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
 import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative";
+import { MetadataChangeBurst } from "../core/metadata-burst";
 import type { Schema } from "../core/schema";
 
 const CHUNK = 500;
 const LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 /** Outside changes within one burst before a full rebuild is scheduled (WB-086). */
 const BURST_REBUILD = 300;
+const METADATA_BURST_WINDOW_MS = 10_000;
 /** Quiet time before a scheduled rebuild runs, so a pull or first-time indexing finishes first. */
 const QUIET_MS = 3000;
 /** Coalesce rapid editor/metadata events before reparsing one note body. */
@@ -48,8 +50,7 @@ export class Indexer {
   private readonly dirty = new Set<string>();
   /** Startup metadata-cache churn is ignored until Workbench deliberately begins model reconciliation. */
   private liveChanges = false;
-  private burst = 0;
-  private burstStarted = 0;
+  private readonly metadataBurst = new MetadataChangeBurst(METADATA_BURST_WINDOW_MS);
   private timer: number | null = null;
   /** Prevents a slower cachedRead from overwriting a newer Local Model edit. */
   private readonly localRevision = new Map<string, number>();
@@ -242,7 +243,7 @@ export class Indexer {
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
     this.cacheDirtyPaths.clear();
-    this.burst = 0;
+    this.metadataBurst.reset();
     this.bumpRevision();
     this.stats = this.makeStats("restored", 0, createdAt);
     return this.stats;
@@ -625,7 +626,7 @@ export class Indexer {
     }
     this.dirty.clear();
     if (backlog > CHUNK) this.scheduleRebuild();
-    this.burst = 0;
+    this.metadataBurst.reset();
     this.stats = await this.makeStatsCooperative("full", Math.round(performance.now() - t0), Date.now());
     return this.stats;
   }
@@ -678,13 +679,8 @@ export class Indexer {
       return;
     }
     this.livePending.add(path);
-    const now = Date.now();
-    if (now - this.burstStarted > 10000) {
-      this.burstStarted = now;
-      this.burst = 0;
-    }
-    this.burst++;
-    if (this.burst >= BURST_REBUILD || this.livePending.size >= BURST_REBUILD) {
+    const burst = this.metadataBurst.record(path, Date.now());
+    if (burst.uniquePaths >= BURST_REBUILD || this.livePending.size >= BURST_REBUILD) {
       this.livePending.clear();
       if (this.liveApplyTimer !== null) {
         window.clearTimeout(this.liveApplyTimer);
