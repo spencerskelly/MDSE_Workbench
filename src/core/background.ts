@@ -1,4 +1,5 @@
 export const BACKGROUND_RESUME_QUIET_MS = 3000;
+export const BACKGROUND_MAX_DEFERRAL_MS = 30000;
 
 export interface BackgroundWorkState {
   unloaded: boolean;
@@ -8,6 +9,9 @@ export interface BackgroundWorkState {
   liveUpdatePending: number;
   quietForMs: number;
   minimumQuietMs: number;
+  /** Age of the pending background request; only the quiet-window rule may age out. */
+  waitingForMs?: number;
+  maxDeferralMs?: number;
 }
 
 /** Shared policy for optional/background work that must yield to foreground model activity. */
@@ -18,7 +22,14 @@ export function canRunBackgroundWork(state: BackgroundWorkState): boolean {
     !state.building &&
     !state.rebuildPending &&
     state.liveUpdatePending === 0 &&
-    state.quietForMs >= state.minimumQuietMs
+    (
+      state.quietForMs >= state.minimumQuietMs ||
+      (
+        state.maxDeferralMs !== undefined &&
+        state.waitingForMs !== undefined &&
+        state.waitingForMs >= state.maxDeferralMs
+      )
+    )
   );
 }
 
