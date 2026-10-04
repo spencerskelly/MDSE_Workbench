@@ -890,6 +890,140 @@ function renderRecord(kind, heading, localId, fields) {
   out.push("^" + localId);
   return out;
 }
+var SECTION_TITLE = {
+  part: "Part Occurrences",
+  endpoint: "Local Interfaces",
+  connection: "Connections"
+};
+var SECTION_ORDER = ["part", "endpoint", "connection"];
+function planLocalRecordCreate(text, input) {
+  validateNewRecord(input);
+  const existing = parseLocalModel(text);
+  if (!existing) {
+    if (/^##\s+Local Model\s*$/m.test(text)) {
+      throw new Error("This note already has an ungoverned Local Model heading. Resolve it before structured creation.");
+    }
+    if (input.kind === "flow") throw new Error("A flow requires an existing connection.");
+    const eol = text.includes("\r\n") ? "\r\n" : "\n";
+    const block2 = renderRecord(input.kind, input.heading.trim(), input.localId, normalizedFields(input.kind, input.fields));
+    const regionLines = [
+      "## Local Model",
+      "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+      "",
+      "### " + SECTION_TITLE[input.kind],
+      "",
+      ...block2,
+      "",
+      "<!-- MDSE:LOCAL-MODEL END -->"
+    ];
+    const separator = text === "" || text.endsWith("\n") || text.endsWith("\r") ? "" : eol;
+    const prefix = text === "" ? "" : text + separator + eol;
+    return checkedCreate(text, prefix + regionLines.join(eol), input);
+  }
+  const editable = editableLocalRegion(text);
+  if (editable.region.records.some((r) => r.localId === input.localId)) {
+    throw new Error("Local Model record ^" + input.localId + " already exists in this note.");
+  }
+  const block = renderRecord(input.kind, input.heading.trim(), input.localId, normalizedFields(input.kind, input.fields));
+  const lines = editable.lines.slice();
+  if (input.kind === "flow") {
+    const connectionId = input.connectionId ?? "";
+    const connection = editable.region.records.find((r) => r.kind === "connection" && r.localId === connectionId);
+    if (!connection) throw new Error("Flow parent connection ^" + connectionId + " does not exist in this note.");
+    const insert = endOfConnection(lines, editable.region, connection);
+    const payload = [...block, ""];
+    lines.splice(insert, 0, ...payload);
+  } else {
+    const insert = sectionInsertPoint(lines, editable.region, input.kind);
+    if (insert.existing) {
+      lines.splice(insert.line, 0, ...block, "");
+    } else {
+      lines.splice(insert.line, 0, "### " + SECTION_TITLE[input.kind], "", ...block, "");
+    }
+  }
+  return checkedCreate(text, lines.join(editable.eol), input);
+}
+function checkedCreate(before, after, input) {
+  const parsed = parseLocalModel(after);
+  if (!parsed?.structured) throw new Error("Planned creation would make the Local Model region structurally unreadable.");
+  const record = parsed.records.find((r) => r.localId === input.localId);
+  if (!record || record.kind !== input.kind) throw new Error("Planned creation did not produce the requested " + input.kind + " record.");
+  return { before, after, changed: after !== before, localId: input.localId, kind: input.kind, findings: parsed.findings.slice() };
+}
+function validateNewRecord(input) {
+  if (!input.heading.trim()) throw new Error("A Local Model record heading cannot be empty.");
+  const prefix = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
+  const want = prefix[input.kind];
+  if (!input.localId.startsWith(want) || !/^\d{17}[a-z-]{13}$/.test(input.localId.slice(want.length))) {
+    throw new Error("Local Model ID " + input.localId + " is not a valid " + input.kind + " identity.");
+  }
+  for (const key2 of Object.keys(input.fields)) {
+    if (!FIELD_ORDER[input.kind].includes(key2)) throw new Error(key2 + " is not a governed field on a " + input.kind + " record.");
+  }
+  if ((input.kind === "part" || input.kind === "endpoint" || input.kind === "flow") && !input.fields.definition?.trim()) {
+    throw new Error("A " + input.kind + " record requires a definition.");
+  }
+  if (input.kind === "connection" && (!input.fields.endpointA?.trim() || !input.fields.endpointB?.trim())) {
+    throw new Error("A connection requires endpointA and endpointB.");
+  }
+  if (input.kind === "flow" && (!input.fields.endpointA?.trim() || !input.fields.endpointB?.trim())) {
+    throw new Error("A flow requires endpointA and endpointB roles.");
+  }
+}
+function normalizedFields(kind, source) {
+  const out = /* @__PURE__ */ new Map();
+  for (const key2 of FIELD_ORDER[kind]) {
+    const value = source[key2]?.trim();
+    if (!value || key2 === "usage" && value === "standard") continue;
+    out.set(key2, value);
+  }
+  return out;
+}
+function sectionInsertPoint(lines, region, kind) {
+  const title = SECTION_TITLE[kind].toLowerCase();
+  const end = region.endLine ? region.endLine - 1 : lines.length;
+  let section = -1;
+  for (let i = region.startLine ?? 1; i < end; i++) {
+    const m = /^###\s+(.*?)\s*$/.exec(lines[i]);
+    if (m && m[1].trim().toLowerCase() === title) {
+      section = i;
+      break;
+    }
+  }
+  if (section >= 0) {
+    let insert = end;
+    for (let i = section + 1; i < end; i++) {
+      if (/^###\s+/.test(lines[i])) {
+        insert = i;
+        break;
+      }
+    }
+    while (insert > section + 1 && lines[insert - 1].trim() === "") insert--;
+    return { line: insert, existing: true };
+  }
+  const order = SECTION_ORDER.indexOf(kind);
+  for (let later = order + 1; later < SECTION_ORDER.length; later++) {
+    const laterTitle = SECTION_TITLE[SECTION_ORDER[later]].toLowerCase();
+    for (let i = region.startLine ?? 1; i < end; i++) {
+      const m = /^###\s+(.*?)\s*$/.exec(lines[i]);
+      if (m && m[1].trim().toLowerCase() === laterTitle) return { line: i, existing: false };
+    }
+  }
+  return { line: end, existing: false };
+}
+function endOfConnection(lines, region, connection) {
+  const start = connection.line - 1;
+  const end = region.endLine ? region.endLine - 1 : lines.length;
+  let insert = end;
+  for (let i = start + 1; i < end; i++) {
+    if (/^####\s+/.test(lines[i]) || /^###\s+/.test(lines[i])) {
+      insert = i;
+      break;
+    }
+  }
+  while (insert > start + 1 && lines[insert - 1].trim() === "") insert--;
+  return insert;
+}
 function assertTargetValid(region, localId) {
   const errors = region.findings.filter((finding) => finding.severity === "error" && finding.localId === localId);
   if (!errors.length) return;
@@ -903,6 +1037,7 @@ var ModelEditService = class {
     this.ownerUid = ownerUid;
     this.transactions = transactions;
     this.sequence = 0;
+    this.pendingCreates = /* @__PURE__ */ new Map();
   }
   async patchLocalRecord(path, localId, patch) {
     const before = await this.store.read(path);
@@ -936,6 +1071,61 @@ var ModelEditService = class {
       throw error;
     }
     return { changed: true, plan };
+  }
+  /**
+   * Stage creation of one Local Model record. Planning and validation happen now, but the vault is
+   * untouched until applyLocalCreate(). This is the first structural Review / Apply / Cancel path.
+   */
+  async stageLocalRecordCreate(path, input) {
+    const before = await this.store.read(path);
+    const plan = planLocalRecordCreate(before, input);
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    const txId = `local-struct-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `create ${input.kind} ${input.heading.trim()}`;
+    this.transactions.begin(txId, label, "structural");
+    const transaction = this.transactions.add(txId, {
+      id: txId + "-create",
+      label,
+      changes: [{
+        kind: "local.create",
+        summary: label,
+        refs: [localRef(uid, input.kind, input.localId)],
+        metadata: { path, localId: input.localId, localKind: input.kind }
+      }]
+    });
+    this.pendingCreates.set(txId, { path, plan, label });
+    return { transaction, plan, path };
+  }
+  reviewLocalCreate(transactionId) {
+    const pending = this.requirePendingCreate(transactionId);
+    return {
+      transaction: this.transactions.review(transactionId),
+      plan: pending.plan,
+      path: pending.path
+    };
+  }
+  async applyLocalCreate(transactionId) {
+    const pending = this.requirePendingCreate(transactionId);
+    try {
+      await this.transactions.apply(transactionId, {
+        apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label)
+      });
+      this.pendingCreates.delete(transactionId);
+    } catch (error) {
+      throw error;
+    }
+  }
+  cancelLocalCreate(transactionId) {
+    this.requirePendingCreate(transactionId);
+    const cancelled = this.transactions.cancel(transactionId);
+    this.pendingCreates.delete(transactionId);
+    return cancelled;
+  }
+  requirePendingCreate(transactionId) {
+    const pending = this.pendingCreates.get(transactionId);
+    if (!pending) throw new Error(`Structural Local Model transaction ${transactionId} does not exist.`);
+    return pending;
   }
   async applyGuarded(path, before, after, label) {
     const current = await this.store.read(path);
