@@ -137,10 +137,10 @@ function renderRecord(kind: LocalKind, heading: string, localId: string, fields:
 
 
 export function nextLocalId(kind: LocalKind, ownerUid: string, now = new Date()): string {
-  const suffix = ownerUid.slice(-13);
-  if (!/^[a-z-]{13}$/.test(suffix)) {
-    throw new Error("Cannot create a Local Model identity because the owner note UID has no valid 13-character author suffix.");
+  if (!/^\d{17}[a-z-]{13}$/.test(ownerUid)) {
+    throw new Error("Cannot create a Local Model identity because the owner note UID is not a governed 30-character identity.");
   }
+  const suffix = ownerUid.slice(-13);
   const pad = (value: number, width: number) => String(value).padStart(width, "0");
   const stamp =
     pad(now.getUTCFullYear(), 4) +
