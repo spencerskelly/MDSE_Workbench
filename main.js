@@ -4625,6 +4625,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.assurance = null;
     this.lastStartupWaitMs = null;
     this.lastTimeToCoreReadyMs = null;
+    this.lastTimeToOccurrenceReadyMs = null;
+    this.startupRunStartedAt = null;
     this.startPromise = null;
     this.pendingRebuild = false;
     /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
@@ -4835,6 +4837,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       elements: stats.elements,
       coreMs: stats.ms,
       timeToCoreReadyMs: this.lastTimeToCoreReadyMs,
+      timeToOccurrenceReadyMs: this.lastTimeToOccurrenceReadyMs,
       startupWaitMs: this.lastStartupWaitMs,
       localHydrationMs: indexer.lastLocalHydrationMs,
       localCandidates: indexer.lastLocalHydrationCandidates,
@@ -4843,11 +4846,22 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.runtimeHistory = this.runtimeHistory.slice(-20);
     await this.saveAll();
   }
+  async markOccurrenceReady(indexer) {
+    if (this.unloaded || this.indexer !== indexer || indexer.localHydrationPending > 0 || this.startupRunStartedAt === null) return;
+    this.lastTimeToOccurrenceReadyMs = Math.round(performance.now() - this.startupRunStartedAt);
+    const latest = this.runtimeHistory[this.runtimeHistory.length - 1];
+    if (latest) {
+      latest.timeToOccurrenceReadyMs = this.lastTimeToOccurrenceReadyMs;
+      latest.localHydrationMs = indexer.lastLocalHydrationMs;
+      latest.localCandidates = indexer.lastLocalHydrationCandidates;
+      await this.saveAll();
+    }
+  }
   showRuntimeHistory() {
     const recent = this.runtimeHistory.slice(-10).reverse();
     const rows = recent.length ? recent.map((s) => [
       new Date(s.at).toLocaleString(),
-      `${s.mode} \xB7 ready ${s.timeToCoreReadyMs == null ? "n/a" : (s.timeToCoreReadyMs / 1e3).toFixed(2) + " s"} \xB7 core ${(s.coreMs / 1e3).toFixed(2)} s \xB7 Local ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1e3).toFixed(2) + " s"} (${s.localCandidates}) \xB7 wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1e3).toFixed(2) + " s"}`
+      `${s.mode} \xB7 core ready ${s.timeToCoreReadyMs == null ? "n/a" : (s.timeToCoreReadyMs / 1e3).toFixed(2) + " s"} \xB7 occurrence ready ${s.timeToOccurrenceReadyMs == null ? "pending/n/a" : (s.timeToOccurrenceReadyMs / 1e3).toFixed(2) + " s"} \xB7 core work ${(s.coreMs / 1e3).toFixed(2)} s \xB7 Local work ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1e3).toFixed(2) + " s"} (${s.localCandidates}) \xB7 wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1e3).toFixed(2) + " s"}`
     ]) : [["Runtime history", "No completed startup samples yet."]];
     new ReportModal(this.app, "MDSE Workbench runtime history", rows, [
       "Local-only performance evidence; this history is stored in the git-ignored Workbench data.json.",
@@ -4875,6 +4889,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       void indexer.whenLocalSettled(false).then(() => {
         if (this.unloaded || this.indexer !== indexer) return;
         this.lastOccurrenceError = null;
+        void this.markOccurrenceReady(indexer);
         this.refreshRuntimeHealth();
         this.scheduleSemanticCacheWrite();
       }).catch((e) => {
@@ -5021,6 +5036,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.lastCoreError = null;
     const firstStart = !this.indexer;
     if (firstStart) {
+      this.startupRunStartedAt = runStartedAt;
+      this.lastTimeToCoreReadyMs = null;
+      this.lastTimeToOccurrenceReadyMs = null;
+    }
+    if (firstStart) {
       this.setRuntimeStatus("waiting");
       const waitStarted = performance.now();
       await this.whenVaultQuiet();
@@ -5130,6 +5150,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
     this.lastTimeToCoreReadyMs = Math.round(performance.now() - runStartedAt);
     const localPending = indexer.localHydrationPending;
+    if (!localPending) this.lastTimeToOccurrenceReadyMs = this.lastTimeToCoreReadyMs;
     this.setRuntimeStatus(
       "ready",
       `${stats.elements} elements \xB7 ${stats.mode}${localPending ? ` \xB7 occurrence features loading later` : ""}`
@@ -5217,6 +5238,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     try {
       const indexer = this.indexer;
       await indexer.whenLocalSettled();
+      void this.markOccurrenceReady(indexer);
       const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
       const scan = analyzeLocalModel(indexer.index, indexer.local, resolve);
       const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
@@ -5266,6 +5288,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Local Model read errors", String(this.indexer.localReadErrorCount), this.indexer.localReadErrorCount > 0],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1e3).toFixed(2)} s`],
       ["Time to core ready", this.lastTimeToCoreReadyMs === null ? "not measured" : `${(this.lastTimeToCoreReadyMs / 1e3).toFixed(2)} s`],
+      ["Time to occurrence ready", this.lastTimeToOccurrenceReadyMs === null ? this.indexer.localHydrationPending ? "pending" : "not measured" : `${(this.lastTimeToOccurrenceReadyMs / 1e3).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1e3).toFixed(2)} s (target under 60 s)`, s.ms > 6e4],
       ["Assurance snapshot", assurance.error ? `unavailable \xB7 ${assurance.ms} ms \xB7 revision ${assurance.revision}` : `${assurance.ms} ms \xB7 revision ${assurance.revision}${assurance.stale ? " \xB7 stale/retrying" : ""}`, !!assurance.error],
       ["Assurance error", assurance.error ?? "none", !!assurance.error],
@@ -5305,6 +5328,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (profileNeedsLocalOccurrences(profile)) {
       this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements \xB7 loading occurrence data for ${profile.name}`);
       await indexer.whenLocalSettled();
+      void this.markOccurrenceReady(indexer);
       this.refreshRuntimeHealth();
     }
     const index = indexer.index;
@@ -5418,7 +5442,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
-    if (profileNeedsLocalOccurrences(profile)) await indexer.whenLocalSettled();
+    if (profileNeedsLocalOccurrences(profile)) {
+      await indexer.whenLocalSettled();
+      void this.markOccurrenceReady(indexer);
+    }
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target, from) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), from)?.path;
