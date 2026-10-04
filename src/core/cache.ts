@@ -82,6 +82,15 @@ export interface RestoredSemanticState {
   fingerprints: Map<string, FileFingerprint>;
 }
 
+export interface RestoredCoreSemanticState {
+  index: ModelIndex;
+  fingerprints: Map<string, FileFingerprint>;
+}
+
+export interface RestoredLocalSemanticState {
+  local: LocalModelIndex;
+}
+
 export function expectedCompatibility(schema: Schema, scope: CacheScope): CacheCompatibility {
   return {
     formatVersion: CACHE_FORMAT_VERSION,
@@ -135,6 +144,16 @@ export function serializeSemanticState(
  * Strictly restore a cache into fresh indexes. Any malformed structure throws and the caller
  * must discard/rebuild the cache rather than trying to "repair" derived semantics.
  */
+export function restoreCoreSemanticState(cache: unknown, schema: Schema, scope: CacheScope): RestoredCoreSemanticState {
+  const restored = restoreSemanticState(cache, schema, scope);
+  return { index: restored.index, fingerprints: restored.fingerprints };
+}
+
+export function restoreLocalSemanticState(cache: unknown, schema: Schema, scope: CacheScope): RestoredLocalSemanticState {
+  const restored = restoreSemanticState(cache, schema, scope);
+  return { local: restored.local };
+}
+
 export function restoreSemanticState(cache: unknown, schema: Schema, scope: CacheScope): RestoredSemanticState {
   const problem = cacheCompatibilityProblem(cache, expectedCompatibility(schema, scope));
   if (problem) throw new Error(`Incompatible semantic cache: ${problem}.`);
