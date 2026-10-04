@@ -1,0 +1,143 @@
+name: Obsidian plugin overlap integration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/integration-plugin-overlap.yml"
+      - "bench/run-plugin-overlap.sh"
+      - "bench/obsidian-plugin-overlap-probe.mjs"
+      - "bench/obsidian-e2e-setup.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-overlap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NOTE_COUNT: "12000"
+      OBSIDIAN_VERSION: "1.13.7"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build Workbench and install probe dependency
+        run: |
+          npm ci
+          npm run build
+          npm install --no-save chrome-remote-interface
+
+      - name: Install Obsidian desktop and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          curl -L --retry 3 -o "$RUNNER_TEMP/obsidian.deb"             "https://github.com/obsidianmd/obsidian-releases/releases/download/v$OBSIDIAN_VERSION/obsidian_$OBSIDIAN_VERSION"_amd64.deb
+          sudo apt-get install -y "$RUNNER_TEMP/obsidian.deb"
+
+      - name: Prepare identical model template and pinned overlap plugins
+        run: |
+          TEMPLATE="$RUNNER_TEMP/mdse-overlap-template"
+          ASSETS="$RUNNER_TEMP/mdse-overlap-assets"
+          RESULTS="$RUNNER_TEMP/mdse-overlap-results"
+          echo "TEMPLATE=$TEMPLATE" >> "$GITHUB_ENV"
+          echo "ASSETS=$ASSETS" >> "$GITHUB_ENV"
+          echo "RESULTS=$RESULTS" >> "$GITHUB_ENV"
+          rm -rf "$TEMPLATE" "$ASSETS" "$RESULTS"
+          mkdir -p "$TEMPLATE/.obsidian/plugins/mdse-workbench" "$ASSETS" "$RESULTS"
+
+          cp -R vault/99_System "$TEMPLATE/99_System"
+          npm run bench:generate -- "$NOTE_COUNT" "$TEMPLATE/IntegrationData"
+          cp main.js manifest.json styles.css "$TEMPLATE/.obsidian/plugins/mdse-workbench/"
+          cat > "$TEMPLATE/.vault.yaml" <<'EOF'
+          vault_uid: 20261004194700000overlaptest
+          vault_name: MDSE Plugin Overlap
+          default_branch: main
+          EOF
+          printf '%s\n' '["mdse-workbench"]' > "$TEMPLATE/.obsidian/community-plugins.json"
+
+          fetch_plugin () {
+            ID="$1"
+            BASE="$2"
+            mkdir -p "$ASSETS/$ID"
+            curl -L --retry 3 -o "$ASSETS/$ID/main.js" "$BASE/main.js"
+            curl -L --retry 3 -o "$ASSETS/$ID/manifest.json" "$BASE/manifest.json"
+            curl -L --retry 3 -o "$ASSETS/$ID/styles.css" "$BASE/styles.css"
+          }
+
+          fetch_plugin nodian "https://github.com/AkiSantin/Nodian/releases/download/1.4.14"
+          fetch_plugin breadcrumbs "https://github.com/michaelpporter/breadcrumbs/releases/download/4.21.11"
+          fetch_plugin dataview "https://github.com/blacksmithgu/obsidian-dataview/releases/download/0.5.68"
+          fetch_plugin fileclass "https://github.com/mdelobelle/fileclass/releases/download/0.2.15"
+          fetch_plugin advanced-canvas "https://github.com/Developer-Mike/obsidian-advanced-canvas/releases/download/7.0.0"
+
+          find "$TEMPLATE" -type f \( -name '*.md' -o -name '*.yaml' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum > "$RUNNER_TEMP/model-template.sha256"
+
+      - name: Measure baseline and one overlap plugin at a time
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-overlap
+        run: bash bench/run-plugin-overlap.sh
+
+      - name: Compare isolated plugin overlap results
+        run: |
+          node <<'NODE'
+          const fs=require("fs"), path=require("path");
+          const ids=["baseline","nodian","breadcrumbs","dataview","fileclass","advanced-canvas"];
+          const versions={nodian:"1.4.14",breadcrumbs:"4.21.11",dataview:"0.5.68",fileclass:"0.2.15","advanced-canvas":"7.0.0"};
+          const rows={};
+          for(const id of ids){
+            rows[id]={
+              startup:JSON.parse(fs.readFileSync(path.join(process.env.RESULTS,id+"-startup.json"),"utf8")),
+              capability:JSON.parse(fs.readFileSync(path.join(process.env.RESULTS,id+"-capability.json"),"utf8")),
+            };
+          }
+          const b=rows.baseline.startup;
+          const comparison=ids.map(id=>{
+            const r=rows[id].startup;
+            return {
+              id,
+              version:versions[id]||null,
+              readableMs:r.launchToReadableMs,
+              coreReadyMs:r.launchToCoreReadyMs,
+              occurrenceReadyMs:r.launchToOccurrenceReadyMs,
+              coreDeltaMs:r.launchToCoreReadyMs-b.launchToCoreReadyMs,
+              occurrenceDeltaMs:r.launchToOccurrenceReadyMs-b.launchToOccurrenceReadyMs,
+              files:r.files,
+              elements:r.elements,
+              links:r.links,
+              workbenchCommandsReady:rows[id].capability.commandsReady,
+              candidateEnabled:rows[id].capability.candidateEnabled,
+            };
+          });
+          fs.writeFileSync("plugin-overlap-comparison.json",JSON.stringify({baseline:"Workbench only",noteCount:Number(process.env.NOTE_COUNT),comparison},null,2)+"\n");
+          console.log(JSON.stringify(comparison,null,2));
+          NODE
+
+      - name: Write overlap summary
+        run: |
+          node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const c=require("./plugin-overlap-comparison.json");
+          console.log("## MDSE Workbench third-party overlap benchmark");
+          console.log("");
+          console.log("| Case | Version | Readable | Core ready | Core delta | Occurrence delta | Workbench commands |");
+          console.log("|---|---:|---:|---:|---:|---:|---|");
+          for(const r of c.comparison){
+            const cd=(r.coreDeltaMs>=0?"+":"")+r.coreDeltaMs+" ms";
+            const od=(r.occurrenceDeltaMs>=0?"+":"")+r.occurrenceDeltaMs+" ms";
+            console.log("| "+r.id+" | "+(r.version||"—")+" | "+r.readableMs+" ms | "+r.coreReadyMs+" ms | "+cd+" | "+od+" | "+(r.workbenchCommandsReady?"ready":"FAILED")+" |");
+          }
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plugin-overlap-evidence
+          path: |
+            plugin-overlap-comparison.json
+            ${{ runner.temp }}/mdse-overlap-results/
+            ${{ runner.temp }}/overlap-*.log
