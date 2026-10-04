@@ -16,6 +16,9 @@ class MemoryStorage implements CacheStorage {
   readonly files = new Map<string, string>();
   readonly dirs = new Set<string>();
   readonly operations: string[] = [];
+  readDelayMs = 0;
+  activeReads = 0;
+  maxActiveReads = 0;
 
   async mkdir(path: string): Promise<void> {
     this.dirs.add(path);
@@ -26,9 +29,16 @@ class MemoryStorage implements CacheStorage {
     this.operations.push("write " + path);
   }
   async read(path: string): Promise<string> {
-    const v = this.files.get(path);
-    if (v === undefined) throw new Error("ENOENT " + path);
-    return v;
+    this.activeReads++;
+    this.maxActiveReads = Math.max(this.maxActiveReads, this.activeReads);
+    try {
+      if (this.readDelayMs) await new Promise((r) => setTimeout(r, this.readDelayMs));
+      const v = this.files.get(path);
+      if (v === undefined) throw new Error("ENOENT " + path);
+      return v;
+    } finally {
+      this.activeReads--;
+    }
   }
 }
 
@@ -159,4 +169,21 @@ test("cache commit order is monotonic even if the system clock moves backward", 
   const manifests = [a, b].map((path) => JSON.parse(storage.files.get(path) ?? "{}"));
   assert.deepEqual(manifests.map((m) => m.sequence).sort((x, y) => x - y), [1, 2]);
   assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "after-clock-rollback");
+});
+
+
+test("warm restore reads cache shards with bounded parallelism", async () => {
+  const { cache } = sampleCache();
+  const storage = new MemoryStorage();
+  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "parallel", {
+    noteBuckets: 8,
+    localBuckets: 8,
+    fingerprintBuckets: 8,
+  });
+  storage.readDelayMs = 2;
+  storage.maxActiveReads = 0;
+
+  assert.deepEqual(await readSemanticCacheGeneration(storage, "runtime/cache"), cache);
+  assert.ok(storage.maxActiveReads > 1, "warm restore should overlap independent shard reads");
+  assert.ok(storage.maxActiveReads <= 12, `bounded read concurrency exceeded: ${storage.maxActiveReads}`);
 });
