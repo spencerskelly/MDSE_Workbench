@@ -58,6 +58,10 @@ export class Indexer {
     return this.running !== null;
   }
 
+  get rebuildPending(): boolean {
+    return this.timer !== null;
+  }
+
   enableLiveChanges(): void {
     this.liveChanges = true;
   }
