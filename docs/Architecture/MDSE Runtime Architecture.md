@@ -321,3 +321,16 @@ The user-facing consequence is intentional: **runtime health** answers “is the
 ## RTA-2/RTA-3 implementation note — W-353
 
 Warm restoration now reads sharded cache families with bounded parallelism rather than one long serial chain or an unbounded read burst. Fingerprint, note and Local Model shards each use a small worker pool; together they cap concurrent cache reads while overlapping independent I/O. This is intended to reduce warm-start latency without recreating the same startup contention the cache architecture is meant to avoid.
+
+
+## RTA-1/RTA-4 implementation note — W-354 staged capability readiness
+
+Workbench now treats readiness as a capability boundary rather than one all-or-nothing startup state.
+
+- **Core ready:** schemas plus reusable-note semantic graph are available. Ordinary note navigation and views that do not require occurrence data may run immediately.
+- **Occurrence loading:** governed Local Model bodies are deliberately deferred until after core readiness. They begin after a short background delay or immediately when an occurrence-aware consumer asks for them.
+- **Occurrence ready:** Internal, Structure, Interfaces, Where Used and Requirements can use complete Local Model occurrence semantics.
+- **Assurance ready:** whole-model Review/validation remains demand-driven and revision-scoped.
+- **Persistence ready:** semantic-cache writes remain later background work and never define engineering authority.
+
+Cold-start runtime evidence no longer forces Local Model hydration simply to record a startup sample. Functional, Design, Verification, Scenario, Behavior, Failure/risk and Evidence views do not wait on Local Model hydration because their current semantics do not consume occurrence records.
