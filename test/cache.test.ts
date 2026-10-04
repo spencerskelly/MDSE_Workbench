@@ -6,6 +6,8 @@ import {
   expectedCompatibility,
   restoreSemanticState,
   serializeSemanticState,
+  shardSemanticCache,
+  joinSemanticCache,
   type FileFingerprint,
 } from "../src/core/cache";
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
@@ -155,4 +157,41 @@ test("serialization is deterministic for paths regardless of insertion order", (
   const ca = serializeSemanticState(a.index, a.local, a.fingerprints, schema, "0.1.17", 1);
   const cb = serializeSemanticState(bIndex, bLocal, bFingerprints, schema, "0.1.17", 1);
   assert.deepEqual(ca, cb);
+});
+
+
+test("bounded sharding reassembles one complete generation and rejects partial/mixed generations", () => {
+  const { index, local, fingerprints } = state();
+  const cache = serializeSemanticState(index, local, fingerprints, schema, "0.1.17", 5);
+  const sharded = shardSemanticCache(cache, "g-0001", 1, 1);
+
+  assert.equal(sharded.manifest.notes.count, 2);
+  assert.equal(sharded.manifest.localRegions.count, 1);
+  assert.deepEqual(joinSemanticCache(sharded.manifest, [...sharded.noteShards].reverse(), sharded.localShards), cache);
+
+  assert.throws(
+    () => joinSemanticCache(sharded.manifest, sharded.noteShards.slice(0, 1), sharded.localShards),
+    /note shard count mismatch/,
+  );
+
+  const mixed = JSON.parse(JSON.stringify(sharded.noteShards));
+  mixed[0].generation = "old-generation";
+  assert.throws(
+    () => joinSemanticCache(sharded.manifest, mixed, sharded.localShards),
+    /Malformed semantic cache note shard/,
+  );
+
+  const duplicate = JSON.parse(JSON.stringify(sharded.noteShards));
+  duplicate[1].index = 0;
+  assert.throws(
+    () => joinSemanticCache(sharded.manifest, duplicate, sharded.localShards),
+    /Duplicate semantic cache note shard index/,
+  );
+});
+
+test("invalid shard sizing and empty generation are refused before anything can be persisted", () => {
+  const { index, local, fingerprints } = state();
+  const cache = serializeSemanticState(index, local, fingerprints, schema, "0.1.17");
+  assert.throws(() => shardSemanticCache(cache, "", 10, 10), /generation/);
+  assert.throws(() => shardSemanticCache(cache, "g", 0, 10), /positive integers/);
 });
