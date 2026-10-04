@@ -2204,6 +2204,8 @@ var Indexer = class {
     this.localRevision = /* @__PURE__ */ new Map();
     /** Body reads started by incremental Local Model updates; consumers can wait for semantic consistency. */
     this.pendingLocalReads = /* @__PURE__ */ new Set();
+    /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
+    this.semanticRevision = 0;
     this.index = new ModelIndex(schema);
   }
   get building() {
@@ -2211,6 +2213,12 @@ var Indexer = class {
   }
   get rebuildPending() {
     return this.timer !== null;
+  }
+  get revision() {
+    return this.semanticRevision;
+  }
+  bumpRevision() {
+    this.semanticRevision++;
   }
   enableLiveChanges() {
     this.liveChanges = true;
@@ -2244,6 +2252,7 @@ var Indexer = class {
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
     this.burst = 0;
+    this.bumpRevision();
     this.stats = this.makeStats("restored", 0, createdAt);
     return this.stats;
   }
@@ -2328,6 +2337,7 @@ var Indexer = class {
       this.local.remove(path);
       this.fingerprints.delete(path);
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
+      this.bumpRevision();
     }
     for (let i = 0; i < changedOrAdded.length; i++) {
       const path = changedOrAdded[i];
@@ -2394,9 +2404,11 @@ var Indexer = class {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
     this.local.remove(path);
-    if (!this.mayHaveLocalModel(file)) return;
-    const text = await this.app.vault.cachedRead(file);
-    if (this.localRevision.get(path) === revision) this.local.set(path, parseLocalModel(text));
+    if (this.mayHaveLocalModel(file)) {
+      const text = await this.app.vault.cachedRead(file);
+      if (this.localRevision.get(path) === revision) this.local.set(path, parseLocalModel(text));
+    }
+    this.bumpRevision();
   }
   /** Builds the index; a second call while building returns the same promise. */
   build() {
@@ -2422,6 +2434,7 @@ var Indexer = class {
     this.local = local;
     this.fingerprints.clear();
     for (const [path, fp] of fingerprints) this.fingerprints.set(path, fp);
+    this.bumpRevision();
     const backlog = this.dirty.size;
     if (backlog <= CHUNK) for (const path of this.dirty) this.apply(path);
     this.dirty.clear();
@@ -2438,6 +2451,7 @@ var Indexer = class {
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
     this.applyLocal(path, f instanceof import_obsidian.TFile ? f : null);
+    this.bumpRevision();
   }
   /** Update one governed Local Model region without rebuilding the whole vault. */
   applyLocal(path, file) {
@@ -3953,6 +3967,8 @@ async function clearWorkbenchCache(app) {
 
 // src/main.ts
 var QUIET_START_MS = 8e3;
+var CACHE_QUIET_MS = 2e3;
+var MIN_CACHE_WRITE_INTERVAL_MS = 3e4;
 var DEFAULTS = {
   relationshipsPath: "99_System/03_Schemas/relationships.yaml",
   elementTypesPath: "99_System/03_Schemas/element-types.yaml",
@@ -3980,6 +3996,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.lastCacheWriteAt = null;
     this.lastCacheWriteMs = null;
     this.lastCacheWriteError = null;
+    this.lastCachedRevision = null;
     this.lastWarmRestore = null;
     this.lastStartupWaitMs = null;
     this.startPromise = null;
@@ -4127,21 +4144,26 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
    */
   scheduleSemanticCacheWrite() {
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
+    const indexer = this.indexer;
+    if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
+    const sinceLast = this.lastCacheWriteAt === null ? Infinity : Date.now() - this.lastCacheWriteAt;
+    const delay = Math.max(CACHE_QUIET_MS, MIN_CACHE_WRITE_INTERVAL_MS - sinceLast);
     this.cacheWriteTimer = window.setTimeout(() => {
       this.cacheWriteTimer = null;
       if (this.unloaded) return;
-      const indexer = this.indexer;
-      if (!indexer?.stats || indexer.building || indexer.rebuildPending || Date.now() - this.lastChange < 1500) {
-        if (indexer?.stats) this.scheduleSemanticCacheWrite();
+      const current = this.indexer;
+      if (!current?.stats || current.revision === this.lastCachedRevision) return;
+      if (current.building || current.rebuildPending || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+        this.scheduleSemanticCacheWrite();
         return;
       }
       void this.persistSemanticCache();
-    }, 2e3);
+    }, delay);
   }
   async persistSemanticCache() {
     const schema = this.schema;
     const indexer = this.indexer;
-    if (!schema || !indexer || indexer.building || !indexer.stats) return;
+    if (!schema || !indexer || indexer.building || !indexer.stats || indexer.revision === this.lastCachedRevision) return;
     const t0 = performance.now();
     try {
       await indexer.whenLocalSettled();
@@ -4149,6 +4171,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.scheduleSemanticCacheWrite();
         return;
       }
+      const revision = indexer.revision;
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
       const cache = serializeSemanticState(
@@ -4170,6 +4193,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.lastCacheWriteAt = Date.now();
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = null;
+      if (indexer.revision === revision) this.lastCachedRevision = revision;
+      else this.scheduleSemanticCacheWrite();
     } catch (e) {
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = e.message;
@@ -4276,6 +4301,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         const initialMode = reconciliationMode(initialPlan);
         if (initialMode !== "full") {
           stats = indexer.installRestored(restored, cache.header.createdAt);
+          this.lastCachedRevision = indexer.revision;
           const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
           this.lastWarmRestore = initialChanges ? `restored; ${initialChanges} path change(s) to reconcile` : "restored; cache matched current file fingerprints";
           indexer.enableLiveChanges();
@@ -4332,6 +4358,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.lastCacheWriteAt = null;
       this.lastCacheWriteMs = null;
       this.lastCacheWriteError = null;
+      this.lastCachedRevision = null;
       this.lastWarmRestore = "cache cleared; next startup will rebuild from the vault";
       new import_obsidian8.Notice("MDSE Workbench: semantic cache cleared. Model files were not changed.");
     } catch (e) {
@@ -4432,7 +4459,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Semantic cache mode", this.settings.warmCachePreview ? "warm restore preview enabled" : "save-only"],
       ["Warm restore", this.lastWarmRestore ?? "not attempted"],
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
-      ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`]
+      ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
+      ["Semantic cache persistence", this.indexer.revision === this.lastCachedRevision ? "current" : "pending/coalesced"]
     ];
     if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
     new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
