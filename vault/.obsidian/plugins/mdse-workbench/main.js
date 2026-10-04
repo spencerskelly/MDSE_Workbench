@@ -2534,7 +2534,7 @@ function blockId(link) {
 }
 
 // src/core/relationship-dependencies.ts
-var TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES = 5e3;
+var TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES = 1e4;
 function shouldUseFullRelationshipReresolution(candidateCount) {
   return candidateCount > TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES;
 }
