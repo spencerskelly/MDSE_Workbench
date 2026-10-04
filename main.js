@@ -1589,6 +1589,14 @@ function isManifestShape(v) {
   return shardSet(v.fingerprints) && shardSet(v.notes) && shardSet(v.localRegions) && typeof v.header.createdAt === "number";
 }
 
+// src/core/edit-availability.ts
+function editingBlockedReason(coreReady, schema) {
+  if (!coreReady) return "Workbench is still indexing; try again in a moment.";
+  if (!schema) return "Workbench schema is not available.";
+  if (editingBlocked(schema)) return "The vault's schema is older than this Workbench supports, so editing is off.";
+  return null;
+}
+
 // src/core/internal-view.ts
 var PART_W = 260;
 var PART_H = 110;
@@ -5560,7 +5568,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.detail = new NoteDetailPanel(this.app, {
       schema: () => this.schema,
       writer: () => this.writer,
-      editBlocked: () => !this.isReady() ? "Workbench is still indexing; try again in a moment." : this.schema && editingBlocked(this.schema) ? "The vault's schema is older than this Workbench supports, so editing is off." : null,
+      editBlocked: () => editingBlockedReason(this.isReady(), this.schema),
       elements: (exclude) => this.elements().filter((r) => r.path !== exclude),
       relate: (a, b) => this.relate(a, b),
       undo: () => this.undo(),
