@@ -139,9 +139,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
             await progress("rename:begin");
             const renameBg = await ensureBackgroundActive("rename");
             const file2 = app.vault.getAbstractFileByPath(added);
-            await withTimeout(app.fileManager.renameFile(file2, renamed), 10000, "rename file");
+            await withTimeout(app.vault.rename(file2, renamed), 10000, "rename file");
             await settleSource("rename");
             await waitFor(() => !note(added) && !!note(renamed), 10000, "rename path convergence");
+            await waitFor(() => edges(renamed).some((e) => e.field === "performs" && e.to === fn), 10000, "renamed note relationship convergence");
             await withTimeout(indexer.hydrateLocalOwners([renamed]), 10000, "rename targeted occurrence hydration");
             if (localCount(added) !== 0 || localCount(renamed) !== 1) throw new Error("Local Model did not migrate cleanly on rename");
             results.push({ op: "rename", background: renameBg, oldPathRemoved: true, newPath: renamed, localRecords: localCount(renamed) });
@@ -152,9 +153,10 @@ for (let attempt = 0; attempt < 480; attempt++) {
             const moveBg = await ensureBackgroundActive("move");
             if (!app.vault.getAbstractFileByPath("Acceptance/Moved")) await app.vault.createFolder("Acceptance/Moved");
             const file3 = app.vault.getAbstractFileByPath(renamed);
-            await withTimeout(app.fileManager.renameFile(file3, moved), 10000, "move file");
+            await withTimeout(app.vault.rename(file3, moved), 10000, "move file");
             await settleSource("move");
             await waitFor(() => !note(renamed) && !!note(moved), 10000, "move path convergence");
+            await waitFor(() => edges(moved).some((e) => e.field === "performs" && e.to === fn), 10000, "moved note relationship convergence");
             await withTimeout(indexer.hydrateLocalOwners([moved]), 10000, "move targeted occurrence hydration");
             if (localCount(renamed) !== 0 || localCount(moved) !== 1) throw new Error("Local Model did not migrate cleanly on move");
             results.push({ op: "move", background: moveBg, oldPathRemoved: true, newPath: moved, localRecords: localCount(moved) });
