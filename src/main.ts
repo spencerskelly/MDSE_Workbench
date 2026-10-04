@@ -221,15 +221,18 @@ export default class MdseWorkbench extends Plugin {
   }
 
   private async persistSemanticCache(): Promise<void> {
-    if (!this.schema || !this.indexer || this.indexer.building || !this.indexer.stats) return;
+    const schema = this.schema;
+    const indexer = this.indexer;
+    if (!schema || !indexer || indexer.building || !indexer.stats) return;
     try {
       const createdAt = Date.now();
+      const scope = { vaultUid: await this.loadVaultUid() };
       const cache = serializeSemanticState(
-        this.indexer.index,
-        this.indexer.local,
-        this.indexer.fingerprints,
-        this.schema,
-        { vaultUid: await this.loadVaultUid() },
+        indexer.index,
+        indexer.local,
+        indexer.fingerprints,
+        schema,
+        scope,
         this.manifest.version,
         createdAt,
       );
@@ -326,15 +329,17 @@ export default class MdseWorkbench extends Plugin {
   }
 
   async inspectSemanticCache(): Promise<void> {
-    if (!this.schema || !this.indexer) {
+    const schema = this.schema;
+    const indexer = this.indexer;
+    if (!schema || !indexer) {
       new Notice("MDSE Workbench has not loaded the model schemas yet.");
       return;
     }
     try {
       const scope = { vaultUid: await this.loadVaultUid() };
       const cache = await readSemanticCacheGeneration(new ObsidianCacheStorage(this.app), WORKBENCH_CACHE_ROOT);
-      const restored = restoreSemanticState(cache, this.schema, scope);
-      const current = this.indexer.currentFingerprints();
+      const restored = restoreSemanticState(cache, schema, scope);
+      const current = indexer.currentFingerprints();
       const plan = planReconciliation(restored.fingerprints, current);
       const mode = reconciliationMode(plan);
       const localRecords = [...restored.local.regions.values()].reduce((n, region) => n + region.records.length, 0);
