@@ -116,6 +116,12 @@ export class ModelEditService {
 
   async applyLocalCreate(transactionId: string): Promise<void> {
     const pending = this.requirePendingCreate(transactionId);
+    const blocking = pending.plan.findings.filter((finding) => finding.severity === "error");
+    if (blocking.length) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blocking.length} blocking Local Model finding${blocking.length === 1 ? "" : "s"} — ${blocking.map((finding) => finding.message).join(" ")}`,
+      );
+    }
     try {
       await this.transactions.apply(transactionId, {
         apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label),
