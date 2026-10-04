@@ -199,3 +199,39 @@ test("dependency consistency detects internally inconsistent reverse evidence", 
   assert.equal(result.complete, false);
   assert.equal(result.issues.some((issue) => issue.includes("missing reverse target entry")), true);
 });
+
+
+test("reverse dependency size is bounded by current evidence rather than edit history", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", ["A/Target.md", "B/Target.md"], ["A/Target", "Shared"]);
+
+  assert.deepEqual(index.size(), {
+    sources: 1,
+    resolvedTargetKeys: 2,
+    authoredKeys: 3,
+    resolvedAssociations: 2,
+    authoredAssociations: 3,
+    storedMemberships: 10,
+  });
+
+  index.set("Source.md", ["C/Target.md"], ["C/Target"]);
+
+  assert.deepEqual(index.size(), {
+    sources: 1,
+    resolvedTargetKeys: 1,
+    authoredKeys: 2,
+    resolvedAssociations: 1,
+    authoredAssociations: 2,
+    storedMemberships: 6,
+  });
+});
+
+test("one authored link contributes at most two normalized dependency keys", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", [], ["Folder/Subfolder/Target#Heading|Alias"]);
+
+  const size = index.size();
+  assert.equal(size.authoredAssociations, 2);
+  assert.equal(size.authoredKeys, 2);
+  assert.equal(size.storedMemberships, 4);
+});
