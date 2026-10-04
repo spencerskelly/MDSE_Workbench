@@ -24,3 +24,10 @@ export class ObsidianCacheStorage implements CacheStorage {
     return this.app.vault.adapter.read(path);
   }
 }
+
+
+/** Delete only Workbench's disposable derived cache. Model files and plugin settings are untouched. */
+export async function clearWorkbenchCache(app: App): Promise<void> {
+  const a = app.vault.adapter;
+  if (await a.exists(WORKBENCH_CACHE_ROOT)) await a.rmdir(WORKBENCH_CACHE_ROOT, true);
+}
