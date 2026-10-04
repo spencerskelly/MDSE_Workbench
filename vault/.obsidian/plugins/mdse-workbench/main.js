@@ -148,6 +148,155 @@ var CacheMutationGate = class {
   }
 };
 
+// src/core/transaction.ts
+var TransactionManager = class {
+  constructor(validators = [], now = () => (/* @__PURE__ */ new Date()).toISOString()) {
+    this.validators = validators;
+    this.now = now;
+    this.drafts = /* @__PURE__ */ new Map();
+    this.undoStack = [];
+    this.redoStack = [];
+  }
+  begin(id, label, scope) {
+    if (this.drafts.has(id)) throw new Error(`Transaction ${id} already exists.`);
+    const tx = { id, label, scope, status: "draft", operations: [], issues: [], createdAt: this.now() };
+    tx.issues = this.validate(tx);
+    this.drafts.set(id, tx);
+    return this.snapshot(tx);
+  }
+  add(transactionId, operation) {
+    const tx = this.requireDraft(transactionId);
+    if (tx.operations.some((x) => x.id === operation.id)) throw new Error(`Operation ${operation.id} already exists in ${transactionId}.`);
+    tx.operations.push(operation);
+    tx.issues = this.validate(tx);
+    return this.snapshot(tx);
+  }
+  replace(transactionId, operation) {
+    const tx = this.requireDraft(transactionId);
+    const i = tx.operations.findIndex((x) => x.id === operation.id);
+    if (i < 0) throw new Error(`Operation ${operation.id} does not exist in ${transactionId}.`);
+    tx.operations[i] = operation;
+    tx.issues = this.validate(tx);
+    return this.snapshot(tx);
+  }
+  remove(transactionId, operationId) {
+    const tx = this.requireDraft(transactionId);
+    tx.operations = tx.operations.filter((x) => x.id !== operationId);
+    tx.issues = this.validate(tx);
+    return this.snapshot(tx);
+  }
+  review(transactionId) {
+    const tx = this.require(transactionId);
+    if (tx.status === "draft") tx.issues = this.validate(tx);
+    return this.snapshot(tx);
+  }
+  canApply(transactionId) {
+    const tx = this.requireDraft(transactionId);
+    tx.issues = this.validate(tx);
+    return !tx.issues.some(isBlocking);
+  }
+  async apply(transactionId, executor) {
+    const tx = this.requireDraft(transactionId);
+    tx.issues = this.validate(tx);
+    const blocking = tx.issues.filter(isBlocking);
+    if (blocking.length) throw new Error(`Transaction ${tx.label} has ${blocking.length} blocking validation issue${blocking.length === 1 ? "" : "s"}.`);
+    if (!tx.operations.length) throw new Error(`Transaction ${tx.label} has no operations.`);
+    const applied = await executor.apply(this.snapshot(tx));
+    tx.status = "applied";
+    const changes = tx.operations.flatMap((op) => op.changes);
+    const entry = {
+      transactionId: tx.id,
+      label: tx.label,
+      scope: tx.scope,
+      appliedAt: this.now(),
+      changes,
+      reversible: changes.every((x) => x.reversible !== false)
+    };
+    this.undoStack.push({ entry, applied });
+    this.redoStack.length = 0;
+    this.drafts.delete(tx.id);
+    return entry;
+  }
+  cancel(transactionId) {
+    const tx = this.requireDraft(transactionId);
+    tx.status = "cancelled";
+    this.drafts.delete(transactionId);
+    return this.snapshot(tx);
+  }
+  get canUndo() {
+    return this.undoStack.length > 0 && this.undoStack[this.undoStack.length - 1].entry.reversible;
+  }
+  get canRedo() {
+    const last = this.redoStack[this.redoStack.length - 1];
+    return !!last && last.entry.reversible && !!last.applied.redo;
+  }
+  /**
+   * Migration seam for mature writers that already performed a governed edit before the WB-114
+   * coordinator existed. New planners should prefer begin/add/apply; existing writers register the
+   * same guarded undo/redo action here so all Workbench edits share one chronological history.
+   */
+  recordApplied(transactionId, label, scope, changes, applied) {
+    const entry = {
+      transactionId,
+      label,
+      scope,
+      appliedAt: this.now(),
+      changes: changes.map((x) => ({ ...x, refs: [...x.refs] })),
+      reversible: changes.every((x) => x.reversible !== false)
+    };
+    this.undoStack.push({ entry, applied });
+    this.redoStack.length = 0;
+    return { ...entry, changes: [...entry.changes] };
+  }
+  history() {
+    return this.undoStack.map((x) => ({ ...x.entry, changes: [...x.entry.changes] }));
+  }
+  async undo() {
+    const state = this.undoStack[this.undoStack.length - 1];
+    if (!state) throw new Error("Nothing to undo.");
+    if (!state.entry.reversible) throw new Error(`Cannot undo ${state.entry.label}: it was marked non-reversible.`);
+    await state.applied.undo();
+    this.undoStack.pop();
+    this.redoStack.push(state);
+    return { ...state.entry, changes: [...state.entry.changes] };
+  }
+  async redo() {
+    const state = this.redoStack[this.redoStack.length - 1];
+    if (!state) throw new Error("Nothing to redo.");
+    if (!state.entry.reversible || !state.applied.redo) throw new Error(`Cannot redo ${state.entry.label}.`);
+    await state.applied.redo();
+    this.redoStack.pop();
+    this.undoStack.push(state);
+    return { ...state.entry, changes: [...state.entry.changes] };
+  }
+  validate(tx) {
+    return this.validators.flatMap((validator) => validator(this.snapshot(tx)));
+  }
+  require(id) {
+    const tx = this.drafts.get(id);
+    if (!tx) throw new Error(`Transaction ${id} does not exist.`);
+    return tx;
+  }
+  requireDraft(id) {
+    const tx = this.require(id);
+    if (tx.status !== "draft") throw new Error(`Transaction ${id} is ${tx.status}, not draft.`);
+    return tx;
+  }
+  snapshot(tx) {
+    return {
+      ...tx,
+      operations: tx.operations.map((op) => ({
+        ...op,
+        changes: op.changes.map((change) => ({ ...change, refs: [...change.refs] }))
+      })),
+      issues: tx.issues.map((issue) => ({ ...issue }))
+    };
+  }
+};
+function isBlocking(issue) {
+  return issue.severity === "error" && issue.blocking !== false;
+}
+
 // src/core/core-readiness.ts
 function canPublishCoreReady(state) {
   return state.publicationGate && state.schemaLoaded && state.writerReady && state.statsAvailable && !state.sourceReconciliationPending && !state.building;
@@ -4948,155 +5097,6 @@ var FindingModal = class extends import_obsidian5.Modal {
 // src/obsidian/writer.ts
 var import_obsidian6 = require("obsidian");
 
-// src/core/transaction.ts
-var TransactionManager = class {
-  constructor(validators = [], now = () => (/* @__PURE__ */ new Date()).toISOString()) {
-    this.validators = validators;
-    this.now = now;
-    this.drafts = /* @__PURE__ */ new Map();
-    this.undoStack = [];
-    this.redoStack = [];
-  }
-  begin(id, label, scope) {
-    if (this.drafts.has(id)) throw new Error(`Transaction ${id} already exists.`);
-    const tx = { id, label, scope, status: "draft", operations: [], issues: [], createdAt: this.now() };
-    tx.issues = this.validate(tx);
-    this.drafts.set(id, tx);
-    return this.snapshot(tx);
-  }
-  add(transactionId, operation) {
-    const tx = this.requireDraft(transactionId);
-    if (tx.operations.some((x) => x.id === operation.id)) throw new Error(`Operation ${operation.id} already exists in ${transactionId}.`);
-    tx.operations.push(operation);
-    tx.issues = this.validate(tx);
-    return this.snapshot(tx);
-  }
-  replace(transactionId, operation) {
-    const tx = this.requireDraft(transactionId);
-    const i = tx.operations.findIndex((x) => x.id === operation.id);
-    if (i < 0) throw new Error(`Operation ${operation.id} does not exist in ${transactionId}.`);
-    tx.operations[i] = operation;
-    tx.issues = this.validate(tx);
-    return this.snapshot(tx);
-  }
-  remove(transactionId, operationId) {
-    const tx = this.requireDraft(transactionId);
-    tx.operations = tx.operations.filter((x) => x.id !== operationId);
-    tx.issues = this.validate(tx);
-    return this.snapshot(tx);
-  }
-  review(transactionId) {
-    const tx = this.require(transactionId);
-    if (tx.status === "draft") tx.issues = this.validate(tx);
-    return this.snapshot(tx);
-  }
-  canApply(transactionId) {
-    const tx = this.requireDraft(transactionId);
-    tx.issues = this.validate(tx);
-    return !tx.issues.some(isBlocking);
-  }
-  async apply(transactionId, executor) {
-    const tx = this.requireDraft(transactionId);
-    tx.issues = this.validate(tx);
-    const blocking = tx.issues.filter(isBlocking);
-    if (blocking.length) throw new Error(`Transaction ${tx.label} has ${blocking.length} blocking validation issue${blocking.length === 1 ? "" : "s"}.`);
-    if (!tx.operations.length) throw new Error(`Transaction ${tx.label} has no operations.`);
-    const applied = await executor.apply(this.snapshot(tx));
-    tx.status = "applied";
-    const changes = tx.operations.flatMap((op) => op.changes);
-    const entry = {
-      transactionId: tx.id,
-      label: tx.label,
-      scope: tx.scope,
-      appliedAt: this.now(),
-      changes,
-      reversible: changes.every((x) => x.reversible !== false)
-    };
-    this.undoStack.push({ entry, applied });
-    this.redoStack.length = 0;
-    this.drafts.delete(tx.id);
-    return entry;
-  }
-  cancel(transactionId) {
-    const tx = this.requireDraft(transactionId);
-    tx.status = "cancelled";
-    this.drafts.delete(transactionId);
-    return this.snapshot(tx);
-  }
-  get canUndo() {
-    return this.undoStack.length > 0 && this.undoStack[this.undoStack.length - 1].entry.reversible;
-  }
-  get canRedo() {
-    const last = this.redoStack[this.redoStack.length - 1];
-    return !!last && last.entry.reversible && !!last.applied.redo;
-  }
-  /**
-   * Migration seam for mature writers that already performed a governed edit before the WB-114
-   * coordinator existed. New planners should prefer begin/add/apply; existing writers register the
-   * same guarded undo/redo action here so all Workbench edits share one chronological history.
-   */
-  recordApplied(transactionId, label, scope, changes, applied) {
-    const entry = {
-      transactionId,
-      label,
-      scope,
-      appliedAt: this.now(),
-      changes: changes.map((x) => ({ ...x, refs: [...x.refs] })),
-      reversible: changes.every((x) => x.reversible !== false)
-    };
-    this.undoStack.push({ entry, applied });
-    this.redoStack.length = 0;
-    return { ...entry, changes: [...entry.changes] };
-  }
-  history() {
-    return this.undoStack.map((x) => ({ ...x.entry, changes: [...x.entry.changes] }));
-  }
-  async undo() {
-    const state = this.undoStack[this.undoStack.length - 1];
-    if (!state) throw new Error("Nothing to undo.");
-    if (!state.entry.reversible) throw new Error(`Cannot undo ${state.entry.label}: it was marked non-reversible.`);
-    await state.applied.undo();
-    this.undoStack.pop();
-    this.redoStack.push(state);
-    return { ...state.entry, changes: [...state.entry.changes] };
-  }
-  async redo() {
-    const state = this.redoStack[this.redoStack.length - 1];
-    if (!state) throw new Error("Nothing to redo.");
-    if (!state.entry.reversible || !state.applied.redo) throw new Error(`Cannot redo ${state.entry.label}.`);
-    await state.applied.redo();
-    this.redoStack.pop();
-    this.undoStack.push(state);
-    return { ...state.entry, changes: [...state.entry.changes] };
-  }
-  validate(tx) {
-    return this.validators.flatMap((validator) => validator(this.snapshot(tx)));
-  }
-  require(id) {
-    const tx = this.drafts.get(id);
-    if (!tx) throw new Error(`Transaction ${id} does not exist.`);
-    return tx;
-  }
-  requireDraft(id) {
-    const tx = this.require(id);
-    if (tx.status !== "draft") throw new Error(`Transaction ${id} is ${tx.status}, not draft.`);
-    return tx;
-  }
-  snapshot(tx) {
-    return {
-      ...tx,
-      operations: tx.operations.map((op) => ({
-        ...op,
-        changes: op.changes.map((change) => ({ ...change, refs: [...change.refs] }))
-      })),
-      issues: tx.issues.map((issue) => ({ ...issue }))
-    };
-  }
-};
-function isBlocking(issue) {
-  return issue.severity === "error" && issue.blocking !== false;
-}
-
 // src/core/frontmatter.ts
 function linkTarget(value) {
   if (typeof value !== "string") return void 0;
@@ -5522,6 +5522,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
+    /** One semantic history stack for every Workbench model writer (WB-114). */
+    this.transactions = new TransactionManager();
     this.detail = null;
     this.statusEl = null;
     this.cancelStartupHandoff = null;
@@ -5653,6 +5655,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       checkCallback: (checking) => this.withActive(checking, (f) => this.pickTargetThenRelate(f.path))
     });
     this.addCommand({ id: "undo", name: "Undo last Workbench edit", callback: () => this.undo() });
+    this.addCommand({ id: "redo", name: "Redo last Workbench edit", callback: () => this.redo() });
     this.addCommand({
       id: "probe-canvas",
       name: "Check Canvas support (Phase 0 probe)",
@@ -6175,7 +6178,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed("backgroundHydration", this.indexer));
-      this.writer = new RelationshipWriter(this.app, () => this.schema, () => this.indexer.index);
+      this.writer = new RelationshipWriter(this.app, () => this.schema, () => this.indexer.index, this.transactions);
       this.assurance = new AssuranceManager({
         revision: () => this.indexer.revision,
         // Assurance ranks below background occurrence hydration. It waits for occurrence work
@@ -6704,6 +6707,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.markForegroundActivity();
     if (!this.writer) return;
     new import_obsidian8.Notice(await this.writer.undo(), 15e3);
+  }
+  async redo() {
+    this.markForegroundActivity();
+    if (!this.writer) return;
+    new import_obsidian8.Notice(await this.writer.redo(), 15e3);
   }
 };
 var WorkbenchSettings = class extends import_obsidian8.PluginSettingTab {
