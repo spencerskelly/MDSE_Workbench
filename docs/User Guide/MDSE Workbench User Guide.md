@@ -37,18 +37,20 @@ Candidate Workbench builds expose startup state in the status bar:
 
 - **starting** — schemas/runtime are being prepared;
 - **waiting for vault** — Workbench is deliberately letting Obsidian finish its own metadata-cache activity;
-- **indexing** — the semantic model is being built or reconciled;
+- **restoring cache** — a compatible disposable semantic cache is being loaded;
+- **reconciling** — cached state is being brought up to date from changed/added/deleted paths;
+- **indexing** — Workbench is performing the full chunked rebuild path;
 - **ready** — Workbench queries/views can be used.
 
 A missing or invalid Workbench cache is a performance/recovery condition, not a model failure. Workbench must be able to rebuild from the vault. **Clear semantic cache** is the supported reset path; engineers should not delete arbitrary files under `.obsidian`.
 
 ### Semantic cache candidate
 
-**Candidate — W-343/W-344 / RTA-2 and RTA-3.**
+**Candidate — W-343/W-345 / RTA-2 and RTA-3.**
 
 The development line writes a local, Git-ignored semantic cache after Workbench is already Ready. The cache is bound to the vault identity and schema/parser contract and uses two crash-safe A/B slots. It may be deleted at any time.
 
-**Warm cache preview** is an explicit pre-release setting and is OFF by default. When enabled in an integration vault, Workbench may restore a validated cache and reconcile a small set of changed existing files. Added/deleted/renamed Markdown paths deliberately use the full-build fallback because such path changes can alter how unchanged wikilinks resolve.
+**Warm cache preview** is an explicit pre-release setting and is OFF by default. When enabled in an integration vault, Workbench may restore a validated cache and reconcile a bounded set of changed, added, deleted or renamed files. Semantic-cache v2 retains authored relationship-link evidence, so a path-set change can re-resolve otherwise unchanged relationship links through Obsidian's current metadata without rereading those note bodies. Large change sets still deliberately use the full chunked rebuild path.
 
 Do not enable Warm cache preview in a controlled release merely because the setting exists; it remains a validation feature until the runtime acceptance sheet passes.
 
@@ -266,4 +268,4 @@ Try these in order:
 
 The engineering Base Vault may still pin an older Workbench while a newer candidate is being developed. The pinned version shown in **Enabled Plugin Stack** is the runtime truth.
 
-The current WB-106 development line adds structured Local Model editing, the Internal occurrence-native view, and the W-343/W-344 runtime architecture. Save-only semantic-cache behavior and opt-in warm-cache preview are candidate capabilities, not released merely because their source exists. Promotion still requires the Workbench test/typecheck/build gate, runtime acceptance on representative vaults, controlled payload/lock/release updates, and release-checker success.
+The current WB-106 development line adds structured Local Model editing, the Internal occurrence-native view, and the W-343/W-345 runtime architecture. Save-only semantic-cache behavior and opt-in warm-cache preview are candidate capabilities, not released merely because their source exists. Promotion still requires the Workbench test/typecheck/build gate, runtime acceptance on representative vaults, controlled payload/lock/release updates, and release-checker success.
