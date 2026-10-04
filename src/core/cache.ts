@@ -374,7 +374,7 @@ function pairsNumber(v: unknown, label: string): Map<string, number> {
 
 
 /** On-disk cache container version. Independent from the semantic payload format. */
-export const CACHE_MANIFEST_VERSION = 2;
+export const CACHE_MANIFEST_VERSION = 3;
 
 export interface CacheShardSet {
   count: number;
@@ -387,7 +387,8 @@ export interface CacheDiskManifest {
   sequence: number;
   generation: string;
   header: CacheHeader;
-  fingerprints: Record<string, FileFingerprint>;
+  /** Fixed path-hash buckets keep the manifest small and make future dirty-bucket writes possible. */
+  fingerprints: CacheShardSet;
   notes: CacheShardSet;
   localRegions: CacheShardSet;
 }
@@ -404,8 +405,15 @@ export interface LocalCacheShard {
   localRegions: Array<[string, CachedLocalRegion]>;
 }
 
+export interface FingerprintCacheShard {
+  generation: string;
+  index: number;
+  fingerprints: Array<[string, FileFingerprint]>;
+}
+
 export interface ShardedSemanticCache {
   manifest: CacheDiskManifest;
+  fingerprintShards: FingerprintCacheShard[];
   noteShards: NoteCacheShard[];
   localShards: LocalCacheShard[];
 }
@@ -418,31 +426,38 @@ export interface ShardedSemanticCache {
 export function shardSemanticCache(
   cache: SemanticCache,
   generation: string,
-  notesPerShard = 2000,
-  regionsPerShard = 500,
+  noteBuckets = 32,
+  localBuckets = 16,
+  fingerprintBuckets = 32,
 ): ShardedSemanticCache {
   if (!generation.trim()) throw new Error("Cache generation must not be empty.");
-  if (!Number.isInteger(notesPerShard) || notesPerShard < 1 || !Number.isInteger(regionsPerShard) || regionsPerShard < 1) {
-    throw new Error("Cache shard sizes must be positive integers.");
+  for (const [label, n] of [["note", noteBuckets], ["Local Model", localBuckets], ["fingerprint", fingerprintBuckets]] as const) {
+    if (!Number.isInteger(n) || n < 1 || n > 256) throw new Error(`${label} cache bucket count must be an integer from 1 to 256.`);
   }
-  const noteShards: NoteCacheShard[] = [];
-  for (let i = 0; i < cache.notes.length; i += notesPerShard) {
-    noteShards.push({ generation, index: noteShards.length, notes: cache.notes.slice(i, i + notesPerShard) });
-  }
-  const localShards: LocalCacheShard[] = [];
-  for (let i = 0; i < cache.localRegions.length; i += regionsPerShard) {
-    localShards.push({ generation, index: localShards.length, localRegions: cache.localRegions.slice(i, i + regionsPerShard) });
-  }
+
+  const noteShards: NoteCacheShard[] = Array.from({ length: noteBuckets }, (_, index) => ({ generation, index, notes: [] }));
+  for (const rec of cache.notes) noteShards[pathBucket(rec.path, noteBuckets)].notes.push(rec);
+  for (const shard of noteShards) shard.notes.sort((a, b) => a.path.localeCompare(b.path));
+
+  const localShards: LocalCacheShard[] = Array.from({ length: localBuckets }, (_, index) => ({ generation, index, localRegions: [] }));
+  for (const entry of cache.localRegions) localShards[pathBucket(entry[0], localBuckets)].localRegions.push(entry);
+  for (const shard of localShards) shard.localRegions.sort((a, b) => a[0].localeCompare(b[0]));
+
+  const fingerprintShards: FingerprintCacheShard[] = Array.from({ length: fingerprintBuckets }, (_, index) => ({ generation, index, fingerprints: [] }));
+  for (const entry of Object.entries(cache.fingerprints)) fingerprintShards[pathBucket(entry[0], fingerprintBuckets)].fingerprints.push(entry);
+  for (const shard of fingerprintShards) shard.fingerprints.sort((a, b) => a[0].localeCompare(b[0]));
+
   return {
     manifest: {
       manifestVersion: CACHE_MANIFEST_VERSION,
       sequence: 0,
       generation,
       header: cache.header,
-      fingerprints: { ...cache.fingerprints },
+      fingerprints: { count: fingerprintShards.length, total: Object.keys(cache.fingerprints).length },
       notes: { count: noteShards.length, total: cache.notes.length },
       localRegions: { count: localShards.length, total: cache.localRegions.length },
     },
+    fingerprintShards,
     noteShards,
     localShards,
   };
@@ -454,19 +469,45 @@ export function shardSemanticCache(
  */
 export function joinSemanticCache(
   manifest: unknown,
+  fingerprintShards: readonly unknown[],
   noteShards: readonly unknown[],
   localShards: readonly unknown[],
 ): SemanticCache {
   if (!isDiskManifest(manifest)) throw new Error("Malformed semantic cache manifest.");
   if (manifest.manifestVersion !== CACHE_MANIFEST_VERSION) throw new Error(`Unsupported cache manifest version ${manifest.manifestVersion}.`);
+  const fingerprints = joinFingerprintShards(manifest, fingerprintShards);
   const notes = joinNoteShards(manifest, noteShards);
   const localRegions = joinLocalShards(manifest, localShards);
   return {
     header: manifest.header,
-    fingerprints: { ...manifest.fingerprints },
+    fingerprints,
     notes,
     localRegions,
   };
+}
+
+function joinFingerprintShards(manifest: CacheDiskManifest, shards: readonly unknown[]): Record<string, FileFingerprint> {
+  if (shards.length !== manifest.fingerprints.count) throw new Error("Semantic cache fingerprint shard count mismatch.");
+  const ordered = new Array<FingerprintCacheShard>(shards.length);
+  for (const raw of shards) {
+    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.fingerprints)) {
+      throw new Error("Malformed semantic cache fingerprint shard.");
+    }
+    if (ordered[raw.index]) throw new Error("Duplicate semantic cache fingerprint shard index.");
+    ordered[raw.index] = raw as unknown as FingerprintCacheShard;
+  }
+  const out: Record<string, FileFingerprint> = {};
+  let total = 0;
+  for (const shard of ordered) {
+    for (const entry of shard.fingerprints) {
+      if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" || !isFingerprint(entry[1])) throw new Error("Malformed semantic cache fingerprint entry.");
+      if (out[entry[0]]) throw new Error(`Duplicate semantic cache fingerprint path ${entry[0]}.`);
+      out[entry[0]] = { ...entry[1] };
+      total++;
+    }
+  }
+  if (total !== manifest.fingerprints.total) throw new Error("Semantic cache fingerprint total mismatch.");
+  return out;
 }
 
 function joinNoteShards(manifest: CacheDiskManifest, shards: readonly unknown[]): CachedNoteRecord[] {
@@ -499,9 +540,19 @@ function joinLocalShards(manifest: CacheDiskManifest, shards: readonly unknown[]
   return regions;
 }
 
+function pathBucket(path: string, count: number): number {
+  // FNV-1a 32-bit: fast, deterministic across runtimes, and sufficient for local cache distribution.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < path.length; i++) {
+    h ^= path.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) % count;
+}
+
 function isDiskManifest(v: unknown): v is CacheDiskManifest {
-  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || (v.sequence as number) < 0 || typeof v.generation !== "string" || !isObject(v.header) || !isObject(v.fingerprints)) return false;
-  return isShardSet(v.notes) && isShardSet(v.localRegions);
+  if (!isObject(v) || typeof v.manifestVersion !== "number" || !Number.isInteger(v.sequence) || (v.sequence as number) < 0 || typeof v.generation !== "string" || !isObject(v.header)) return false;
+  return isShardSet(v.fingerprints) && isShardSet(v.notes) && isShardSet(v.localRegions);
 }
 
 function isShardSet(v: unknown): v is CacheShardSet {
