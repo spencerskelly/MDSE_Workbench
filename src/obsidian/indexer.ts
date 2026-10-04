@@ -7,7 +7,7 @@ import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../c
 import type { FileFingerprint, ReconciliationPlan, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
-import { CooperativeBudget } from "../core/cooperative";
+import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative";
 import type { Schema } from "../core/schema";
 
 const CHUNK = 500;
@@ -18,7 +18,7 @@ const BURST_REBUILD = 300;
 const QUIET_MS = 3000;
 /** Coalesce rapid editor/metadata events before reparsing one note body. */
 const LIVE_DEBOUNCE_MS = 250;
-const WORK_SLICE_MS = 12;
+const WORK_SLICE_MS = UI_WORK_SLICE_BUDGET_MS;
 const yieldToUi = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
 export interface BuildStats {
