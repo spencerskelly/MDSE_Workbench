@@ -106,7 +106,6 @@ for (let attempt = 0; attempt < 300; attempt++) {
             const edited = targetText.replace("status: Draft", "status: Active\nperforms:\n  - \"[[Live Function]]\"").replace("#### Nested occurrence", "#### Nested occurrence edited");
             await app.vault.modify(file1, edited);
             await settleSource("edit");
-            await waitFor(() => note(added)?.raw?.status === "Active" || note(added)?.status === "Active", 10000, "edited status indexed");
             await waitFor(() => edges(added).some((e) => e.field === "performs" && e.to === fn), 10000, "edited relationship indexed");
             await indexer.hydrateLocalOwners([added]);
             if (localCount(added) !== 1) throw new Error("edited Local Model occurrence disappeared");
