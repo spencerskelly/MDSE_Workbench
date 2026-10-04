@@ -114,6 +114,14 @@ test("cache compatibility is exact for format and semantic parser/schema inputs"
   wrongFormat.header.formatVersion++;
   assert.match(cacheCompatibilityProblem(wrongFormat, expected) ?? "", /cache format/);
 
+  const wrongSemantic = structuredClone(cache);
+  wrongSemantic.header.semanticVersion++;
+  assert.match(cacheCompatibilityProblem(wrongSemantic, expected) ?? "", /semantic cache contract/);
+
+  const wrongVault = structuredClone(cache);
+  wrongVault.header.vaultUid = "different-vault";
+  assert.match(cacheCompatibilityProblem(wrongVault, expected) ?? "", /vault identity/);
+
   const wrongRelationships = structuredClone(cache);
   wrongRelationships.header.relationshipsVersion = "999";
   assert.match(cacheCompatibilityProblem(wrongRelationships, expected) ?? "", /relationships schema/);
@@ -164,7 +172,7 @@ test("serialization is deterministic for paths regardless of insertion order", (
 
 test("bounded sharding reassembles one complete generation and rejects partial/mixed generations", () => {
   const { index, local, fingerprints } = state();
-  const cache = serializeSemanticState(index, local, fingerprints, schema, "0.1.17", 5);
+  const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17", 5);
   const sharded = shardSemanticCache(cache, "g-0001", 1, 1);
 
   assert.equal(sharded.manifest.notes.count, 2);
