@@ -4949,6 +4949,153 @@ var LocalPartDeleteModal = class extends import_obsidian3.Modal {
     };
   }
 };
+var LocalEndpointCreateModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, partName, partLocalId, localId, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.partName = partName;
+    this.partLocalId = partLocalId;
+    this.localId = localId;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.renderCompose();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try {
+        this.cancel(staged.transaction.id);
+      } catch {
+      }
+    }
+  }
+  renderCompose() {
+    this.titleEl.setText("Add endpoint occurrence");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Create an endpoint occurrence on part ${this.partName} in ${this.ownerName}. Parent/exposes/connection topology is intentionally deferred.`
+    });
+    const field = (label, value = "", placeholder = "") => {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: label });
+      const input = row.createEl("input", { type: "text", cls: "mdse-detail-input", value });
+      if (placeholder) input.setAttr("placeholder", placeholder);
+      input.onkeydown = (e) => e.stopPropagation();
+      return input;
+    };
+    const heading = field("Endpoint name", "", "J1");
+    const definition = field("Reusable definition", "", "[[CAN Port]]");
+    const endpointKind = field("Endpoint kind", "", "physical");
+    const usage = field("Usage", "standard", "standard");
+    const multiplicity = field("Multiplicity", "", "optional");
+    const part = this.contentEl.createEl("p", { cls: "mdse-muted", text: `Attached part: ${this.partName} (#^${this.partLocalId})` });
+    part.setAttr("title", "The part relationship is fixed for this creation slice.");
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Local ID: ${this.localId}` });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => {
+      void (async () => {
+        review.disabled = true;
+        try {
+          const fields = {
+            definition: definition.value.trim(),
+            part: `[[#^${this.partLocalId}|${this.partName}]]`
+          };
+          if (endpointKind.value.trim()) fields.kind = endpointKind.value.trim();
+          if (usage.value.trim() && usage.value.trim() !== "standard") fields.usage = usage.value.trim();
+          if (multiplicity.value.trim()) fields.multiplicity = multiplicity.value.trim();
+          const staged = await this.stage({
+            kind: "endpoint",
+            localId: this.localId,
+            heading: heading.value.trim(),
+            fields
+          });
+          this.staged = staged;
+          this.renderReview(staged, {
+            heading: heading.value.trim(),
+            definition: definition.value.trim(),
+            endpointKind: endpointKind.value.trim(),
+            usage: usage.value.trim() || "standard",
+            multiplicity: multiplicity.value.trim()
+          });
+        } catch (e) {
+          new import_obsidian3.Notice(`Cannot stage endpoint: ${e.message}`, 12e3);
+          review.disabled = false;
+        }
+      })();
+    };
+  }
+  renderReview(staged, values) {
+    this.titleEl.setText("Review new endpoint occurrence");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const row = (key2, value) => {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: value || "\u2014" });
+    };
+    row("Owner", this.ownerName);
+    row("Part", this.partName);
+    row("Transaction", staged.transaction.label);
+    row("Scope", staged.transaction.scope);
+    row("Endpoint", values.heading);
+    row("Reusable definition", values.definition);
+    row("Endpoint kind", values.endpointKind);
+    row("Usage", values.usage);
+    row("Multiplicity", values.multiplicity);
+    row("Local ID", staged.plan.localId);
+    const findings = staged.plan.findings;
+    const blocking = findings.filter((finding) => finding.severity === "error");
+    if (findings.length) {
+      const box = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      box.createEl("strong", { text: blocking.length ? "Validation findings" : "Validation warnings" });
+      for (const finding of findings) {
+        box.createEl("p", {
+          text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+          cls: finding.severity === "error" ? "mdse-warn" : void 0
+        });
+      }
+    } else {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will add one endpoint occurrence attached to the selected part." });
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied(staged.plan.localId);
+          new import_obsidian3.Notice(`Created endpoint occurrence ${values.heading}.`, 5e3);
+        } catch (e) {
+          new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+          apply.disabled = false;
+        }
+      })();
+    };
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -5232,6 +5379,8 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       addPart.onclick = () => this.createPartOccurrence(file);
     }
     if (this.editing && record.kind === "part") {
+      const addEndpoint = head.createEl("button", { text: "Add endpoint\u2026", cls: "mdse-detail-btn" });
+      addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
       const deletePart = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
       deletePart.onclick = () => this.deletePartOccurrence(file, record);
     }
@@ -5320,6 +5469,32 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       text: this.editing ? "Editing context only. Definition identity and structural/topology links remain separate and read-only here." : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data."
     });
     root.scrollTop = 0;
+  }
+  createEndpointOccurrence(file, part) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
+      const localId = nextLocalId("endpoint", ownerUid);
+      new LocalEndpointCreateModal(
+        this.app,
+        file.basename,
+        part.identifier,
+        part.localId,
+        localId,
+        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (transactionId) => editor.applyLocalCreate(transactionId),
+        (transactionId) => {
+          editor.cancelLocalCreate(transactionId);
+        },
+        (createdId) => {
+          void this.refreshLocal(file, createdId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot create endpoint: ${e.message}`, 12e3);
+    }
   }
   deletePartOccurrence(file, record) {
     try {
