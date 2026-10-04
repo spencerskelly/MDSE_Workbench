@@ -95,7 +95,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model create/delete use explicit Review / Apply / Cancel. */
+  /** Context edits apply atomically; structural Local Model create/delete and endpoint creation use explicit Review / Apply / Cancel. */
   modelEditor: ModelEditService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
