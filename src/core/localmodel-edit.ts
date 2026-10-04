@@ -135,6 +135,25 @@ function renderRecord(kind: LocalKind, heading: string, localId: string, fields:
 }
 
 
+
+export function nextLocalId(kind: LocalKind, ownerUid: string, now = new Date()): string {
+  const suffix = ownerUid.slice(-13);
+  if (!/^[a-z-]{13}$/.test(suffix)) {
+    throw new Error("Cannot create a Local Model identity because the owner note UID has no valid 13-character author suffix.");
+  }
+  const pad = (value: number, width: number) => String(value).padStart(width, "0");
+  const stamp =
+    pad(now.getUTCFullYear(), 4) +
+    pad(now.getUTCMonth() + 1, 2) +
+    pad(now.getUTCDate(), 2) +
+    pad(now.getUTCHours(), 2) +
+    pad(now.getUTCMinutes(), 2) +
+    pad(now.getUTCSeconds(), 2) +
+    pad(now.getUTCMilliseconds(), 3);
+  const prefix: Record<LocalKind, string> = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
+  return prefix[kind] + stamp + suffix;
+}
+
 export interface NewLocalRecord {
   kind: LocalKind;
   localId: string;
