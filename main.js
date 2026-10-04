@@ -132,6 +132,23 @@ function canStartRuntimeWork(requested, active) {
   return !active.some((kind) => RuntimeWorkPriority[kind] > requestedPriority);
 }
 
+// src/core/startup-handoff.ts
+function scheduleStartupHandoff(schedule, cancel, run) {
+  let active = true;
+  const handle = schedule(() => {
+    if (!active) return;
+    active = false;
+    run();
+  });
+  return {
+    cancel: () => {
+      if (!active) return;
+      active = false;
+      cancel(handle);
+    }
+  };
+}
+
 // src/core/localmodel.ts
 var READABLE_VERSIONS = ["0.1", "0.2"];
 var PREFIX = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
@@ -4707,7 +4724,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.writer = null;
     this.detail = null;
     this.statusEl = null;
-    this.startupHandoffTimer = null;
+    this.cancelStartupHandoff = null;
     this.healthRefreshTimer = null;
     this.localBackgroundTimer = null;
     this.cacheWriteTimer = null;
@@ -4855,16 +4872,22 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }));
     this.register(() => {
       this.unloaded = true;
-      if (this.startupHandoffTimer !== null) window.clearTimeout(this.startupHandoffTimer);
+      this.cancelStartupHandoff?.();
+      this.cancelStartupHandoff = null;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
       if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
       if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     });
     this.app.workspace.onLayoutReady(() => {
-      this.startupHandoffTimer = window.setTimeout(() => {
-        this.startupHandoffTimer = null;
-        if (!this.unloaded) void this.start(false);
-      }, 0);
+      const handoff = scheduleStartupHandoff(
+        (run) => window.setTimeout(run, 0),
+        (handle) => window.clearTimeout(handle),
+        () => {
+          this.cancelStartupHandoff = null;
+          if (!this.unloaded) void this.start(false);
+        }
+      );
+      this.cancelStartupHandoff = handoff.cancel;
     });
   }
   setRuntimeStatus(state, detail = "") {
