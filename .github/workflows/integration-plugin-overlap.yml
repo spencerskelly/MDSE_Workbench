@@ -76,7 +76,7 @@ jobs:
           fetch_plugin fileclass "https://github.com/mdelobelle/fileclass/releases/download/0.2.15"
           fetch_plugin advanced-canvas "https://github.com/Developer-Mike/obsidian-advanced-canvas/releases/download/7.0.0"
 
-          find "$TEMPLATE" -type f \( -name '*.md' -o -name '*.yaml' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum > "$RUNNER_TEMP/model-template.sha256"
+          (cd "$TEMPLATE" && find . -type f \( -name '*.md' -o -name '*.yaml' \) -print0 | sort -z | xargs -0 sha256sum | sha256sum) > "$RUNNER_TEMP/model-template.sha256"
 
       - name: Measure baseline and one overlap plugin at a time
         env:
