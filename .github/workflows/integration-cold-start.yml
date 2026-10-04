@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/integration-cold-start.yml"
+      - "bench/obsidian-e2e-setup.mjs"
 
 permissions:
   contents: read
@@ -63,8 +64,9 @@ jobs:
         env:
           XDG_CONFIG_HOME: ${{ runner.temp }}/xdg
         run: |
-          mkdir -p "$XDG_CONFIG_HOME"
+          mkdir -p "$XDG_CONFIG_HOME/obsidian"
           export VAULT NOTE_COUNT
+          node -e 'const fs=require("fs"),p=require("path");const out=p.join(process.env.XDG_CONFIG_HOME,"obsidian","obsidian.json");fs.writeFileSync(out,JSON.stringify({vaults:{mdseintegration:{path:process.env.VAULT,ts:Date.now(),open:true}}},null,2))'
           xvfb-run -a bash -euo pipefail -c '
             /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9222 >"$RUNNER_TEMP/obsidian-setup.log" 2>&1 &
             PID=$!
