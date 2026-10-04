@@ -27,6 +27,7 @@ Start with:
 - **MDSE Workbench: Open Review** to inspect model-health findings.
 - **MDSE Workbench: Check Local Model** when validating imported or heavily edited Local Model content.
 - **MDSE Workbench: Inspect semantic cache** in a development/integration vault when validating the W-343/W-344 runtime candidate.
+- **MDSE Workbench: Clear semantic cache** when cache recovery is needed; it deletes only derived Workbench state and forces the next startup onto the full rebuild path.
 
 Workbench normally updates its semantic index incrementally as files change. The vault's Markdown/YAML remains authoritative; Workbench's index, semantic cache, findings and generated views are derived and disposable.
 
@@ -39,7 +40,7 @@ Candidate Workbench builds expose startup state in the status bar:
 - **indexing** — the semantic model is being built or reconciled;
 - **ready** — Workbench queries/views can be used.
 
-A missing or invalid Workbench cache is a performance/recovery condition, not a model failure. Workbench must be able to rebuild from the vault.
+A missing or invalid Workbench cache is a performance/recovery condition, not a model failure. Workbench must be able to rebuild from the vault. **Clear semantic cache** is the supported reset path; engineers should not delete arbitrary files under `.obsidian`.
 
 ### Semantic cache candidate
 
@@ -253,7 +254,7 @@ Do not:
 
 Try these in order:
 
-1. **Rebuild index.** If a cache-related problem is suspected in a candidate build, **Inspect semantic cache** first; deleting the disposable cache is also a supported recovery action.
+1. **Rebuild index.** If a cache-related problem is suspected in a candidate build, **Inspect semantic cache** first; use **Clear semantic cache** for a supported reset rather than deleting arbitrary plugin files.
 2. Open the source note/occurrence and confirm the underlying model content.
 3. Run **Check Local Model** for occurrence/interface/connection issues.
 4. Open **Review** for broken or off-rule relationships.
