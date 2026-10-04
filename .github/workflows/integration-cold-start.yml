@@ -7,6 +7,7 @@ on:
       - ".github/workflows/integration-cold-start.yml"
       - "bench/obsidian-e2e-setup.mjs"
       - "bench/obsidian-e2e-observe.mjs"
+      - "bench/obsidian-e2e-activate.mjs"
 
 permissions:
   contents: read
@@ -95,13 +96,11 @@ jobs:
             /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9223 >"$RUNNER_TEMP/obsidian-cold.log" 2>&1 &
             PID=$!
             trap "kill $PID 2>/dev/null || true" EXIT
-            node bench/obsidian-e2e-observe.mjs "$VAULT" 9223 >"$RUNNER_TEMP/obsidian-cold-observe.log" 2>&1 &
-            OBSERVER=$!
+            node bench/obsidian-e2e-activate.mjs "$VAULT" 9223 >"$RUNNER_TEMP/obsidian-cold-activate.log" 2>&1
+            cat "$RUNNER_TEMP/obsidian-cold-activate.log"
 
             for i in $(seq 1 360); do
               if [ -f "$VAULT/.mdse_integration_result.json" ]; then
-                wait "$OBSERVER" || { cat "$RUNNER_TEMP/obsidian-cold-observe.log" >&2; exit 1; }
-                cat "$RUNNER_TEMP/obsidian-cold-observe.log"
                 cat "$VAULT/.mdse_integration_result.json"
                 exit 0
               fi
@@ -161,4 +160,5 @@ jobs:
             ${{ runner.temp }}/obsidian-setup.log
             ${{ runner.temp }}/obsidian-cold.log
             ${{ runner.temp }}/obsidian-cold-observe.log
+            ${{ runner.temp }}/obsidian-cold-activate.log
           if-no-files-found: warn
