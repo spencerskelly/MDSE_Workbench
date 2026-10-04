@@ -627,7 +627,7 @@ export default class MdseWorkbench extends Plugin {
     const schema = this.schema;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
-      this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed(this.indexer));
+      this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed("backgroundHydration", this.indexer));
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index);
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
