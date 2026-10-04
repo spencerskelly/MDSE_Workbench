@@ -5718,10 +5718,29 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     } catch {
     }
   }
+  async updateIntegrationResult(patch) {
+    if (!this.integrationProbe) return;
+    try {
+      const path = ".mdse_integration_result.json";
+      const current = JSON.parse(await this.app.vault.adapter.read(path));
+      await this.app.vault.adapter.write(path, JSON.stringify({ ...current, ...patch }, null, 2) + "\n");
+    } catch {
+    }
+  }
   async writeIntegrationColdResult(stats) {
     const probe = this.integrationProbe;
     if (!probe) return;
     const coreReadyAt = Date.now();
+    let readableAt = null;
+    let readableSource = null;
+    try {
+      const raw = JSON.parse(await this.app.vault.adapter.read(".mdse_integration_readable.json"));
+      if (typeof raw.at === "number") {
+        readableAt = raw.at;
+        readableSource = typeof raw.source === "string" ? raw.source : "external-controller";
+      }
+    } catch {
+    }
     let metadataResolvedAt = this.integrationMetadataResolvedAt;
     let metadataResolutionSource = metadataResolvedAt === null ? null : "workbench-resolved-event";
     if (metadataResolvedAt === null) {
@@ -5739,12 +5758,18 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       noteCount: probe.noteCount ?? stats.files,
       launchStartedAt: probe.launchStartedAt,
       pluginLoadedAt: this.integrationPluginLoadedAt,
+      readableAt,
+      readableSource,
       metadataResolvedAt,
       metadataResolutionSource,
       coreReadyAt,
+      occurrenceReadyAt: this.indexer?.localHydrationPending ? null : coreReadyAt,
+      cacheReadyAt: null,
+      launchToReadableMs: readableAt === null ? null : readableAt - probe.launchStartedAt,
       launchToPluginMs: this.integrationPluginLoadedAt === null ? null : this.integrationPluginLoadedAt - probe.launchStartedAt,
       launchToMetadataResolvedMs: metadataResolvedAt === null ? null : metadataResolvedAt - probe.launchStartedAt,
       launchToCoreReadyMs: coreReadyAt - probe.launchStartedAt,
+      launchToOccurrenceReadyMs: this.indexer?.localHydrationPending ? null : coreReadyAt - probe.launchStartedAt,
       pluginToCoreReadyMs: this.integrationPluginLoadedAt === null ? null : coreReadyAt - this.integrationPluginLoadedAt,
       workbenchCoreWorkMs: stats.ms,
       files: stats.files,
@@ -5898,6 +5923,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   async markOccurrenceReady(indexer) {
     if (this.unloaded || this.indexer !== indexer || indexer.localHydrationPending > 0 || this.startupRunStartedAt === null) return;
     this.lastTimeToOccurrenceReadyMs = Math.round(performance.now() - this.startupRunStartedAt);
+    if (this.integrationProbe) {
+      const occurrenceReadyAt = Date.now();
+      await this.updateIntegrationResult({
+        occurrenceReadyAt,
+        launchToOccurrenceReadyMs: occurrenceReadyAt - this.integrationProbe.launchStartedAt
+      });
+    }
     const latest = this.runtimeHistory[this.runtimeHistory.length - 1];
     if (latest) {
       latest.timeToOccurrenceReadyMs = this.lastTimeToOccurrenceReadyMs;
@@ -6036,6 +6068,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.lastCachedRevision = revision;
         indexer.markCacheCommitted(revision);
         this.clearBackgroundPending("cacheWrite");
+        if (this.integrationProbe) {
+          const cacheReadyAt = Date.now();
+          await this.updateIntegrationResult({
+            cacheReadyAt,
+            launchToCacheReadyMs: cacheReadyAt - this.integrationProbe.launchStartedAt
+          });
+        }
       } else this.scheduleSemanticCacheWrite();
       indexer.trimLocalRetention();
       this.refreshRuntimeHealth();
