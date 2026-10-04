@@ -59,6 +59,8 @@ export class Indexer {
   /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
   private hydrationEpoch = 0;
   private hydrationTask: Promise<void> | null = null;
+  private deferredHydrationFiles: TFile[] = [];
+  private deferredHydrationEpoch = 0;
   private hydrationRemaining = 0;
   private hydrationStartedAt: number | null = null;
   private lastHydrationMsValue: number | null = null;
@@ -91,7 +93,7 @@ export class Indexer {
   }
 
   get localHydrationPending(): number {
-    return this.hydrationRemaining;
+    return this.hydrationRemaining + this.deferredHydrationFiles.length;
   }
 
   get liveUpdatePending(): number {
@@ -143,8 +145,18 @@ export class Indexer {
     this.liveChanges = true;
   }
 
-  /** Wait until all asynchronous semantic work that can affect queries has settled. */
+  /** Start deferred occurrence parsing when an occurrence-aware consumer actually needs it. */
+  beginDeferredLocalHydration(): void {
+    if (this.hydrationTask || !this.deferredHydrationFiles.length) return;
+    const files = this.deferredHydrationFiles;
+    const epoch = this.deferredHydrationEpoch;
+    this.deferredHydrationFiles = [];
+    this.startLocalHydration(files, epoch);
+  }
+
+  /** Wait until all asynchronous semantic work that can affect occurrence-aware queries has settled. */
   async whenLocalSettled(): Promise<void> {
+    this.beginDeferredLocalHydration();
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work: Promise<unknown>[] = [...this.pendingLocalReads];
       if (this.liveApplyTask) work.push(this.liveApplyTask);
@@ -176,6 +188,8 @@ export class Indexer {
     if (this.running) throw new Error("Cannot install restored state while indexing is active.");
     this.hydrationEpoch++;
     this.hydrationTask = null;
+    this.deferredHydrationFiles = [];
+    this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
     this.hydrationStartedAt = null;
     this.lastHydrationMsValue = 0;
@@ -520,7 +534,13 @@ export class Indexer {
       this.cacheDirtyPaths.add(path);
     }
     this.bumpRevision();
-    this.startLocalHydration(localCandidates, epoch);
+    // Core graph readiness comes first. Governed Local Model bodies are deferred until either
+    // an occurrence-aware consumer asks for them or the plugin starts background hydration later.
+    this.deferredHydrationFiles = localCandidates;
+    this.deferredHydrationEpoch = epoch;
+    this.hydrationRemaining = 0;
+    this.lastHydrationCandidatesValue = localCandidates.length;
+    this.lastHydrationMsValue = null;
     // Apply what changed while building. A large backlog (first-time caching, a big pull)
     // is cheaper as one more chunked build after things go quiet than as one long loop.
     const backlog = this.dirty.size;
@@ -657,6 +677,8 @@ export class Indexer {
     this.relationshipResolvePending = false;
     this.hydrationEpoch++;
     this.hydrationTask = null;
+    this.deferredHydrationFiles = [];
+    this.deferredHydrationEpoch = this.hydrationEpoch;
     this.hydrationRemaining = 0;
   }
 }
