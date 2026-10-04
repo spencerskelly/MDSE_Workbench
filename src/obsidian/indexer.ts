@@ -11,6 +11,7 @@ import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative"
 import { MetadataChangeBurst } from "../core/metadata-burst";
 import { requeueHydrationPaths } from "../core/hydration-cancel";
 import { SingleFlightByKey } from "../core/single-flight";
+import { DEFAULT_LOCAL_REGION_RETENTION_LIMIT, localRegionEvictions } from "../core/local-retention";
 import { hasPendingSourceReconciliation } from "../core/source-reconciliation";
 import type { Schema } from "../core/schema";
 
@@ -82,6 +83,9 @@ export class Indexer {
   private lastHydrationCandidatesValue = 0;
   /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
   private readonly localReadErrors = new Map<string, string>();
+  /** Hydration/use recency for bounded steady-state Local Model retention. */
+  private readonly localRetentionOrder = new Map<string, number>();
+  private localRetentionClock = 0;
   /** Rapid live edits are coalesced so one keystroke burst does not trigger repeated Local Model body reads. */
   private readonly livePending = new Set<string>();
   private liveApplyTimer: number | null = null;
@@ -173,6 +177,41 @@ export class Indexer {
         message: `Could not read this note's Local Model body: ${message}`,
         path,
       }));
+  }
+
+  private setLocalRegion(path: string, region: ReturnType<typeof parseLocalModel>): void {
+    this.local.set(path, region);
+    if (region) this.localRetentionOrder.set(path, ++this.localRetentionClock);
+    else this.localRetentionOrder.delete(path);
+  }
+
+  private removeLocalRegion(path: string): void {
+    this.removeLocalRegion(path);
+    this.localRetentionOrder.delete(path);
+  }
+
+  /**
+   * Return steady-state occurrence memory to a bounded size. Evicted regions remain discoverable
+   * from authoritative Markdown and are requeued for future hydration.
+   */
+  trimLocalRetention(protectedPaths: readonly string[] = [], limit = DEFAULT_LOCAL_REGION_RETENTION_LIMIT): number {
+    const ordered = [...this.local.regions.keys()]
+      .sort((a, b) => (this.localRetentionOrder.get(a) ?? 0) - (this.localRetentionOrder.get(b) ?? 0) || a.localeCompare(b));
+    const evict = localRegionEvictions(ordered, new Set(protectedPaths), limit);
+    if (!evict.length) return 0;
+    const deferred = new Set(this.deferredHydrationPaths);
+    for (const path of evict) {
+      this.removeLocalRegion(path);
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile && file.extension === "md" && this.mayHaveLocalModel(file)) deferred.add(path);
+    }
+    this.deferredHydrationPaths = [...deferred].sort();
+    this.deferredHydrationEpoch = this.hydrationEpoch;
+    return evict.length;
+  }
+
+  get localRetainedRegionCount(): number {
+    return this.local.regions.size;
   }
 
   private bumpRevision(path?: string): void {
@@ -284,7 +323,7 @@ export class Indexer {
           try {
             const text = await this.app.vault.cachedRead(file);
             if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-            this.local.set(path, parseLocalModel(text));
+            this.setLocalRegion(path, parseLocalModel(text));
             this.localReadErrors.delete(path);
             this.bumpRevision(path);
           } catch (e) {
@@ -335,6 +374,8 @@ export class Indexer {
     this.requestedHydrationFlights.clear();
     this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
+    this.localRetentionOrder.clear();
+    this.localRetentionClock = 0;
     this.deferredHydrationPaths = this.app.vault.getMarkdownFiles()
       .filter((file) => this.mayHaveLocalModel(file))
       .map((file) => file.path)
@@ -489,7 +530,7 @@ export class Indexer {
 
     for (const path of deleted) {
       this.index.remove(path);
-      this.local.remove(path);
+      this.removeLocalRegion(path);
       this.localReadErrors.delete(path);
       this.fingerprints.delete(path);
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
@@ -621,12 +662,12 @@ export class Indexer {
 
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.local.remove(path);
+    this.removeLocalRegion(path);
     if (this.mayHaveLocalModel(file)) {
       try {
         const text = await this.app.vault.cachedRead(file);
         if (this.localRevision.get(path) === revision) {
-          this.local.set(path, parseLocalModel(text));
+          this.setLocalRegion(path, parseLocalModel(text));
           this.localReadErrors.delete(path);
         }
       } catch (e) {
@@ -669,7 +710,7 @@ export class Indexer {
         try {
           const text = await this.app.vault.cachedRead(file);
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
-            this.local.set(path, parseLocalModel(text));
+            this.setLocalRegion(path, parseLocalModel(text));
             this.localReadErrors.delete(path);
             this.cacheDirtyPaths.add(path);
             changed = true;
@@ -784,7 +825,7 @@ export class Indexer {
   private applyLocal(path: string, file: TFile | null): void {
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
-    this.local.remove(path);
+    this.removeLocalRegion(path);
     if (!file || !this.mayHaveLocalModel(file)) {
       this.localReadErrors.delete(path);
       return;
@@ -793,7 +834,7 @@ export class Indexer {
     task = this.app.vault.cachedRead(file)
       .then((text) => {
         if (this.localRevision.get(path) !== revision) return;
-        this.local.set(path, parseLocalModel(text));
+        this.setLocalRegion(path, parseLocalModel(text));
         this.localReadErrors.delete(path);
         // Local Model body parsing completes after the note/frontmatter apply. Treat that as
         // a second semantic revision so Review/cache consumers cannot mistake pre-parse state
