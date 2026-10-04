@@ -142,6 +142,7 @@ npm ci
 npm test            # unit tests against the vault schema in test/fixtures
 npm run build       # typecheck and bundle main.js
 npm run bench:generate -- 60000 && npm run bench
+npm run bench:startup -- 60000   # paired cold/warm core-startup comparison on one identical synthetic state
 ```
 
 `test/fixtures/` holds copies of the vault's relationship, element and Local Model schemas (the current 0.2 authority copy and the frozen 0.1 compatibility copy); `test/localmodel.test.ts` tests the reader against both.
