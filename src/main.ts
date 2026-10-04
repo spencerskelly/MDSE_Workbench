@@ -17,7 +17,7 @@ import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, rest
 import { readCoreCacheGeneration, readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
-import { parseSchema, type Schema } from "./core/schema";
+import { editingBlocked, parseSchema, type Schema } from "./core/schema";
 import { editingBlockedReason } from "./core/edit-availability";
 import { INTERNAL_PROFILE, PROFILES, profileNeedsLocalOccurrences, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
