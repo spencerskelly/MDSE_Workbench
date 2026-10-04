@@ -103,6 +103,7 @@ export default class MdseWorkbench extends Plugin {
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
   private lastCacheWriteError: string | null = null;
+  private lastSchemaError: string | null = null;
   private lastCoreError: string | null = null;
   private lastOccurrenceError: string | null = null;
   private lastCachedRevision: number | null = null;
@@ -302,9 +303,13 @@ export default class MdseWorkbench extends Plugin {
       localQueued: indexer?.localHydrationQueued ?? 0,
       livePending: indexer?.liveUpdatePending ?? 0,
       localReadErrors: indexer?.localReadErrorCount ?? 0,
+      schemaLoaded: !!this.schema,
+      schemaError: this.lastSchemaError,
       schemaWarnings: this.schema?.warnings.length ?? 0,
       cacheWriteError: this.lastCacheWriteError,
       cacheCurrent: !!indexer && indexer.revision === this.lastCachedRevision,
+      cachePending: !!indexer?.stats && (!!this.cacheWriteTask || this.cacheWriteTimer !== null || indexer.revision !== this.lastCachedRevision),
+      assuranceActive: !!this.assurance?.active,
       assurance: cachedAssurance
         ? {
             current: cachedAssurance.revision === indexer?.revision && !cachedAssurance.stale,
@@ -664,6 +669,7 @@ export default class MdseWorkbench extends Plugin {
     const runStartedAt = performance.now();
     this.coreReadyPublished = false;
     this.lastCoreError = null;
+    this.lastSchemaError = null;
     const firstStart = !this.indexer;
     if (firstStart) {
       this.startupRunStartedAt = runStartedAt;
@@ -687,7 +693,7 @@ export default class MdseWorkbench extends Plugin {
       this.schema = await this.loadSchema();
     } catch (e) {
       const message = (e as Error).message || String(e);
-      this.lastCoreError = `schema: ${message}`;
+      this.lastSchemaError = message;
       this.setRuntimeStatus("error", "schema");
       new Notice(`MDSE Workbench: could not read the schema files. ${message} Check the paths in settings.`);
       return;
