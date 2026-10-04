@@ -17,7 +17,8 @@ import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, rest
 import { readCoreCacheGeneration, readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
-import { editingBlocked, parseSchema, type Schema } from "./core/schema";
+import { parseSchema, type Schema } from "./core/schema";
+import { editingBlockedReason } from "./core/edit-availability";
 import { INTERNAL_PROFILE, PROFILES, profileNeedsLocalOccurrences, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
@@ -138,7 +139,7 @@ export default class MdseWorkbench extends Plugin {
     this.detail = new NoteDetailPanel(this.app, {
       schema: () => this.schema,
       writer: () => this.writer,
-      editBlocked: () => (!this.isReady() ? "Workbench is still indexing; try again in a moment." : this.schema && editingBlocked(this.schema) ? "The vault's schema is older than this Workbench supports, so editing is off." : null),
+      editBlocked: () => editingBlockedReason(this.isReady(), this.schema),
       elements: (exclude) => this.elements().filter((r) => r.path !== exclude),
       relate: (a, b) => this.relate(a, b),
       undo: () => this.undo(),
