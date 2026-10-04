@@ -21,6 +21,7 @@ class MemoryStorage implements CacheStorage {
   readDelayMs = 0;
   activeReads = 0;
   maxActiveReads = 0;
+  afterWrite: ((path: string) => Promise<void>) | null = null;
 
   async mkdir(path: string): Promise<void> {
     this.dirs.add(path);
@@ -29,6 +30,7 @@ class MemoryStorage implements CacheStorage {
   async write(path: string, content: string): Promise<void> {
     this.files.set(path, content);
     this.operations.push("write " + path);
+    if (this.afterWrite) await this.afterWrite(path);
   }
   async read(path: string): Promise<string> {
     this.activeReads++;
@@ -285,4 +287,59 @@ test("corrupt newest manifest is ignored deterministically without touching the 
   const newest = committedSlots(storage)[0];
   storage.files.set(newest.path, "{broken");
   assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "manifest-old");
+});
+
+
+test("generation publication is semantically atomic at every observable write boundary", async () => {
+  const oldCache = sampleCache(100).cache;
+  oldCache.header.producerVersion = "atomic-old";
+  const newCache = sampleCache(200).cache;
+  newCache.header.producerVersion = "atomic-new";
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", oldCache, "atomic-old", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  const observed: string[] = [];
+  storage.afterWrite = async () => {
+    const current = await readSemanticCacheGeneration(storage, "runtime/cache");
+    observed.push(current.header.producerVersion);
+  };
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", newCache, "atomic-new", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  assert.ok(observed.length > 1, "the test must observe intermediate shard writes and the manifest commit");
+  assert.ok(observed.slice(0, -1).every((x) => x === "atomic-old"), "all pre-commit observations must see the prior generation");
+  assert.equal(observed.at(-1), "atomic-new", "the manifest commit is the single semantic publication point");
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "atomic-new");
+});
+
+test("failed publication before manifest commit leaves the previous generation authoritative", async () => {
+  const oldCache = sampleCache(100).cache;
+  oldCache.header.producerVersion = "stable-old";
+  const newCache = sampleCache(200).cache;
+  newCache.header.producerVersion = "never-published";
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", oldCache, "stable-old", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  let writes = 0;
+  storage.afterWrite = async (path) => {
+    if (path.includes("/slots/") && ++writes === 2) throw new Error("simulated shard persistence failure");
+  };
+
+  await assert.rejects(
+    () => writeSemanticCacheGeneration(storage, "runtime/cache", newCache, "never-published", {
+      noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+    }),
+    /simulated shard persistence failure/,
+  );
+
+  storage.afterWrite = null;
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "stable-old");
 });
