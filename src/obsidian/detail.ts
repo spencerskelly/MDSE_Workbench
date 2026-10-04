@@ -182,28 +182,46 @@ export class NoteDetailPanel extends Component {
     root.scrollTop = 0;
   }
 
-  /** WB-105/WB-106: read-only details for one contextual Local Model occurrence. */
-  showLocal(file: TFile, record: LocalRecord): void {
+  /** WB-105/WB-106/WB-114: contextual Local Model details with safe atomic editing. */
+  showLocal(file: TFile, record: LocalRecord, editMode = false): void {
     if (this.isDirty()) {
       new ConfirmModal(this.app, `Discard the unsaved text changes to ${this.current?.basename ?? "this note"}?`, "Discard", () => {
         this.bodyArea = null;
-        this.showLocal(file, record);
+        this.showLocal(file, record, editMode);
       }).open();
       return;
     }
     this.generation++;
     this.current = file;
     this.currentLocal = record;
-    this.editing = false;
+    const blocked = this.host.editBlocked();
+    const localBlocked = record.sourceSchemaVersion !== "0.2"
+      ? `Local Model schema ${record.sourceSchemaVersion || "unknown"} is read-only. Structured writes require schema 0.2.`
+      : blocked;
+    this.editing = editMode && !localBlocked;
     this.bodyArea = null;
     this.renderer?.unload();
     this.renderer = null;
     const root = this.ensure();
     root.empty();
-    root.removeClass("mdse-detail-editing");
+    root.toggleClass("mdse-detail-editing", this.editing);
 
     const head = root.createDiv({ cls: "mdse-detail-head" });
     head.createDiv({ cls: "mdse-detail-title", text: record.identifier }).setAttr("title", `${file.path}#^${record.localId}`);
+    const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit context", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
+    if (localBlocked && !this.editing) {
+      edit.disabled = true;
+      edit.setAttr("title", localBlocked);
+    }
+    edit.onclick = () => this.showLocal(file, record, !this.editing);
+    if (this.editing) {
+      const undo = head.createEl("button", { text: "Undo", cls: "mdse-detail-btn", attr: { title: "Undo the last Workbench edit" } });
+      undo.disabled = !this.host.writer()?.canUndo;
+      undo.onclick = async () => {
+        await this.host.undo();
+        await this.refreshLocal(file, record.localId, true);
+      };
+    }
     const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
     owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
     const occurrence = head.createEl("button", { text: "Open occurrence", cls: "mdse-detail-btn" });
@@ -212,8 +230,10 @@ export class NoteDetailPanel extends Component {
 
     const chips = root.createDiv({ cls: "mdse-detail-chips" });
     chips.createSpan({ cls: "mdse-detail-chip", text: record.kind });
+    chips.createSpan({ cls: "mdse-detail-chip", text: "context" });
     if (record.usage !== "standard") chips.createSpan({ cls: "mdse-detail-chip", text: record.usage });
     if (record.endpointKind) chips.createSpan({ cls: "mdse-detail-chip", text: record.endpointKind });
+    if (this.editing) chips.createSpan({ cls: "mdse-detail-chip mdse-detail-chip-edit", text: "editing context" });
 
     const table = root.createEl("table", { cls: "mdse-finding" });
     const row = (key: string, value: string, action?: () => void) => {
@@ -226,26 +246,100 @@ export class NoteDetailPanel extends Component {
         a.onclick = (e) => { e.preventDefault(); action(); };
       } else td.setText(value);
     };
+    const editRow = (key: string, value: string, patch: (value: string) => LocalRecordPatch, placeholder = "") => {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      const td = tr.createEl("td");
+      const input = td.createEl("input", { type: "text", cls: "mdse-detail-input", value });
+      if (placeholder) input.setAttr("placeholder", placeholder);
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") input.blur();
+        e.stopPropagation();
+      };
+      input.onchange = () => void this.saveLocalPatch(file, record, patch(input.value));
+    };
     const linkText = (r: LinkRef | null) => r?.text ?? "";
     const open = (r: LinkRef | null) => r?.target ? () => void this.app.workspace.openLinkText(r.target, file.path, true) : undefined;
+
     row("Owner", file.basename, () => void this.app.workspace.getLeaf(true).openFile(file));
     row("Local ID", record.localId);
-    row("Definition", linkText(record.definition), open(record.definition));
-    row("Usage", record.usage !== "standard" ? record.usage : "");
-    row("Multiplicity", record.multiplicity ?? "");
+    if (this.editing) editRow("Occurrence name", record.identifier, (value) => ({ heading: value }));
+    else row("Occurrence name", record.identifier);
+
+    row("Reusable definition", linkText(record.definition), open(record.definition));
+    if (record.definition?.target) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: "Definition editing" });
+      const td = tr.createEl("td");
+      const button = td.createEl("button", { text: "Open definition", cls: "mdse-detail-btn" });
+      button.setAttr("title", "Definition properties belong to the reusable definition note, not this occurrence context.");
+      button.onclick = () => void this.app.workspace.openLinkText(record.definition!.target, file.path, true);
+    }
+
+    if (this.editing && (record.kind === "part" || record.kind === "endpoint")) {
+      editRow("Usage", record.usage, (value) => ({ fields: { usage: value } }), "standard");
+      editRow("Multiplicity", record.multiplicity ?? "", (value) => ({ fields: { multiplicity: value || null } }));
+    } else {
+      row("Usage", record.usage !== "standard" ? record.usage : "");
+      row("Multiplicity", record.multiplicity ?? "");
+    }
+
+    if (record.kind === "endpoint" && this.editing) {
+      editRow("Endpoint kind", record.endpointKind ?? "", (value) => ({ fields: { kind: value || null } }));
+    } else row("Endpoint kind", record.endpointKind ?? "");
+
+    // Structural/topology fields remain read-only until the Review/Apply/Cancel transaction slice.
     row("Part", linkText(record.part));
     row("Parent endpoint", linkText(record.parent));
     if (record.exposes.length) row("Exposes", record.exposes.map((r) => r.text).join(", "));
     if (record.equals.length) row("Equals (temporary)", record.equals.map((r) => r.text).join(", "));
-    row("Endpoint A", linkText(record.endpointA));
-    row("Endpoint B", linkText(record.endpointB));
-    row("Connection", record.connectionId ?? "");
-    if (record.kind === "flow") {
-      row("Endpoint A role", record.roleA ?? "");
-      row("Endpoint B role", record.roleB ?? "");
+    if (record.kind !== "flow") {
+      row("Endpoint A", linkText(record.endpointA));
+      row("Endpoint B", linkText(record.endpointB));
     }
-    root.createEl("p", { cls: "mdse-muted", text: "Local Model occurrences are contextual model records stored in the owner note. This popup is read-only." });
+    row("Connection", record.connectionId ?? "");
+
+    if (record.kind === "flow") {
+      if (this.editing) {
+        editRow("Endpoint A role", record.roleA ?? "", (value) => ({ fields: { endpointA: value } }));
+        editRow("Endpoint B role", record.roleB ?? "", (value) => ({ fields: { endpointB: value } }));
+      } else {
+        row("Endpoint A role", record.roleA ?? "");
+        row("Endpoint B role", record.roleB ?? "");
+      }
+    }
+
+    root.createEl("p", {
+      cls: "mdse-muted",
+      text: this.editing
+        ? "Editing context only. Definition identity and structural/topology links remain separate and read-only here."
+        : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data.",
+    });
     root.scrollTop = 0;
+  }
+
+  private async saveLocalPatch(file: TFile, record: LocalRecord, patch: LocalRecordPatch): Promise<void> {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const result = await editor.patchLocalRecord(file.path, record.localId, patch);
+      if (result.changed) new Notice(`Saved context for ${record.identifier}.`, 3000);
+      await this.refreshLocal(file, record.localId, true);
+    } catch (e) {
+      new Notice(`Not saved: ${(e as Error).message}`, 12000);
+      await this.refreshLocal(file, record.localId, true);
+    }
+  }
+
+  private async refreshLocal(file: TFile, localId: string, editMode: boolean): Promise<void> {
+    const text = await this.app.vault.read(file);
+    const refreshed = parseLocalModel(text)?.records.find((candidate) => candidate.localId === localId);
+    if (!refreshed) {
+      new Notice(`Local Model record ${localId} is no longer present in ${file.basename}.`, 8000);
+      this.close();
+      return;
+    }
+    this.showLocal(file, refreshed, editMode);
   }
 
   /** A card for a note that does not exist yet (WB-092). */
