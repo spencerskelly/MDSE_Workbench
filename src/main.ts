@@ -11,7 +11,7 @@ import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./cor
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
-import { INTERNAL_PROFILE, PROFILES, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
+import { INTERNAL_PROFILE, PROFILES, profileNeedsLocalOccurrences, signature, STRUCTURE_PROFILE, toCanvas, traverse, withLocalOccurrences, type ViewProfile } from "./core/views";
 import { Indexer } from "./obsidian/indexer";
 import { probeReport, registerSelectionMenu } from "./obsidian/probe";
 import { ConfirmModal, ElementPicker, RelationshipPicker, ReportModal, ViewPicker } from "./obsidian/ui";
@@ -25,7 +25,8 @@ import { AssuranceManager, type AssuranceSnapshot } from "./obsidian/assurance";
 
 /** Quiet time with no cache activity before the first index build starts. */
 const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
-const CACHE_QUIET_MS = 2000;
+const LOCAL_BACKGROUND_DELAY_MS = 3000;
+const CACHE_QUIET_MS = 8000;
 const MIN_CACHE_WRITE_INTERVAL_MS = 30000;
 
 interface Settings {
@@ -84,6 +85,7 @@ export default class MdseWorkbench extends Plugin {
   detail: NoteDetailPanel | null = null;
   private statusEl: HTMLElement | null = null;
   private healthRefreshTimer: number | null = null;
+  private localBackgroundTimer: number | null = null;
   private cacheWriteTimer: number | null = null;
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
@@ -213,6 +215,7 @@ export default class MdseWorkbench extends Plugin {
       this.unloaded = true;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
       if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
+      if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     });
     this.app.workspace.onLayoutReady(() => void this.start(false));
   }
@@ -303,7 +306,7 @@ export default class MdseWorkbench extends Plugin {
   }
 
   private async recordRuntimeSample(indexer: Indexer, stats: NonNullable<Indexer["stats"]>): Promise<void> {
-    await indexer.whenLocalSettled();
+    // Runtime evidence must never pull deferred capabilities into the startup critical path.
     if (this.unloaded || this.indexer !== indexer || indexer.stats?.builtAt !== stats.builtAt) return;
     this.runtimeHistory.push({
       at: Date.now(),
@@ -332,6 +335,28 @@ export default class MdseWorkbench extends Plugin {
       "Local-only performance evidence; this history is stored in the git-ignored Workbench data.json.",
       "Use it to compare cold/full, warm/restored and reconciled startup behavior across candidate builds.",
     ]).open();
+  }
+
+  /**
+   * Stability-first capability staging: the core note graph is usable before occurrence bodies.
+   * Local Model hydration starts later in the background, or immediately if an occurrence-aware
+   * command/Review explicitly asks for it.
+   */
+  private scheduleBackgroundLocalHydration(): void {
+    if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
+    const indexer = this.indexer;
+    if (!indexer || !this.isReady() || !indexer.localHydrationPending) return;
+    this.localBackgroundTimer = window.setTimeout(() => {
+      this.localBackgroundTimer = null;
+      if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
+      indexer.beginDeferredLocalHydration();
+      this.scheduleRuntimeHealthRefresh();
+      void indexer.whenLocalSettled().then(() => {
+        if (this.unloaded || this.indexer !== indexer) return;
+        this.refreshRuntimeHealth();
+        this.scheduleSemanticCacheWrite();
+      });
+    }, LOCAL_BACKGROUND_DELAY_MS);
   }
 
   /**
@@ -582,18 +607,11 @@ export default class MdseWorkbench extends Plugin {
     const localPending = indexer.localHydrationPending;
     this.setRuntimeStatus(
       "ready",
-      `${stats.elements} elements · ${stats.mode}${localPending ? ` · ${localPending} Local Model pending` : ""}`,
+      `${stats.elements} elements · ${stats.mode}${localPending ? ` · occurrence features loading later` : ""}`,
     );
-    if (localPending) {
-      void indexer.whenLocalSettled().then(() => {
-        if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
-        this.refreshRuntimeHealth();
-        this.scheduleSemanticCacheWrite();
-      });
-    } else {
-      this.refreshRuntimeHealth();
-      this.scheduleSemanticCacheWrite();
-    }
+    this.refreshRuntimeHealth();
+    if (localPending) this.scheduleBackgroundLocalHydration();
+    else this.scheduleSemanticCacheWrite();
     void this.recordRuntimeSample(indexer, stats);
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
@@ -768,7 +786,11 @@ export default class MdseWorkbench extends Plugin {
   async explore(starts: string[], profile: ViewProfile = STRUCTURE_PROFILE): Promise<void> {
     if (!this.ready()) return;
     const indexer = this.indexer as Indexer;
-    await indexer.whenLocalSettled();
+    if (profileNeedsLocalOccurrences(profile)) {
+      this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements · loading occurrence data for ${profile.name}`);
+      await indexer.whenLocalSettled();
+      this.refreshRuntimeHealth();
+    }
     const index = indexer.index;
     const t0 = performance.now();
     if (profile.startTypes) {
