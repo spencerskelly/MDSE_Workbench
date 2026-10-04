@@ -119,6 +119,17 @@ function summarizeRuntimeHealth(input) {
 function canRunBackgroundWork(state) {
   return !state.unloaded && state.ready && !state.building && !state.rebuildPending && state.liveUpdatePending === 0 && state.quietForMs >= state.minimumQuietMs;
 }
+var RuntimeWorkPriority = {
+  cacheWrite: 100,
+  assurance: 200,
+  backgroundHydration: 300,
+  requestedHydration: 400,
+  indexing: 500
+};
+function canStartRuntimeWork(requested, active) {
+  const requestedPriority = RuntimeWorkPriority[requested];
+  return !active.some((kind) => RuntimeWorkPriority[kind] > requestedPriority);
+}
 
 // src/core/localmodel.ts
 var READABLE_VERSIONS = ["0.1", "0.2"];
@@ -2441,6 +2452,9 @@ var Indexer = class {
   get localHydrationActive() {
     return this.hydrationRemaining;
   }
+  get localHydrationDemanded() {
+    return this.hydrationDemanded && (this.hydrationTask !== null || this.deferredHydrationPaths.length > 0);
+  }
   get liveUpdatePending() {
     return this.livePending.size + (this.liveApplyTask ? 1 : 0);
   }
@@ -4533,6 +4547,9 @@ var AssuranceManager = class {
     this.cached = null;
     this.running = null;
   }
+  get active() {
+    return this.running !== null;
+  }
   peek() {
     const s = this.cached;
     return s && s.revision === this.source.revision() ? s : null;
@@ -4835,9 +4852,19 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.lastChange = Date.now();
   }
   /** Single policy gate used by every optional/background Workbench subsystem. */
-  backgroundWorkAllowed(indexer = this.indexer) {
+  activeRuntimeWork(indexer) {
+    const active = [];
+    if (indexer.building || indexer.rebuildPending) active.push("indexing");
+    if (indexer.localHydrationActive > 0) {
+      active.push(indexer.localHydrationDemanded ? "requestedHydration" : "backgroundHydration");
+    }
+    if (this.assurance?.active) active.push("assurance");
+    if (this.cacheWriteTask) active.push("cacheWrite");
+    return active;
+  }
+  backgroundWorkAllowed(kind, indexer = this.indexer) {
     if (!indexer || this.indexer !== indexer) return false;
-    return canRunBackgroundWork({
+    const base3 = canRunBackgroundWork({
       unloaded: this.unloaded,
       ready: this.isReady(),
       building: indexer.building,
@@ -4846,6 +4873,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       quietForMs: Date.now() - this.lastChange,
       minimumQuietMs: LOCAL_BACKGROUND_DELAY_MS
     });
+    return base3 && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
   }
   scheduleRuntimeHealthRefresh() {
     this.refreshRuntimeHealth();
@@ -4929,7 +4957,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.localBackgroundTimer = window.setTimeout(() => {
       this.localBackgroundTimer = null;
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
-      if (!this.backgroundWorkAllowed(indexer)) {
+      if (!this.backgroundWorkAllowed("backgroundHydration", indexer)) {
         this.scheduleBackgroundLocalHydration();
         return;
       }
@@ -4964,7 +4992,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (!this.backgroundWorkAllowed(current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -5109,11 +5137,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const schema = this.schema;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
-      this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed(this.indexer));
+      this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed("backgroundHydration", this.indexer));
       this.writer = new RelationshipWriter(this.app, () => this.schema, () => this.indexer.index);
       this.assurance = new AssuranceManager({
         revision: () => this.indexer.revision,
-        settle: () => this.indexer.whenLocalSettled(),
+        // Assurance ranks below background occurrence hydration. It waits for occurrence work
+        // without promoting deferred hydration into the requested/foreground priority lane.
+        settle: () => this.indexer.whenLocalSettled(false),
         index: () => this.indexer.index,
         localFindings: () => {
           const indexer2 = this.indexer;
