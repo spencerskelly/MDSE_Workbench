@@ -14,6 +14,7 @@ export interface AssuranceSnapshot {
   computedAt: number;
   ms: number;
   stale: boolean;
+  error: string | null;
   model: Findings;
   local: LocalFinding[];
   all: Finding[];
@@ -65,26 +66,61 @@ export class AssuranceManager {
       await this.source.settle();
       const revision = this.source.revision();
       const t0 = performance.now();
-      const model = this.source.index().findings();
-      const local = this.source.localFindings();
-      const all = toFindings(model, local);
-      const stale = this.source.revision() !== revision;
-      last = {
-        revision,
-        computedAt: Date.now(),
-        ms: Math.round(performance.now() - t0),
-        stale,
-        model,
-        local,
-        all,
-        counts: countByCategory(all),
-      };
-      if (!stale) {
-        this.cached = last;
-        return last;
+      try {
+        const model = this.source.index().findings();
+        const local = this.source.localFindings();
+        const all = toFindings(model, local);
+        const stale = this.source.revision() !== revision;
+        last = {
+          revision,
+          computedAt: Date.now(),
+          ms: Math.round(performance.now() - t0),
+          stale,
+          error: null,
+          model,
+          local,
+          all,
+          counts: countByCategory(all),
+        };
+        if (!stale) {
+          this.cached = last;
+          return last;
+        }
+      } catch (e) {
+        const model = emptyFindings();
+        const all: Finding[] = [];
+        last = {
+          revision,
+          computedAt: Date.now(),
+          ms: Math.round(performance.now() - t0),
+          stale: this.source.revision() !== revision,
+          error: (e as Error).message || String(e),
+          model,
+          local: [],
+          all,
+          counts: countByCategory(all),
+        };
+        // A repeatable validator defect is a scoped subsystem failure, not a reason to crash
+        // Workbench. Cache it for this semantic revision; manual force or a model change retries.
+        if (!last.stale) {
+          this.cached = last;
+          return last;
+        }
       }
     }
     // Do not cache a racing snapshot. The next request can retry once the model is quiet.
     return last as AssuranceSnapshot;
   }
+}
+
+
+function emptyFindings(): Findings {
+  return {
+    missingInverse: [],
+    orphanInverse: [],
+    offRule: [],
+    provisional: [],
+    unresolvedLinks: 0,
+    broken: [],
+  };
 }
