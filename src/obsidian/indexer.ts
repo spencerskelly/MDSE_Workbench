@@ -4,6 +4,7 @@
  */
 import { App, getLinkpath, TFile } from "obsidian";
 import { ModelIndex, type NoteRecord } from "../core/model";
+import type { FileFingerprint } from "../core/cache";
 import { LocalModelIndex, parseLocalModel } from "../core/localmodel";
 import type { Schema } from "../core/schema";
 
@@ -34,6 +35,8 @@ export class Indexer {
   /** Parsed governed Local Model regions used by occurrence-aware views (WB-106). */
   local = new LocalModelIndex();
   stats: BuildStats | null = null;
+  /** Cheap file evidence persisted with the disposable semantic cache. */
+  readonly fingerprints = new Map<string, FileFingerprint>();
   private running: Promise<BuildStats> | null = null;
   private readonly dirty = new Set<string>();
   private burst = 0;
@@ -112,8 +115,10 @@ export class Indexer {
     const index = new ModelIndex(this.schema);
     const local = new LocalModelIndex();
     const files = this.app.vault.getMarkdownFiles();
+    const fingerprints = new Map<string, FileFingerprint>();
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      fingerprints.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
       const rec = this.record(file);
       if (rec) index.upsert(rec);
       if (this.mayHaveLocalModel(file)) local.set(file.path, parseLocalModel(await this.app.vault.cachedRead(file)));
@@ -121,6 +126,8 @@ export class Indexer {
     }
     this.index = index;
     this.local = local;
+    this.fingerprints.clear();
+    for (const [path, fp] of fingerprints) this.fingerprints.set(path, fp);
     // Apply what changed while building. A large backlog (first-time caching, a big pull)
     // is cheaper as one more chunked build after things go quiet than as one long loop.
     const backlog = this.dirty.size;
@@ -143,6 +150,8 @@ export class Indexer {
 
   private apply(path: string): void {
     const f = this.app.vault.getAbstractFileByPath(path);
+    if (f instanceof TFile && f.extension === "md") this.fingerprints.set(path, { mtime: f.stat.mtime, size: f.stat.size });
+    else this.fingerprints.delete(path);
     const rec = f instanceof TFile ? this.record(f) : null;
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
