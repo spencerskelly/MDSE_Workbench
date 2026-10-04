@@ -9,6 +9,7 @@ import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
 import { CacheMutationGate } from "./core/cache-mutation";
+import { canPublishCoreReady } from "./core/core-readiness";
 import { formatCacheBytes } from "./core/cache-size";
 import { scheduleStartupHandoff } from "./core/startup-handoff";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreCoreSemanticState, restoreSemanticState, serializeSemanticState } from "./core/cache";
@@ -789,15 +790,15 @@ export default class MdseWorkbench extends Plugin {
 
   /** Quiet version of ready(): no notice. Used by Review, which waits and retries. */
   private isReady(): boolean {
-    return !!(
-      this.coreReadyPublished &&
-      this.schema &&
-      this.indexer &&
-      this.writer &&
-      !this.indexer.sourceReconciliationPending &&
-      !this.indexer.building &&
-      this.indexer.stats
-    );
+    const indexer = this.indexer;
+    return canPublishCoreReady({
+      publicationGate: this.coreReadyPublished,
+      schemaLoaded: !!this.schema,
+      writerReady: !!this.writer,
+      statsAvailable: !!indexer?.stats,
+      sourceReconciliationPending: indexer?.sourceReconciliationPending ?? true,
+      building: !!indexer?.building,
+    });
   }
 
   private confirmClearSemanticCache(): void {
