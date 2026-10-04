@@ -316,3 +316,8 @@ The runtime now separates three concerns that previously risked being conflated:
 - **Live indexing:** rapid editor/metadata events are coalesced per path for 250 ms before semantic reparsing, preventing repeated Local Model body reads during a typing burst. Bursts at the existing 300-path threshold deliberately fall back to the quiet-time full rebuild.
 
 The user-facing consequence is intentional: **runtime health** answers “is the tool/model service working?”, while **Review** answers “what engineering/model findings exist?”. Engineering findings do not make the runtime itself appear broken.
+
+
+## RTA-2/RTA-3 implementation note — W-353
+
+Warm restoration now reads sharded cache families with bounded parallelism rather than one long serial chain or an unbounded read burst. Fingerprint, note and Local Model shards each use a small worker pool; together they cap concurrent cache reads while overlapping independent I/O. This is intended to reduce warm-start latency without recreating the same startup contention the cache architecture is meant to avoid.
