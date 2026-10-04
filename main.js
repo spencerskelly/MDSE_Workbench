@@ -2537,29 +2537,29 @@ function blockId(link) {
 var ReversePathDependencyIndex = class {
   constructor() {
     this.byTarget = /* @__PURE__ */ new Map();
+    this.byAuthoredKey = /* @__PURE__ */ new Map();
     this.bySource = /* @__PURE__ */ new Map();
+    this.authoredBySource = /* @__PURE__ */ new Map();
   }
-  set(sourcePath, targetPaths) {
+  set(sourcePath, targetPaths, authoredLinkpaths = []) {
     this.remove(sourcePath);
     const targets = new Set([...targetPaths].filter((path) => path && path !== sourcePath));
-    if (!targets.size) return;
-    this.bySource.set(sourcePath, targets);
-    for (const target of targets) {
-      let sources = this.byTarget.get(target);
-      if (!sources) this.byTarget.set(target, sources = /* @__PURE__ */ new Set());
-      sources.add(sourcePath);
+    if (targets.size) {
+      this.bySource.set(sourcePath, targets);
+      for (const target of targets) addReverse(this.byTarget, target, sourcePath);
+    }
+    const authoredKeys = /* @__PURE__ */ new Set();
+    for (const linkpath of authoredLinkpaths) for (const key2 of linkpathKeys(linkpath)) authoredKeys.add(key2);
+    if (authoredKeys.size) {
+      this.authoredBySource.set(sourcePath, authoredKeys);
+      for (const key2 of authoredKeys) addReverse(this.byAuthoredKey, key2, sourcePath);
     }
   }
   remove(sourcePath) {
-    const targets = this.bySource.get(sourcePath);
-    if (!targets) return;
+    removeReverseSource(this.byTarget, this.bySource.get(sourcePath), sourcePath);
+    removeReverseSource(this.byAuthoredKey, this.authoredBySource.get(sourcePath), sourcePath);
     this.bySource.delete(sourcePath);
-    for (const target of targets) {
-      const sources = this.byTarget.get(target);
-      if (!sources) continue;
-      sources.delete(sourcePath);
-      if (!sources.size) this.byTarget.delete(target);
-    }
+    this.authoredBySource.delete(sourcePath);
   }
   dependentsOf(targetPaths) {
     const out = /* @__PURE__ */ new Set();
@@ -2568,20 +2568,56 @@ var ReversePathDependencyIndex = class {
     }
     return [...out].sort();
   }
+  /**
+   * Conservative candidate lookup for add/delete/rename. It unions currently resolved target
+   * dependencies with authored linkpath keys so newly resolvable links are not missed.
+   */
+  candidatesForPathChanges(paths) {
+    const out = new Set(this.dependentsOf(paths));
+    for (const path of paths) {
+      for (const key2 of linkpathKeys(path)) {
+        for (const source of this.byAuthoredKey.get(key2) ?? []) out.add(source);
+      }
+    }
+    return [...out].sort();
+  }
   targetsOf(sourcePath) {
     return [...this.bySource.get(sourcePath) ?? []].sort();
   }
   clear() {
     this.byTarget.clear();
+    this.byAuthoredKey.clear();
     this.bySource.clear();
+    this.authoredBySource.clear();
   }
   get targetCount() {
     return this.byTarget.size;
   }
   get sourceCount() {
-    return this.bySource.size;
+    return (/* @__PURE__ */ new Set([...this.bySource.keys(), ...this.authoredBySource.keys()])).size;
   }
 };
+function addReverse(index, key2, sourcePath) {
+  let sources = index.get(key2);
+  if (!sources) index.set(key2, sources = /* @__PURE__ */ new Set());
+  sources.add(sourcePath);
+}
+function removeReverseSource(index, keys, sourcePath) {
+  if (!keys) return;
+  for (const key2 of keys) {
+    const sources = index.get(key2);
+    if (!sources) continue;
+    sources.delete(sourcePath);
+    if (!sources.size) index.delete(key2);
+  }
+}
+function linkpathKeys(value) {
+  const clean = value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\.md$/i, "");
+  if (!clean) return [];
+  const slash = clean.lastIndexOf("/");
+  const base3 = slash >= 0 ? clean.slice(slash + 1) : clean;
+  return base3 === clean ? [clean] : [clean, base3];
+}
 
 // src/core/cooperative.ts
 var UI_WORK_SLICE_BUDGET_MS = 12;
@@ -2776,6 +2812,7 @@ var Indexer = class {
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
     this.relationshipResolvePending = false;
+    this.relationshipPathChanges = /* @__PURE__ */ new Set();
     this.index = new ModelIndex(schema);
   }
   get building() {
@@ -3029,6 +3066,9 @@ var Indexer = class {
   relationshipDependentsOf(paths) {
     return this.relationshipDependencies.dependentsOf(paths);
   }
+  relationshipCandidatesForPathChanges(paths) {
+    return this.relationshipDependencies.candidatesForPathChanges(paths);
+  }
   relationshipTargets(rec) {
     const targets = /* @__PURE__ */ new Set();
     for (const values of rec.fields.values()) for (const path of values) targets.add(path);
@@ -3040,7 +3080,7 @@ var Indexer = class {
       this.relationshipDependencies.remove(sourcePath);
       return;
     }
-    this.relationshipDependencies.set(sourcePath, this.relationshipTargets(rec));
+    this.relationshipDependencies.set(sourcePath, this.relationshipTargets(rec), (rec.authoredLinks ?? []).map((link) => link.linkpath));
   }
   rebuildRelationshipDependencies() {
     this.relationshipDependencies.clear();
@@ -3224,7 +3264,11 @@ var Indexer = class {
       await this.applyAwaited(path, f);
       await reconcileBudget.checkpoint(yieldToUi);
     }
-    if (plan.added.length || plan.deleted.length) await this.reResolveAllRelationships();
+    if (plan.added.length || plan.deleted.length) {
+      const changedPaths = [...plan.added, ...plan.deleted];
+      const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
+      await this.reResolveRelationships(candidates);
+    }
     const backlog = [...this.dirty];
     this.dirty.clear();
     if (backlog.length > CHUNK) this.scheduleRebuild();
@@ -3249,8 +3293,9 @@ var Indexer = class {
    * Re-resolve relationship links from cached authored evidence after the note path set changes.
    * This is CPU/metadata work only: unchanged Markdown files and Local Model bodies are not read.
    */
-  async reResolveAllRelationships() {
-    const notes = [...this.index.notes.values()];
+  async reResolveRelationships(sourcePaths) {
+    const wanted = sourcePaths ? new Set(sourcePaths) : null;
+    const notes = wanted ? [...wanted].map((path) => this.index.notes.get(path)).filter((rec) => !!rec) : [...this.index.notes.values()];
     let changed = 0;
     const resolveBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (let i = 0; i < notes.length; i++) {
@@ -3285,8 +3330,9 @@ var Indexer = class {
    * Debounce live add/delete/rename events, then re-resolve authored links from metadata only.
    * This keeps an open vault semantically correct without rereading unchanged Markdown bodies.
    */
-  scheduleRelationshipReresolution() {
+  scheduleRelationshipReresolution(paths = []) {
     if (!this.liveChanges) return;
+    for (const path of paths) this.relationshipPathChanges.add(path);
     this.relationshipResolvePending = true;
     if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
     this.relationshipResolveTimer = window.setTimeout(() => {
@@ -3312,7 +3358,10 @@ var Indexer = class {
     if (this.relationshipResolveTask) return;
     this.relationshipResolvePending = false;
     let task;
-    task = this.reResolveAllRelationships().then(() => void 0).finally(() => {
+    const changedPaths = [...this.relationshipPathChanges];
+    this.relationshipPathChanges.clear();
+    const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
+    task = this.reResolveRelationships(candidates).then(() => void 0).finally(() => {
       if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
       if (this.relationshipResolvePending) this.scheduleRelationshipReresolution();
     });
@@ -3546,17 +3595,17 @@ var Indexer = class {
     this.livePending.clear();
     let task;
     task = (async () => {
-      let pathSetChanged = false;
+      const pathSetChanges = [];
       const liveBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         const existed = this.fingerprints.has(path);
         this.apply(path);
         const existsNow = this.fingerprints.has(path);
-        if (existed !== existsNow) pathSetChanged = true;
+        if (existed !== existsNow) pathSetChanges.push(path);
         await liveBudget.checkpoint(yieldToUi);
       }
-      if (pathSetChanged) this.scheduleRelationshipReresolution();
+      if (pathSetChanges.length) this.scheduleRelationshipReresolution(pathSetChanges);
     })().finally(() => {
       if (this.liveApplyTask === task) this.liveApplyTask = null;
       if (this.livePending.size) this.scheduleLiveApply();
@@ -3580,6 +3629,7 @@ var Indexer = class {
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
     this.relationshipResolvePending = false;
+    this.relationshipPathChanges.clear();
     this.hydrationEpoch++;
     this.hydrationTask = null;
     this.deferredHydrationPaths = [];
