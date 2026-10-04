@@ -305,15 +305,30 @@ export default class MdseWorkbench extends Plugin {
     const probe = this.integrationProbe;
     if (!probe) return;
     const coreReadyAt = Date.now();
+    let metadataResolvedAt = this.integrationMetadataResolvedAt;
+    let metadataResolutionSource = metadataResolvedAt === null ? null : "workbench-resolved-event";
+    if (metadataResolvedAt === null) {
+      try {
+        const raw = JSON.parse(await this.app.vault.adapter.read(".mdse_integration_metadata.json")) as { at?: unknown; source?: unknown };
+        if (typeof raw.at === "number") {
+          metadataResolvedAt = raw.at;
+          metadataResolutionSource = typeof raw.source === "string" ? raw.source : "external-observer";
+        }
+      } catch {
+        // The integration validator will fail closed if neither Workbench nor the controller
+        // observed real Obsidian metadata resolution.
+      }
+    }
     const result = {
       label: probe.label ?? "cold-integration",
       noteCount: probe.noteCount ?? stats.files,
       launchStartedAt: probe.launchStartedAt,
       pluginLoadedAt: this.integrationPluginLoadedAt,
-      metadataResolvedAt: this.integrationMetadataResolvedAt,
+      metadataResolvedAt,
+      metadataResolutionSource,
       coreReadyAt,
       launchToPluginMs: this.integrationPluginLoadedAt === null ? null : this.integrationPluginLoadedAt - probe.launchStartedAt,
-      launchToMetadataResolvedMs: this.integrationMetadataResolvedAt === null ? null : this.integrationMetadataResolvedAt - probe.launchStartedAt,
+      launchToMetadataResolvedMs: metadataResolvedAt === null ? null : metadataResolvedAt - probe.launchStartedAt,
       launchToCoreReadyMs: coreReadyAt - probe.launchStartedAt,
       pluginToCoreReadyMs: this.integrationPluginLoadedAt === null ? null : coreReadyAt - this.integrationPluginLoadedAt,
       workbenchCoreWorkMs: stats.ms,
