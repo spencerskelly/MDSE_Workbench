@@ -149,6 +149,10 @@ test("malformed/corrupt cache fails closed instead of partially restoring semant
   badField.notes[0].fields = [["dependsOn", 7]];
   assert.throws(() => restoreSemanticState(badField, schema, scope), /Malformed cached fields/);
 
+  const missingAuthored = JSON.parse(JSON.stringify(base));
+  delete missingAuthored.notes[0].authoredLinks;
+  assert.throws(() => restoreSemanticState(missingAuthored, schema, scope), /Malformed note cache entry/);
+
   const badFingerprint = JSON.parse(JSON.stringify(base));
   badFingerprint.fingerprints["Assembly.md"].mtime = "yesterday";
   assert.throws(() => restoreSemanticState(badFingerprint, schema, scope), /Malformed fingerprint/);
@@ -236,12 +240,13 @@ test("warm-start reconciliation identifies unchanged, changed, added and deleted
 });
 
 
-test("warm-start policy stays incremental only while the path set is stable", () => {
+test("warm-start policy allows bounded path-set reconciliation with authored-link cache evidence", () => {
   assert.equal(reconciliationMode({ unchanged: ["A"], changed: [], added: [], deleted: [] }), "none");
   assert.equal(reconciliationMode({ unchanged: [], changed: ["A"], added: [], deleted: [] }), "incremental");
-  assert.equal(reconciliationMode({ unchanged: [], changed: ["A"], added: ["B"], deleted: [] }), "full", "adding a path can change wikilink resolution");
-  assert.equal(reconciliationMode({ unchanged: [], changed: [], added: [], deleted: ["B"] }), "full", "deleting/renaming a path can change wikilink resolution");
-  assert.equal(reconciliationMode({ unchanged: [], changed: ["A", "B"], added: [], deleted: [] }, 1), "full", "large stable-path bursts use the proven full rebuild");
+  assert.equal(reconciliationMode({ unchanged: [], changed: ["A"], added: ["B"], deleted: [] }), "incremental");
+  assert.equal(reconciliationMode({ unchanged: [], changed: [], added: [], deleted: ["B"] }), "incremental");
+  assert.equal(reconciliationMode({ unchanged: [], changed: ["A"], added: ["B"], deleted: ["C"] }, 2), "full", "the bounded startup budget still applies");
+  assert.equal(reconciliationMode({ unchanged: [], changed: ["A", "B"], added: [], deleted: [] }, 1), "full", "large bursts use the proven full rebuild");
   assert.throws(() => reconciliationMode({ unchanged: [], changed: [], added: [], deleted: [] }, 0), /positive integer/);
 });
 
