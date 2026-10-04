@@ -455,6 +455,24 @@ export class Indexer {
     for (const rec of this.index.notes.values()) this.syncRelationshipDependency(rec, rec.path);
   }
 
+  private relationshipDependencyConsistency(): { complete: boolean; issues: string[] } {
+    const expected: Array<{ sourcePath: string; targetPaths: string[]; authoredLinkpaths: string[] }> = [];
+    for (const rec of this.index.notes.values()) {
+      if (!rec.authoredLinks) {
+        return {
+          complete: false,
+          issues: [`missing authored relationship evidence for ${rec.path}`],
+        };
+      }
+      expected.push({
+        sourcePath: rec.path,
+        targetPaths: this.relationshipTargets(rec),
+        authoredLinkpaths: rec.authoredLinks.map((link) => link.linkpath),
+      });
+    }
+    return this.relationshipDependencies.consistency(expected);
+  }
+
   /**
    * Install only the core semantic cache. Local Model regions remain deferred and are discovered
    * from Obsidian metadata without reading note bodies.
@@ -648,6 +666,10 @@ export class Indexer {
     }
 
     if (plan.added.length || plan.deleted.length) {
+      const consistency = this.relationshipDependencyConsistency();
+      if (!consistency.complete) {
+        throw new Error(`Relationship dependency evidence is incomplete or inconsistent; full rebuild required: ${consistency.issues[0] ?? "unknown mismatch"}`);
+      }
       const changedPaths = [...plan.added, ...plan.deleted];
       const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
       await this.reResolveRelationships(
@@ -757,6 +779,13 @@ export class Indexer {
     let task: Promise<void>;
     const changedPaths = [...this.relationshipPathChanges].sort();
     this.relationshipPathChanges.clear();
+    const consistency = this.relationshipDependencyConsistency();
+    if (!consistency.complete) {
+      // Fail closed: do not trust targeted invalidation when the derived accelerator cannot be
+      // proven complete. A cooperative rebuild rereads authoritative Markdown instead.
+      this.scheduleRebuild();
+      return;
+    }
     const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
     const startedAt = performance.now();
