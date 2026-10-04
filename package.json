@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "bench:generate": "tsx bench/generate-vault.ts",
-    "bench": "tsx bench/run-bench.ts"
+    "bench": "tsx bench/run-bench.ts",
+    "bench:cache": "tsx bench/cache-bench.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {
