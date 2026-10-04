@@ -12,6 +12,7 @@ Use a disposable repository only. The Markdown/YAML model remains authoritative 
 - `MDSE Bootstrap` reports no Workbench hash/version drift.
 - Workbench setting **Warm cache preview** starts OFF.
 - `.obsidian/plugins/mdse-workbench/cache/` is git-ignored.
+- Installed candidate uses semantic-cache v3 fingerprints (`ctime + mtime + size`).
 
 Record Workbench **Show diagnostics** after each startup.
 
@@ -51,7 +52,7 @@ Pass:
 3. Record diagnostics and inspect the cache.
 
 Pass:
-- exactly the changed path is identified (subject to Obsidian metadata housekeeping);
+- exactly the changed path is identified (subject to Obsidian metadata housekeeping); a ctime-only change must also be treated as changed;
 - startup mode is `reconciled`;
 - unchanged note bodies are not reparsed by Workbench;
 - relationships and Local Model content for the changed note are current;
