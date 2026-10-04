@@ -2608,6 +2608,28 @@ var ReversePathDependencyIndex = class {
     return (/* @__PURE__ */ new Set([...this.bySource.keys(), ...this.authoredBySource.keys()])).size;
   }
   /**
+   * Exact structural size of the derived accelerator.
+   *
+   * Memory growth is bounded by current source evidence rather than edit history: set() removes a
+   * source's prior entries before replacing them. Each resolved source-target association appears
+   * once in bySource and once in byTarget. Each normalized authored-key association appears once
+   * in authoredBySource and once in byAuthoredKey. linkpathKeys() yields at most two keys.
+   */
+  size() {
+    let resolvedAssociations = 0;
+    for (const targets of this.bySource.values()) resolvedAssociations += targets.size;
+    let authoredAssociations = 0;
+    for (const keys of this.authoredBySource.values()) authoredAssociations += keys.size;
+    return {
+      sources: this.sourceCount,
+      resolvedTargetKeys: this.byTarget.size,
+      authoredKeys: this.byAuthoredKey.size,
+      resolvedAssociations,
+      authoredAssociations,
+      storedMemberships: 2 * (resolvedAssociations + authoredAssociations)
+    };
+  }
+  /**
    * Fail-closed consistency check for the derived reverse dependency surface.
    *
    * The index is only safe for targeted invalidation when every canonical source-side entry
@@ -2953,6 +2975,9 @@ var Indexer = class {
   get lastRelationshipReresolution() {
     const sample = this.relationshipReresolutionHistoryValue[this.relationshipReresolutionHistoryValue.length - 1];
     return sample ? { ...sample, changedPaths: [...sample.changedPaths], fanOut: sample.fanOut.map((row) => ({ ...row })) } : null;
+  }
+  get relationshipDependencySize() {
+    return this.relationshipDependencies.size();
   }
   recordRelationshipReresolution(sample) {
     this.relationshipReresolutionHistoryValue.push(sample);
@@ -6142,6 +6167,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const mem = performance.memory;
     const cacheSizeBytes = await workbenchCacheSizeBytes(this.app);
     const relationshipReconciliation = this.indexer.lastRelationshipReresolution;
+    const relationshipDependencySize = this.indexer.relationshipDependencySize;
     const rows = [
       ["Index mode", s.mode],
       ["Markdown files", String(s.files)],
@@ -6150,6 +6176,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Authored links", String(s.links)],
       ["Relationship reconciliation", relationshipReconciliation ? `${relationshipReconciliation.mode} \xB7 ${relationshipReconciliation.candidateCount} candidate(s) \xB7 ${relationshipReconciliation.elapsedMs.toFixed(1)} ms` : "not measured"],
       ["Relationship sources changed", relationshipReconciliation ? String(relationshipReconciliation.changedSourceCount) : "not measured"],
+      ["Reverse relationship index", `${relationshipDependencySize.sources} source(s) \xB7 ${relationshipDependencySize.resolvedTargetKeys + relationshipDependencySize.authoredKeys} key(s) \xB7 ${relationshipDependencySize.storedMemberships} stored membership(s)`],
+      ["Reverse relationship associations", `${relationshipDependencySize.resolvedAssociations} resolved \xB7 ${relationshipDependencySize.authoredAssociations} authored-key`],
       ["Local Model hydration", this.indexer.localHydrationPending ? `${this.indexer.localHydrationPending} note(s) pending` : "settled"],
       ["Local Model read errors", String(this.indexer.localReadErrorCount), this.indexer.localReadErrorCount > 0],
       ["Hydration cost / Object", (() => {
