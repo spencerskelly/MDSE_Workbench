@@ -5,7 +5,7 @@
  */
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
-import { planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
+import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
@@ -335,8 +335,10 @@ export default class MdseWorkbench extends Plugin {
       this.lastCacheWriteAt = Date.now();
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
       this.lastCacheWriteError = null;
-      if (indexer.revision === revision) this.lastCachedRevision = revision;
-      else this.scheduleSemanticCacheWrite();
+      if (indexer.revision === revision) {
+        this.lastCachedRevision = revision;
+        indexer.markCacheCommitted(revision);
+      } else this.scheduleSemanticCacheWrite();
     } catch (e) {
       // Cache is disposable. Failure is diagnostic only and never makes the model unavailable.
       this.lastCacheWriteMs = Math.round(performance.now() - t0);
@@ -647,6 +649,7 @@ export default class MdseWorkbench extends Plugin {
     const schema = this.schema!;
     const assurance = await this.getAssurance(false);
     const f = assurance.model;
+    const dirtyBuckets = cacheDirtyBucketsForPaths(this.indexer!.cacheDirtyPathsSnapshot());
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     const rows: Array<[string, string, boolean?]> = [
       ["Index mode", s.mode],
@@ -672,6 +675,8 @@ export default class MdseWorkbench extends Plugin {
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
       ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
       ["Semantic cache persistence", this.indexer!.revision === this.lastCachedRevision ? "current" : "pending/coalesced"],
+      ["Cache dirty paths", String(this.indexer!.cacheDirtyPathCount)],
+      ["Cache dirty buckets", `${dirtyBuckets.notes.length} note · ${dirtyBuckets.localRegions.length} local · ${dirtyBuckets.fingerprints.length} fingerprint`],
     ];
     if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
     new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
