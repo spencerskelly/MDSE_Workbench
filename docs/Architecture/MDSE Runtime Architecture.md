@@ -225,6 +225,7 @@ Targets are acceptance budgets, not promises until measured on the real model.
 
 - dependency-aware local validation after edits;
 - global assurance jobs explicit/idle;
+- Review/global findings cached by semantic revision rather than recomputed on every UI refresh;
 - Review freshness/status.
 
 ### RTA-5 — Bootstrap startup optimization
@@ -270,3 +271,10 @@ The standalone source gate is now green: GitHub Actions passed **95/95 tests and
 RTA-3 source is also present behind the default-OFF **Warm cache preview** gate: a validated restored index can be installed, small stable-path changes reconcile in bounded batches, path-set/large-burst/concurrent ambiguity falls back to the proven full rebuild, and startup/rebuild requests are serialized. **This is not promoted behavior yet.**
 
 The next gate is runtime acceptance in Obsidian using `docs/Testing/RTA Startup and Semantic Cache Test Sheet.md`: first prove save-only cache/inspection and normal full-build equivalence, then enable Warm cache preview in the disposable vault and compare no-change/small-change/path-change behavior against a manual full rebuild.
+
+
+## RTA-4 implementation note — W-346
+
+Workbench now carries a monotonic in-session semantic revision. Review recomputes whole-index plus Local Model assurance only when that revision changes, unless the engineer explicitly forces **Refresh**. The same revision is used to coalesce disposable semantic-cache persistence: unchanged semantic state is not rewritten, cache writes wait for quiet time and a minimum interval, and a semantic change during a write causes a later generation instead of blocking editing.
+
+This is the first RTA-4 step. Dependency-scoped immediate validation and a fuller assurance freshness surface remain to be implemented.
