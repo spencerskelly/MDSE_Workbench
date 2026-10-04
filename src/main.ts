@@ -32,6 +32,8 @@ interface Settings {
   canvasProbe: boolean;
   /** Clicking a note on a generated view opens its details in a popup (WB-099). */
   showDetails: boolean;
+  /** Pre-release gate for RTA-3 warm restore. Off in controlled bases until runtime validation passes. */
+  warmCachePreview: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -40,6 +42,7 @@ const DEFAULTS: Settings = {
   viewsFolder: "Workbench Views",
   canvasProbe: true,
   showDetails: true,
+  warmCachePreview: false,
 };
 
 interface Stored {
@@ -662,6 +665,15 @@ class WorkbenchSettings extends PluginSettingTab {
       .addToggle((t) =>
         t.setValue(this.plugin.settings.canvasProbe).onChange(async (v) => {
           this.plugin.settings.canvasProbe = v;
+          await this.plugin.saveAll();
+        }),
+      );
+    new Setting(containerEl)
+      .setName("Warm cache preview")
+      .setDesc("Pre-release RTA-3 test only. Restore a validated local semantic cache before reconciling the vault. Keep off in controlled releases until the startup gate passes.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.warmCachePreview).onChange(async (v) => {
+          this.plugin.settings.warmCachePreview = v;
           await this.plugin.saveAll();
         }),
       );
