@@ -5432,7 +5432,7 @@ var AssuranceManager = class {
       if (cached) return cached;
       if (this.running) return this.running;
     }
-    const task = this.compute();
+    const task = this.compute(force);
     this.running = task;
     try {
       return await task;
@@ -5443,9 +5443,12 @@ var AssuranceManager = class {
   invalidate() {
     this.cached = null;
   }
-  async compute() {
+  async compute(force) {
     let last = null;
     for (let attempt = 0; attempt < 2; attempt++) {
+      if ((!force || attempt > 0) && this.source.waitForBackgroundPermission) {
+        await this.source.waitForBackgroundPermission();
+      }
       await this.source.settle();
       const revision = this.source.revision();
       const t0 = performance.now();
@@ -5770,6 +5773,12 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     });
     return base3 && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
   }
+  async waitForBackgroundWork(kind, indexer) {
+    while (!this.unloaded && this.indexer === indexer && !this.backgroundWorkAllowed(kind, indexer)) {
+      await new Promise((r) => window.setTimeout(r, 250));
+    }
+    if (this.unloaded || this.indexer !== indexer) throw new Error("Workbench background work was cancelled.");
+  }
   scheduleRuntimeHealthRefresh() {
     this.refreshRuntimeHealth();
     if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
@@ -5915,7 +5924,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const t0 = performance.now();
     try {
       await indexer.whenLocalSettled(false);
-      if (indexer.building || indexer.rebuildPending) {
+      if (indexer.building || indexer.rebuildPending || !this.backgroundWorkAllowed("cacheWrite", indexer) || Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -6049,7 +6058,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
             ...validateLocalModels({ index: indexer2.index, local: indexer2.local, resolve }),
             ...indexer2.localReadFindings()
           ];
-        }
+        },
+        waitForBackgroundPermission: () => this.waitForBackgroundWork("assurance", this.indexer)
       });
       const schemaPaths = () => [(0, import_obsidian8.normalizePath)(this.settings.relationshipsPath), (0, import_obsidian8.normalizePath)(this.settings.elementTypesPath)];
       this.registerEvent(
