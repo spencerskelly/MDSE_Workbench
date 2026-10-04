@@ -247,6 +247,7 @@ export default class MdseWorkbench extends Plugin {
       coreError: this.lastCoreError,
       occurrenceError: this.lastOccurrenceError,
       localPending: indexer?.localHydrationPending ?? 0,
+      localQueued: indexer?.localHydrationQueued ?? 0,
       livePending: indexer?.liveUpdatePending ?? 0,
       localReadErrors: indexer?.localReadErrorCount ?? 0,
       schemaWarnings: this.schema?.warnings.length ?? 0,
@@ -289,7 +290,7 @@ export default class MdseWorkbench extends Plugin {
       // Health is observation only. If background/live work is already pending, poll its cheap
       // counters later; never call a settle/ensure method from the health path because that would
       // make status rendering itself pull deferred capabilities into the foreground.
-      if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationPending > 0) {
+      if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationActive > 0) {
         this.scheduleRuntimeHealthRefresh();
       }
     }, 400);
