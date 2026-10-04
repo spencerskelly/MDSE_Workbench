@@ -4753,10 +4753,26 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     });
     this.addChild(this.detail);
     this.registerDetailClicks();
-    this.addCommand({ id: "diagnostics", name: "Show diagnostics", callback: () => void this.diagnostics() });
+    this.addCommand({
+      id: "diagnostics",
+      name: "Show diagnostics",
+      checkCallback: (checking) => {
+        if (!this.isReady()) return false;
+        if (!checking) void this.diagnostics();
+        return true;
+      }
+    });
     this.addCommand({ id: "runtime-health", name: "Show runtime health", callback: () => this.showRuntimeHealth() });
     this.addCommand({ id: "runtime-history", name: "Show runtime history", callback: () => this.showRuntimeHistory() });
-    this.addCommand({ id: "inspect-semantic-cache", name: "Inspect semantic cache", callback: () => void this.inspectSemanticCache() });
+    this.addCommand({
+      id: "inspect-semantic-cache",
+      name: "Inspect semantic cache",
+      checkCallback: (checking) => {
+        if (!this.isReady()) return false;
+        if (!checking) void this.inspectSemanticCache();
+        return true;
+      }
+    });
     this.addCommand({ id: "clear-semantic-cache", name: "Clear semantic cache", callback: () => this.confirmClearSemanticCache() });
     this.addCommand({ id: "rebuild-index", name: "Rebuild index", callback: () => this.start(true) });
     this.addCommand({
@@ -5324,6 +5340,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }
   }
   async inspectSemanticCache() {
+    if (!this.isReady()) return;
     const schema = this.schema;
     const indexer = this.indexer;
     if (!schema || !indexer) {
