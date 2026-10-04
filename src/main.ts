@@ -110,6 +110,8 @@ export default class MdseWorkbench extends Plugin {
   private lastTimeToCoreReadyMs: number | null = null;
   private lastTimeToOccurrenceReadyMs: number | null = null;
   private startupRunStartedAt: number | null = null;
+  /** Explicit publication gate: restored/build stats are internal until source validation settles. */
+  private coreReadyPublished = false;
   private startPromise: Promise<void> | null = null;
   private pendingRebuild = false;
   /** Last foreground model/UI activity; background subsystems share this preemption signal. */
@@ -622,6 +624,7 @@ export default class MdseWorkbench extends Plugin {
   /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
   private async runStart(rebuild: boolean): Promise<void> {
     const runStartedAt = performance.now();
+    this.coreReadyPublished = false;
     this.lastCoreError = null;
     const firstStart = !this.indexer;
     if (firstStart) {
@@ -761,6 +764,13 @@ export default class MdseWorkbench extends Plugin {
       stats = await indexer.build();
     }
 
+    // Restored/build stats are not a readiness signal. Publish core-ready only after every
+    // source/path lane (including any rebuild queued by startup churn) has actually settled.
+    await indexer.whenSourceSettled();
+    if (!indexer.stats) throw new Error("Core source reconciliation settled without publishable index statistics.");
+    stats = indexer.stats;
+    this.coreReadyPublished = true;
+
     this.lastTimeToCoreReadyMs = Math.round(performance.now() - runStartedAt);
     const localPending = indexer.localHydrationPending;
     if (!localPending) this.lastTimeToOccurrenceReadyMs = this.lastTimeToCoreReadyMs;
@@ -779,7 +789,15 @@ export default class MdseWorkbench extends Plugin {
 
   /** Quiet version of ready(): no notice. Used by Review, which waits and retries. */
   private isReady(): boolean {
-    return !!(this.schema && this.indexer && this.writer && !this.indexer.building && this.indexer.stats);
+    return !!(
+      this.coreReadyPublished &&
+      this.schema &&
+      this.indexer &&
+      this.writer &&
+      !this.indexer.sourceReconciliationPending &&
+      !this.indexer.building &&
+      this.indexer.stats
+    );
   }
 
   private confirmClearSemanticCache(): void {
