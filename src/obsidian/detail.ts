@@ -9,7 +9,9 @@ import { App, Component, MarkdownRenderer, Notice, TFile } from "obsidian";
 import { bodyOf, propertyRows, relationshipRows, type PropertyRow } from "../core/detail";
 import { coerceValue, parseListInput, propertyEditor } from "../core/edit";
 import type { NoteRecord } from "../core/model";
-import type { LinkRef, LocalRecord } from "../core/localmodel";
+import { parseLocalModel, type LinkRef, type LocalRecord } from "../core/localmodel";
+import type { LocalRecordPatch } from "../core/localmodel-edit";
+import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
 import { ConfirmModal, ElementPicker } from "./ui";
@@ -18,6 +20,7 @@ import { ConfirmModal, ElementPicker } from "./ui";
 export interface DetailHost {
   schema(): Schema | null;
   writer(): RelationshipWriter | null;
+  modelEditor(): ModelEditService | null;
   /** Why editing is not possible right now, or null. */
   editBlocked(): string | null;
   /** Model notes the given note could be related to. */
