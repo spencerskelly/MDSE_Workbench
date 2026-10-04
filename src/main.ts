@@ -850,6 +850,15 @@ export default class MdseWorkbench extends Plugin {
         },
         (path) => (this.indexer as Indexer).index.notes.get(path)?.uid ?? null,
         this.transactions,
+        (ownerPath, localId) => {
+          const impacts: Array<{ path: string; field: string }> = [];
+          for (const note of (this.indexer as Indexer).index.notes.values()) {
+            for (const ref of note.localRefs ?? []) {
+              if (ref.path === ownerPath && ref.localId === localId) impacts.push({ path: note.path, field: ref.field });
+            }
+          }
+          return impacts;
+        },
       );
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
