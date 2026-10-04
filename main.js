@@ -116,6 +116,7 @@ function summarizeRuntimeHealth(input) {
 }
 
 // src/core/background.ts
+var BACKGROUND_RESUME_QUIET_MS = 3e3;
 function canRunBackgroundWork(state) {
   return !state.unloaded && state.ready && !state.building && !state.rebuildPending && state.liveUpdatePending === 0 && state.quietForMs >= state.minimumQuietMs;
 }
@@ -4871,7 +4872,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       rebuildPending: indexer.rebuildPending,
       liveUpdatePending: indexer.liveUpdatePending,
       quietForMs: Date.now() - this.lastChange,
-      minimumQuietMs: LOCAL_BACKGROUND_DELAY_MS
+      minimumQuietMs: BACKGROUND_RESUME_QUIET_MS
     });
     return base3 && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
   }
