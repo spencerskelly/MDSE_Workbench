@@ -41,7 +41,7 @@ function summarizeRuntimeHealth(input) {
   }
   const rows = [];
   const hardAttention = input.localReadErrors > 0 || !!input.cacheWriteError || input.schemaWarnings > 0;
-  rows.push(["Model service", "ready"]);
+  rows.push(["Model service", input.livePending ? `${input.livePending} live update(s) pending` : "ready"]);
   rows.push([
     "Local Model",
     input.localReadErrors ? `${input.localReadErrors} read error(s)` : input.localPending ? `${input.localPending} note(s) hydrating` : "settled",
@@ -73,11 +73,12 @@ function summarizeRuntimeHealth(input) {
       rows
     };
   }
-  if (input.localPending > 0) {
+  const pending = input.livePending + input.localPending;
+  if (pending > 0) {
     return {
       level: "syncing",
-      label: `Workbench \xB7 syncing ${input.localPending}`,
-      detail: "Core model is ready while Local Model hydration finishes in the background.",
+      label: `Workbench \xB7 syncing ${pending}`,
+      detail: input.livePending ? "Core model is usable while coalesced live edits and Local Model hydration finish." : "Core model is ready while Local Model hydration finishes in the background.",
       rows
     };
   }
@@ -1320,19 +1321,26 @@ async function readSemanticCacheGeneration(storage, root) {
 async function readSlot(storage, clean, slot, manifest) {
   assertGeneration(manifest.generation);
   const slotRoot = cacheSlotPaths(clean)[slot];
-  const fingerprintShards = [];
-  for (let i = 0; i < manifest.fingerprints.count; i++) {
-    fingerprintShards.push(JSON.parse(await storage.read(`${slotRoot}/fingerprints-${pad(i)}.json`)));
-  }
-  const noteShards = [];
-  for (let i = 0; i < manifest.notes.count; i++) {
-    noteShards.push(JSON.parse(await storage.read(`${slotRoot}/notes-${pad(i)}.json`)));
-  }
-  const localShards = [];
-  for (let i = 0; i < manifest.localRegions.count; i++) {
-    localShards.push(JSON.parse(await storage.read(`${slotRoot}/local-${pad(i)}.json`)));
-  }
+  const [fingerprintShards, noteShards, localShards] = await Promise.all([
+    readJsonSeries(storage, Array.from({ length: manifest.fingerprints.count }, (_, i) => `${slotRoot}/fingerprints-${pad(i)}.json`)),
+    readJsonSeries(storage, Array.from({ length: manifest.notes.count }, (_, i) => `${slotRoot}/notes-${pad(i)}.json`)),
+    readJsonSeries(storage, Array.from({ length: manifest.localRegions.count }, (_, i) => `${slotRoot}/local-${pad(i)}.json`))
+  ]);
   return joinSemanticCache(manifest, fingerprintShards, noteShards, localShards);
+}
+async function readJsonSeries(storage, paths, concurrency = 4) {
+  if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Cache read concurrency must be a positive integer.");
+  const out = new Array(paths.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= paths.length) return;
+      out[i] = JSON.parse(await storage.read(paths[i]));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, () => worker()));
+  return out;
 }
 async function readManifestSlots(storage, clean) {
   const paths = cacheManifestPaths(clean);
@@ -2311,6 +2319,7 @@ var CHUNK = 500;
 var LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 var BURST_REBUILD = 300;
 var QUIET_MS = 3e3;
+var LIVE_DEBOUNCE_MS = 250;
 var Indexer = class {
   constructor(app, schema) {
     this.app = app;
@@ -2344,6 +2353,10 @@ var Indexer = class {
     this.lastHydrationCandidatesValue = 0;
     /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
     this.localReadErrors = /* @__PURE__ */ new Map();
+    /** Rapid live edits are coalesced so one keystroke burst does not trigger repeated Local Model body reads. */
+    this.livePending = /* @__PURE__ */ new Set();
+    this.liveApplyTimer = null;
+    this.liveApplyTask = null;
     /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
@@ -2361,6 +2374,9 @@ var Indexer = class {
   }
   get localHydrationPending() {
     return this.hydrationRemaining;
+  }
+  get liveUpdatePending() {
+    return this.livePending.size + (this.liveApplyTask ? 1 : 0);
   }
   get lastLocalHydrationMs() {
     return this.lastHydrationMsValue;
@@ -2398,8 +2414,9 @@ var Indexer = class {
   }
   /** Wait until all asynchronous semantic work that can affect queries has settled. */
   async whenLocalSettled() {
-    while (this.hydrationTask || this.pendingLocalReads.size || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
+    while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work = [...this.pendingLocalReads];
+      if (this.liveApplyTask) work.push(this.liveApplyTask);
       if (this.hydrationTask) work.push(this.hydrationTask);
       if (this.relationshipResolveTask) work.push(this.relationshipResolveTask);
       if (work.length) await Promise.all(work);
@@ -2710,6 +2727,11 @@ var Indexer = class {
   async doBuild() {
     const t0 = performance.now();
     this.dirty.clear();
+    this.livePending.clear();
+    if (this.liveApplyTimer !== null) {
+      window.clearTimeout(this.liveApplyTimer);
+      this.liveApplyTimer = null;
+    }
     this.localReadErrors.clear();
     const epoch = ++this.hydrationEpoch;
     const index = new ModelIndex(this.schema);
@@ -2775,28 +2797,66 @@ var Indexer = class {
     }).finally(() => this.pendingLocalReads.delete(task));
     this.pendingLocalReads.add(task);
   }
-  /** One file changed or was created. Cheap; never starts a build directly. */
+  /** One file changed or was created. Rapid events are coalesced by path. */
   changed(path) {
     if (!this.liveChanges) return;
     if (!this.stats || this.running) {
       this.dirty.add(path);
       return;
     }
-    const existed = this.fingerprints.has(path);
-    this.apply(path);
-    const existsNow = this.fingerprints.has(path);
-    if (!existed && existsNow) this.scheduleRelationshipReresolution();
+    this.livePending.add(path);
     const now = Date.now();
     if (now - this.burstStarted > 1e4) {
       this.burstStarted = now;
       this.burst = 0;
     }
-    if (++this.burst >= BURST_REBUILD) this.scheduleRebuild();
+    this.burst++;
+    if (this.burst >= BURST_REBUILD || this.livePending.size >= BURST_REBUILD) {
+      this.livePending.clear();
+      if (this.liveApplyTimer !== null) {
+        window.clearTimeout(this.liveApplyTimer);
+        this.liveApplyTimer = null;
+      }
+      this.scheduleRebuild();
+      return;
+    }
+    this.scheduleLiveApply();
   }
   removed(path) {
-    const existed = this.fingerprints.has(path);
     this.changed(path);
-    if (existed) this.scheduleRelationshipReresolution();
+  }
+  scheduleLiveApply() {
+    if (!this.liveChanges || this.rebuildPending) return;
+    if (this.liveApplyTimer !== null) window.clearTimeout(this.liveApplyTimer);
+    this.liveApplyTimer = window.setTimeout(() => {
+      this.liveApplyTimer = null;
+      this.beginLiveApply();
+    }, LIVE_DEBOUNCE_MS);
+  }
+  beginLiveApply() {
+    if (!this.liveChanges || this.rebuildPending || this.running || this.liveApplyTask || !this.livePending.size) {
+      if (this.livePending.size && !this.rebuildPending && !this.liveApplyTask) this.scheduleLiveApply();
+      return;
+    }
+    const paths = [...this.livePending].sort();
+    this.livePending.clear();
+    let task;
+    task = (async () => {
+      let pathSetChanged = false;
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i];
+        const existed = this.fingerprints.has(path);
+        this.apply(path);
+        const existsNow = this.fingerprints.has(path);
+        if (existed !== existsNow) pathSetChanged = true;
+        if (i % 100 === 99) await new Promise((r) => window.setTimeout(r, 0));
+      }
+      if (pathSetChanged) this.scheduleRelationshipReresolution();
+    })().finally(() => {
+      if (this.liveApplyTask === task) this.liveApplyTask = null;
+      if (this.livePending.size) this.scheduleLiveApply();
+    });
+    this.liveApplyTask = task;
   }
   scheduleRebuild() {
     if (this.timer !== null) window.clearTimeout(this.timer);
@@ -2807,6 +2867,10 @@ var Indexer = class {
   }
   dispose() {
     if (this.timer !== null) window.clearTimeout(this.timer);
+    if (this.liveApplyTimer !== null) window.clearTimeout(this.liveApplyTimer);
+    this.liveApplyTimer = null;
+    this.livePending.clear();
+    this.liveApplyTask = null;
     if (this.relationshipResolveTimer !== null) window.clearTimeout(this.relationshipResolveTimer);
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
@@ -4400,6 +4464,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.writer = null;
     this.detail = null;
     this.statusEl = null;
+    this.healthRefreshTimer = null;
     this.cacheWriteTimer = null;
     this.lastCacheWriteAt = null;
     this.lastCacheWriteMs = null;
@@ -4524,6 +4589,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.register(() => {
       this.unloaded = true;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
+      if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
     });
     this.app.workspace.onLayoutReady(() => void this.start(false));
   }
@@ -4541,6 +4607,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ready: this.isReady(),
       building: !!indexer?.building,
       localPending: indexer?.localHydrationPending ?? 0,
+      livePending: indexer?.liveUpdatePending ?? 0,
       localReadErrors: indexer?.localReadErrorCount ?? 0,
       schemaWarnings: this.schema?.warnings.length ?? 0,
       cacheWriteError: this.lastCacheWriteError,
@@ -4565,6 +4632,20 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       "This view is lightweight: it reports already-known runtime state and does not trigger a whole-model assurance scan.",
       "Engineering findings are not treated as a runtime failure; open Review when you want the current global assurance results."
     ]).open();
+  }
+  scheduleRuntimeHealthRefresh() {
+    this.refreshRuntimeHealth();
+    if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
+    this.healthRefreshTimer = window.setTimeout(() => {
+      this.healthRefreshTimer = null;
+      this.refreshRuntimeHealth();
+      const indexer = this.indexer;
+      if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationPending > 0) {
+        void indexer.whenLocalSettled().then(() => {
+          if (!this.unloaded && this.indexer === indexer) this.refreshRuntimeHealth();
+        });
+      }
+    }, 400);
   }
   /**
    * Prefer Obsidian's own metadata/link-resolution completion signal over a fixed startup delay.
@@ -4754,20 +4835,20 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         this.app.metadataCache.on("changed", (file) => {
           if (schemaPaths().includes(file.path)) return;
           this.indexer?.changed(file.path);
-          this.refreshRuntimeHealth();
+          this.scheduleRuntimeHealthRefresh();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         })
       );
       this.registerEvent(this.app.vault.on("delete", (f) => {
         this.indexer?.removed(f.path);
-        this.refreshRuntimeHealth();
+        this.scheduleRuntimeHealthRefresh();
         if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
       }));
       this.registerEvent(
         this.app.vault.on("rename", (f, old) => {
           this.indexer?.removed(old);
           this.indexer?.changed(f.path);
-          this.refreshRuntimeHealth();
+          this.scheduleRuntimeHealthRefresh();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         })
       );
