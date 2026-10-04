@@ -50,10 +50,8 @@ jobs:
           cp -R vault/99_System "$VAULT/99_System"
           npm run bench:generate -- "$NOTE_COUNT" "$VAULT/IntegrationData"
           cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/mdse-workbench/"
-          printf '%s
-' '["mdse-workbench"]' > "$VAULT/.obsidian/community-plugins.json"
-          printf '%s
-' '{"settings":{"warmCachePreview":true}}' > "$VAULT/.obsidian/plugins/mdse-workbench/data.json"
+          printf '%s\\n' '["mdse-workbench"]' > "$VAULT/.obsidian/community-plugins.json"
+          printf '%s\\n' '{"settings":{"warmCachePreview":true}}' > "$VAULT/.obsidian/plugins/mdse-workbench/data.json"
           cat > "$VAULT/.vault.yaml" <<'EOF'
           vault_uid: 20261004235900000restartaccept
           vault_name: MDSE Restart Acceptance
@@ -110,8 +108,7 @@ jobs:
             pkill -9 -x obsidian 2>/dev/null || true
             sleep 2
             xvfb-run -a bash -euo pipefail -c "/usr/bin/obsidian --no-sandbox --disable-gpu --js-flags=--expose-gc --remote-debugging-port=9253 >\"$RUNNER_TEMP/restart-${cycle}.log\" 2>&1 & PID=\$!; trap 'kill \$PID 2>/dev/null || true' EXIT; node bench/obsidian-e2e-activate.mjs \"$VAULT\" 9253 >\"$RUNNER_TEMP/restart-${cycle}-activate.log\" 2>&1; node bench/obsidian-restart-cycle-probe.mjs \"$VAULT\" 9253 \"$label\" | tee \"restart-cycle-${cycle}.json\""
-            node -e 'const fs=require("fs");const probe=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));let startup={};try{startup=JSON.parse(fs.readFileSync(process.env.VAULT+"/.mdse_integration_result.json","utf8"));}catch{};const row={cycle:Number(process.argv[2]),kind:process.argv[3],...probe,launchToReadableMs:startup.launchToReadableMs??null,launchToMetadataMs:startup.launchToMetadataMs??null,launchToCoreReadyMs:startup.launchToCoreReadyMs??null,launchToOccurrenceReadyMs:startup.launchToOccurrenceReadyMs??null};fs.appendFileSync("restart-cycle-summary.ndjson",JSON.stringify(row)+"
-")' "restart-cycle-${cycle}.json" "$cycle" "$kind"
+            node -e 'const fs=require("fs");const probe=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));let startup={};try{startup=JSON.parse(fs.readFileSync(process.env.VAULT+"/.mdse_integration_result.json","utf8"));}catch{};const row={cycle:Number(process.argv[2]),kind:process.argv[3],...probe,launchToReadableMs:startup.launchToReadableMs??null,launchToMetadataMs:startup.launchToMetadataMs??null,launchToCoreReadyMs:startup.launchToCoreReadyMs??null,launchToOccurrenceReadyMs:startup.launchToOccurrenceReadyMs??null};fs.appendFileSync("restart-cycle-summary.ndjson",JSON.stringify(row)+"\\n")' "restart-cycle-${cycle}.json" "$cycle" "$kind"
             pkill -9 -x obsidian 2>/dev/null || true
             sleep 2
           done
@@ -120,8 +117,7 @@ jobs:
         run: |
           node <<'NODE'
           const fs=require("fs");
-          const rows=fs.readFileSync("restart-cycle-summary.ndjson","utf8").trim().split(/
-+/).map(JSON.parse);
+          const rows=fs.readFileSync("restart-cycle-summary.ndjson","utf8").trim().split(/\\n+/).map(JSON.parse);
           const fail=(m)=>{throw new Error(m)};
           if(rows.length!==Number(process.env.CYCLE_PAIRS)*2) fail("missing restart cycle evidence");
           const baseline=rows[0];
@@ -140,8 +136,7 @@ jobs:
             return {count:s.length,heapUsedBytes:s.map(r=>r.jsHeapUsedBytes),coreReadyMs:s.map(r=>r.launchToCoreReadyMs),modes:s.map(r=>r.mode),warmRestore:s.map(r=>r.warmRestore)};
           };
           const out={accepted:true,semanticBaseline:{files:baseline.files,elements:baseline.elements,links:baseline.links},cold:summarize("cold"),warm:summarize("warm"),cycles:rows};
-          fs.writeFileSync("restart-acceptance.json",JSON.stringify(out,null,2)+"
-");
+          fs.writeFileSync("restart-acceptance.json",JSON.stringify(out,null,2)+"\\n");
           console.log(JSON.stringify(out,null,2));
           NODE
 
