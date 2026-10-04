@@ -395,3 +395,28 @@ test("only changed inactive-slot shards are rewritten before the manifest commit
   assert.match(writes.at(-1) ?? "", /manifest-[ab]\.json$/, "manifest must remain the final commit marker");
   assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).notes[0].name, "A changed");
 });
+
+
+test("malformed per-shard generation references fail closed on core, local, and full restore", async () => {
+  const older = sampleCache(100).cache;
+  older.header.producerVersion = "fallback-old";
+  const newer = sampleCache(200).cache;
+  newer.header.producerVersion = "fallback-new";
+  const storage = new MemoryStorage();
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", older, "fallback-old", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", newer, "fallback-new", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  const newest = committedSlots(storage)[0];
+  const malformed = structuredClone(newest.manifest);
+  malformed.notes.generations = ["wrong-length"];
+  storage.files.set(newest.path, JSON.stringify(malformed));
+
+  assert.equal((await readCoreCacheGeneration(storage, "runtime/cache")).header.producerVersion, "fallback-old");
+  assert.equal((await readLocalCacheGeneration(storage, "runtime/cache")).header.producerVersion, "fallback-old");
+  assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "fallback-old");
+});
