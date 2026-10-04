@@ -39,6 +39,17 @@ export interface BuildStats {
   builtAt: number;
 }
 
+export interface RelationshipReresolutionSample {
+  at: number;
+  changedPaths: string[];
+  fanOut: Array<{ path: string; candidates: number }>;
+  candidateCount: number;
+  changedSourceCount: number;
+  elapsedMs: number;
+}
+
+const RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT = 20;
+
 /**
  * Startup rule: Obsidian reports every note as "changed" while it builds its own cache the
  * first time a vault opens (tens of thousands of events). Changes arriving before the first
@@ -103,6 +114,8 @@ export class Indexer {
   private relationshipResolveTask: Promise<void> | null = null;
   private relationshipResolvePending = false;
   private readonly relationshipPathChanges = new Set<string>();
+  /** Bounded in-memory evidence for path-set relationship invalidation fan-out (stability Step 33). */
+  private relationshipReresolutionHistoryValue: RelationshipReresolutionSample[] = [];
 
   constructor(private readonly app: App, private schema: Schema) {
     this.index = new ModelIndex(schema);
@@ -171,6 +184,21 @@ export class Indexer {
 
   get lastLocalHydrationCandidates(): number {
     return this.lastHydrationCandidatesValue;
+  }
+
+  get relationshipReresolutionHistory(): RelationshipReresolutionSample[] {
+    return this.relationshipReresolutionHistoryValue.map((sample) => ({
+      ...sample,
+      changedPaths: [...sample.changedPaths],
+      fanOut: sample.fanOut.map((row) => ({ ...row })),
+    }));
+  }
+
+  get lastRelationshipReresolution(): RelationshipReresolutionSample | null {
+    const sample = this.relationshipReresolutionHistoryValue[this.relationshipReresolutionHistoryValue.length - 1];
+    return sample
+      ? { ...sample, changedPaths: [...sample.changedPaths], fanOut: sample.fanOut.map((row) => ({ ...row })) }
+      : null;
   }
 
   get localHydrationCostSummary(): HydrationCostSummary {
@@ -725,11 +753,28 @@ export class Indexer {
     if (this.relationshipResolveTask) return;
     this.relationshipResolvePending = false;
     let task: Promise<void>;
-    const changedPaths = [...this.relationshipPathChanges];
+    const changedPaths = [...this.relationshipPathChanges].sort();
     this.relationshipPathChanges.clear();
+    const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
+    const startedAt = performance.now();
     task = this.reResolveRelationships(candidates)
-      .then(() => undefined)
+      .then((changedSourceCount) => {
+        this.relationshipReresolutionHistoryValue.push({
+          at: Date.now(),
+          changedPaths,
+          fanOut,
+          candidateCount: candidates.length,
+          changedSourceCount,
+          elapsedMs: performance.now() - startedAt,
+        });
+        if (this.relationshipReresolutionHistoryValue.length > RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT) {
+          this.relationshipReresolutionHistoryValue.splice(
+            0,
+            this.relationshipReresolutionHistoryValue.length - RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT,
+          );
+        }
+      })
       .finally(() => {
         if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
         if (this.relationshipResolvePending) this.scheduleRelationshipReresolution();
