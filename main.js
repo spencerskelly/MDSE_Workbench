@@ -2804,6 +2804,14 @@ var SingleFlightByKey = class {
   }
 };
 
+// src/core/occurrence-hydration.ts
+function shouldPauseBackgroundOccurrence(state) {
+  return !state.demanded && (!state.backgroundIdle || state.liveUpdatePending > 0 || state.requestedActive > 0);
+}
+function canPublishOccurrence(epoch, currentEpoch, revision, currentRevision) {
+  return epoch === currentEpoch && currentRevision === revision;
+}
+
 // src/core/local-retention.ts
 var DEFAULT_LOCAL_REGION_RETENTION_LIMIT = 256;
 function localRegionEvictions(oldestToNewest, protectedPaths, limit = DEFAULT_LOCAL_REGION_RETENTION_LIMIT) {
@@ -2880,7 +2888,8 @@ var Indexer = class {
     this.pendingLocalReads = /* @__PURE__ */ new Set();
     this.requestedLocalReads = /* @__PURE__ */ new Set();
     this.requestedHydrationPaths = /* @__PURE__ */ new Set();
-    this.requestedHydrationFlights = new SingleFlightByKey();
+    /** Shared owner body reads across background and requested occurrence hydration. */
+    this.occurrenceReadFlights = new SingleFlightByKey();
     /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
     this.semanticRevision = 0;
     /** Paths whose derived cache buckets no longer match the last committed cache generation. */
@@ -3078,6 +3087,14 @@ var Indexer = class {
   setBackgroundIdleCheck(check) {
     this.backgroundIdle = check;
   }
+  occurrenceBody(path, file) {
+    return this.occurrenceReadFlights.run(path, async () => {
+      const readStartedAt = performance.now();
+      const text = await this.app.vault.cachedRead(file);
+      const readFinishedAt = performance.now();
+      return { text, readStartedAt, readFinishedAt };
+    });
+  }
   /**
    * Invalidate in-flight occurrence hydration immediately when source semantics change.
    * Unfinished bulk owners return to the deferred queue. Epoch/revision guards prevent reads
@@ -3151,26 +3168,24 @@ var Indexer = class {
         if (epoch !== this.hydrationEpoch) break;
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof import_obsidian.TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
-        const task = this.requestedHydrationFlights.run(path, async () => {
-          const revision = (this.localRevision.get(path) ?? 0) + 1;
-          this.localRevision.set(path, revision);
-          this.requestedHydrationPaths.add(path);
+        const revision = (this.localRevision.get(path) ?? 0) + 1;
+        this.localRevision.set(path, revision);
+        this.requestedHydrationPaths.add(path);
+        const task = (async () => {
           try {
-            const readStartedAt = performance.now();
-            const text = await this.app.vault.cachedRead(file);
-            const readFinishedAt = performance.now();
-            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            const { text, readStartedAt, readFinishedAt } = await this.occurrenceBody(path, file);
+            if (!canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) return;
             this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.bumpRevision(path);
           } catch (e) {
-            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            if (!canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) return;
             this.localReadErrors.set(path, e.message);
             this.bumpRevision(path);
           } finally {
             this.requestedHydrationPaths.delete(path);
           }
-        });
+        })();
         this.requestedLocalReads.add(task);
         try {
           await task;
@@ -3302,7 +3317,7 @@ var Indexer = class {
     this.hydrationTask = null;
     this.hydrationDemanded = false;
     this.requestedLocalReads.clear();
-    this.requestedHydrationFlights.clear();
+    this.occurrenceReadFlights.clear();
     this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
     this.hydrationCosts.clear();
@@ -3656,7 +3671,12 @@ var Indexer = class {
       const hydrationBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < files.length; i++) {
         if (epoch !== this.hydrationEpoch) return;
-        while (!this.hydrationDemanded && (!this.backgroundIdle() || this.liveUpdatePending > 0)) {
+        while (shouldPauseBackgroundOccurrence({
+          demanded: this.hydrationDemanded,
+          backgroundIdle: this.backgroundIdle(),
+          liveUpdatePending: this.liveUpdatePending,
+          requestedActive: this.requestedLocalReads.size
+        })) {
           await new Promise((r) => window.setTimeout(r, 250));
           if (epoch !== this.hydrationEpoch) return;
         }
@@ -3666,17 +3686,15 @@ var Indexer = class {
         const revision = (this.localRevision.get(path) ?? 0) + 1;
         this.localRevision.set(path, revision);
         try {
-          const readStartedAt = performance.now();
-          const text = await this.app.vault.cachedRead(file);
-          const readFinishedAt = performance.now();
-          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+          const { text, readStartedAt, readFinishedAt } = await this.occurrenceBody(path, file);
+          if (canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) {
             this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.cacheDirtyPaths.add(path);
             changed = true;
           }
         } catch (e) {
-          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+          if (canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) {
             this.localReadErrors.set(path, e.message);
             this.cacheDirtyPaths.add(path);
             changed = true;
