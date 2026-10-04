@@ -544,18 +544,16 @@ export function planReconciliation(
 export type ReconciliationMode = "none" | "incremental" | "full";
 
 /**
- * Conservative warm-start policy.
+ * Warm-start policy after semantic-cache v2.
  *
- * Note relationships currently cache resolved target paths. Adding/removing/renaming a file can
- * change how an unchanged wikilink resolves, so a path-set change requires a full rebuild until
- * the cache retains enough authored-link information to safely re-resolve dependants.
- *
- * Content-only changes on stable paths may reconcile incrementally. A large changed-file burst
- * also falls back to the proven chunked full rebuild.
+ * Cached notes retain their authored relationship-link evidence, so added/deleted/renamed paths
+ * no longer require body rereads of unchanged notes: Workbench can re-resolve those links against
+ * Obsidian's current metadata cache. Large bursts still fall back to the proven chunked full rebuild
+ * so incremental startup cannot become an unbounded foreground job.
  */
 export function reconciliationMode(plan: ReconciliationPlan, incrementalLimit = 300): ReconciliationMode {
   if (!Number.isInteger(incrementalLimit) || incrementalLimit < 1) throw new Error("incrementalLimit must be a positive integer.");
-  if (plan.added.length || plan.deleted.length) return "full";
-  if (!plan.changed.length) return "none";
-  return plan.changed.length <= incrementalLimit ? "incremental" : "full";
+  const changed = plan.changed.length + plan.added.length + plan.deleted.length;
+  if (!changed) return "none";
+  return changed <= incrementalLimit ? "incremental" : "full";
 }
