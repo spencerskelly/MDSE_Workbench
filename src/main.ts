@@ -357,6 +357,12 @@ export default class MdseWorkbench extends Plugin {
     this.localBackgroundTimer = window.setTimeout(() => {
       this.localBackgroundTimer = null;
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
+      // Background occurrence parsing must yield to active use. If the engineer just edited
+      // something or live semantic updates are pending, leave the capability queued and try later.
+      if (Date.now() - this.lastChange < LOCAL_BACKGROUND_DELAY_MS || indexer.liveUpdatePending > 0) {
+        this.scheduleBackgroundLocalHydration();
+        return;
+      }
       indexer.beginDeferredLocalHydration();
       this.scheduleRuntimeHealthRefresh();
       void indexer.whenLocalSettled().then(() => {
