@@ -558,6 +558,7 @@ export default class MdseWorkbench extends Plugin {
         this.lastCachedRevision = revision;
         indexer.markCacheCommitted(revision);
       } else this.scheduleSemanticCacheWrite();
+      indexer.trimLocalRetention();
       this.refreshRuntimeHealth();
     } catch (e) {
       // Cache is disposable. Failure is diagnostic only and never makes the model unavailable.
@@ -862,6 +863,7 @@ export default class MdseWorkbench extends Plugin {
       void this.markOccurrenceReady(indexer);
       const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
       const scan = analyzeLocalModel(indexer.index, indexer.local, resolve);
+      indexer.trimLocalRetention();
       const file = await writeFindingsReport(this.app, this.settings.viewsFolder, scan);
       const errors = scan.findings.filter((f) => f.severity === "error").length;
       new Notice(`Local Model: ${scan.notesWithRegion} notes, ${scan.records} records, ${errors} errors, ${scan.findings.length - errors} warnings (${(scan.ms / 1000).toFixed(1)} s).`, 10000);
@@ -1026,6 +1028,7 @@ export default class MdseWorkbench extends Plugin {
       return;
     }
     const canvas = toCanvas(index, view, profile);
+    if (profileNeedsLocalOccurrences(profile)) indexer.trimLocalRetention();
     const name = (index.notes.get(starts[0])?.name ?? "view").replace(/[\\/:*?"<>|#^[\]]/g, "_");
     const folder = normalizePath(this.settings.viewsFolder);
     if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
@@ -1148,6 +1151,7 @@ export default class MdseWorkbench extends Plugin {
       ? withLocalOccurrences(index, indexer.local, resolve, baseView, profile)
       : baseView;
     const now = signature(current);
+    if (profileNeedsLocalOccurrences(profile)) indexer.trimLocalRetention();
     if (now === meta.signature) new Notice("This view is current.");
     else
       new ConfirmModal(this.app, "The model changed since this view was generated.", "Refresh view", () => void this.explore(meta.starts, profile)).open();
