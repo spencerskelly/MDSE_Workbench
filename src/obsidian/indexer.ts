@@ -7,7 +7,7 @@ import { ModelIndex, type AuthoredRelationshipLink, type NoteRecord } from "../c
 import type { FileFingerprint, ReconciliationPlan, RestoredCoreSemanticState, RestoredSemanticState } from "../core/cache";
 import { LocalModelIndex, parseLocalModel, type LocalFinding } from "../core/localmodel";
 import { resolveAuthoredRelationshipLinks } from "../core/relationship-resolution";
-import { ReversePathDependencyIndex } from "../core/relationship-dependencies";
+import { ReversePathDependencyIndex, shouldUseFullRelationshipReresolution } from "../core/relationship-dependencies";
 import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative";
 import { MetadataChangeBurst } from "../core/metadata-burst";
 import { requeueHydrationPaths } from "../core/hydration-cancel";
@@ -650,7 +650,9 @@ export class Indexer {
     if (plan.added.length || plan.deleted.length) {
       const changedPaths = [...plan.added, ...plan.deleted];
       const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
-      await this.reResolveRelationships(candidates);
+      await this.reResolveRelationships(
+        shouldUseFullRelationshipReresolution(candidates.length) ? undefined : candidates,
+      );
     }
 
     // Changes arriving during reconciliation are replayed once. Concurrent path-set changes
@@ -758,7 +760,9 @@ export class Indexer {
     const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
     const startedAt = performance.now();
-    task = this.reResolveRelationships(candidates)
+    task = this.reResolveRelationships(
+      shouldUseFullRelationshipReresolution(candidates.length) ? undefined : candidates,
+    )
       .then((changedSourceCount) => {
         this.relationshipReresolutionHistoryValue.push({
           at: Date.now(),
