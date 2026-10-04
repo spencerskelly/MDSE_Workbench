@@ -239,6 +239,22 @@ var ALLOWED_FIELDS = {
   connection: ["endpointA", "endpointB", "definition", "identifier"],
   flow: ["definition", "identifier", "endpointA", "endpointB"]
 };
+function localModelSourceFingerprint(text) {
+  const lines = text.split(/\r?\n/);
+  const markerLines = [];
+  lines.forEach((line, i) => {
+    const trimmed = line.trim();
+    if (START.test(trimmed) || END.test(trimmed)) markerLines.push(i);
+  });
+  if (!markerLines.length) return null;
+  const slice = lines.slice(markerLines[0], markerLines[markerLines.length - 1] + 1).join("\n");
+  let h = 2166136261;
+  for (let i = 0; i < slice.length; i++) {
+    h ^= slice.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
 function parseLocalModel(text) {
   const lines = text.split(/\r?\n/);
   const starts = [];
@@ -250,6 +266,7 @@ function parseLocalModel(text) {
   });
   if (!starts.length && !ends.length) return null;
   const region = {
+    sourceFingerprint: localModelSourceFingerprint(text),
     schemaVersion: starts[0]?.version ?? null,
     startLine: starts[0] ? starts[0].i + 1 : null,
     endLine: ends[0] !== void 0 ? ends[0] + 1 : null,
@@ -909,7 +926,7 @@ function schemaSignature(schema) {
 }
 
 // src/core/cache.ts
-var CACHE_FORMAT_VERSION = 1;
+var CACHE_FORMAT_VERSION = 2;
 var CACHE_SEMANTIC_VERSION = 3;
 function expectedCompatibility(schema, scope) {
   return {
@@ -1042,6 +1059,7 @@ function deserializeNote(raw) {
 }
 function serializeRegion(r) {
   return {
+    sourceFingerprint: r.sourceFingerprint,
     schemaVersion: r.schemaVersion,
     startLine: r.startLine,
     endLine: r.endLine,
@@ -1091,10 +1109,12 @@ function deserializeRegion(raw) {
     if (!isFinding(finding)) throw new Error("Malformed Local Model finding cache entry.");
     return { ...finding };
   });
+  if (typeof raw.sourceFingerprint !== "string" || !/^[0-9a-f]{8}$/.test(raw.sourceFingerprint)) throw new Error("Malformed Local Model source fingerprint in cache.");
   if (!(raw.schemaVersion === null || typeof raw.schemaVersion === "string")) throw new Error("Malformed Local Model schema version in cache.");
   if (!(raw.startLine === null || typeof raw.startLine === "number")) throw new Error("Malformed Local Model start line in cache.");
   if (!(raw.endLine === null || typeof raw.endLine === "number")) throw new Error("Malformed Local Model end line in cache.");
   return {
+    sourceFingerprint: raw.sourceFingerprint,
     schemaVersion: raw.schemaVersion,
     startLine: raw.startLine,
     endLine: raw.endLine,
