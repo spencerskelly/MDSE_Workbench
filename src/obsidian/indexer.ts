@@ -693,7 +693,7 @@ export class Indexer {
    * Debounce live add/delete/rename events, then re-resolve authored links from metadata only.
    * This keeps an open vault semantically correct without rereading unchanged Markdown bodies.
    */
-  private scheduleRelationshipReresolution(paths: Iterable<string>): void {
+  private scheduleRelationshipReresolution(paths: Iterable<string> = []): void {
     if (!this.liveChanges) return;
     for (const path of paths) this.relationshipPathChanges.add(path);
     this.relationshipResolvePending = true;
