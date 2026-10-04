@@ -26,7 +26,7 @@ Start with:
 - **MDSE Workbench: Rebuild index** after a large pull/import or when the displayed model appears stale.
 - **MDSE Workbench: Open Review** to inspect model-health findings.
 - **MDSE Workbench: Check Local Model** when validating imported or heavily edited Local Model content.
-- **MDSE Workbench: Inspect semantic cache** in a development/integration vault when validating the W-343/W-344 runtime candidate.
+- **MDSE Workbench: Inspect semantic cache** in a development/integration vault when validating the W-343/W-348 runtime candidate.
 - **MDSE Workbench: Clear semantic cache** when cache recovery is needed; it deletes only derived Workbench state and forces the next startup onto the full rebuild path.
 
 Workbench normally updates its semantic index incrementally as files change. The vault's Markdown/YAML remains authoritative; Workbench's index, semantic cache, findings and generated views are derived and disposable.
@@ -50,7 +50,7 @@ A missing or invalid Workbench cache is a performance/recovery condition, not a 
 
 The development line writes a local, Git-ignored semantic cache after Workbench is already Ready. The cache is bound to the vault identity and schema/parser contract and uses two crash-safe A/B slots. It may be deleted at any time.
 
-**Warm cache preview** is an explicit pre-release setting and is OFF by default. When enabled in an integration vault, Workbench may restore a validated cache and reconcile a bounded set of changed, added, deleted or renamed files. Semantic-cache v2 retains authored relationship-link evidence, so a path-set change can re-resolve otherwise unchanged relationship links through Obsidian's current metadata without rereading those note bodies. Large change sets still deliberately use the full chunked rebuild path.
+**Warm cache preview** is an explicit pre-release setting and is OFF by default. When enabled in an integration vault, Workbench may restore a validated cache and reconcile a bounded set of changed, added, deleted or renamed files. Semantic-cache v3 retains authored relationship-link evidence and uses Obsidian ctime + mtime + size fingerprints. A path-set change can therefore re-resolve otherwise unchanged relationship links through Obsidian's current metadata without rereading those note bodies, while suspicious file-stat changes force reconciliation. Large change sets still deliberately use the full chunked rebuild path.
 
 Do not enable Warm cache preview in a controlled release merely because the setting exists; it remains a validation feature until the runtime acceptance sheet passes.
 
