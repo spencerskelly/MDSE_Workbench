@@ -2379,10 +2379,34 @@ var CooperativeBudget = class {
   }
 };
 
+// src/core/metadata-burst.ts
+var MetadataChangeBurst = class {
+  constructor(windowMs) {
+    this.windowMs = windowMs;
+    this.startedAt = 0;
+    this.paths = /* @__PURE__ */ new Set();
+    if (!(windowMs > 0) || !Number.isFinite(windowMs)) throw new Error("Metadata burst window must be a positive finite number.");
+  }
+  record(path, now) {
+    if (!this.startedAt || now - this.startedAt > this.windowMs) {
+      this.startedAt = now;
+      this.paths.clear();
+    }
+    const distinct = !this.paths.has(path);
+    this.paths.add(path);
+    return { distinct, uniquePaths: this.paths.size };
+  }
+  reset() {
+    this.startedAt = 0;
+    this.paths.clear();
+  }
+};
+
 // src/obsidian/indexer.ts
 var CHUNK = 500;
 var LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 var BURST_REBUILD = 300;
+var METADATA_BURST_WINDOW_MS = 1e4;
 var QUIET_MS = 3e3;
 var LIVE_DEBOUNCE_MS = 250;
 var WORK_SLICE_MS = UI_WORK_SLICE_BUDGET_MS;
@@ -2400,8 +2424,7 @@ var Indexer = class {
     this.dirty = /* @__PURE__ */ new Set();
     /** Startup metadata-cache churn is ignored until Workbench deliberately begins model reconciliation. */
     this.liveChanges = false;
-    this.burst = 0;
-    this.burstStarted = 0;
+    this.metadataBurst = new MetadataChangeBurst(METADATA_BURST_WINDOW_MS);
     this.timer = null;
     /** Prevents a slower cachedRead from overwriting a newer Local Model edit. */
     this.localRevision = /* @__PURE__ */ new Map();
@@ -2563,7 +2586,7 @@ var Indexer = class {
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
     this.cacheDirtyPaths.clear();
-    this.burst = 0;
+    this.metadataBurst.reset();
     this.bumpRevision();
     this.stats = this.makeStats("restored", 0, createdAt);
     return this.stats;
@@ -2911,7 +2934,7 @@ var Indexer = class {
     }
     this.dirty.clear();
     if (backlog > CHUNK) this.scheduleRebuild();
-    this.burst = 0;
+    this.metadataBurst.reset();
     this.stats = await this.makeStatsCooperative("full", Math.round(performance.now() - t0), Date.now());
     return this.stats;
   }
@@ -2955,13 +2978,8 @@ var Indexer = class {
       return;
     }
     this.livePending.add(path);
-    const now = Date.now();
-    if (now - this.burstStarted > 1e4) {
-      this.burstStarted = now;
-      this.burst = 0;
-    }
-    this.burst++;
-    if (this.burst >= BURST_REBUILD || this.livePending.size >= BURST_REBUILD) {
+    const burst = this.metadataBurst.record(path, Date.now());
+    if (burst.uniquePaths >= BURST_REBUILD || this.livePending.size >= BURST_REBUILD) {
       this.livePending.clear();
       if (this.liveApplyTimer !== null) {
         window.clearTimeout(this.liveApplyTimer);
