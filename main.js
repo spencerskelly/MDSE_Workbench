@@ -2491,6 +2491,35 @@ function requeueHydrationPaths(deferred, active) {
   return [.../* @__PURE__ */ new Set([...deferred, ...active])].sort();
 }
 
+// src/core/single-flight.ts
+var SingleFlightByKey = class {
+  constructor() {
+    this.active = /* @__PURE__ */ new Map();
+  }
+  get size() {
+    return this.active.size;
+  }
+  keys() {
+    return [...this.active.keys()];
+  }
+  get(key2) {
+    return this.active.get(key2);
+  }
+  run(key2, start) {
+    const existing = this.active.get(key2);
+    if (existing) return existing;
+    let task;
+    task = start().finally(() => {
+      if (this.active.get(key2) === task) this.active.delete(key2);
+    });
+    this.active.set(key2, task);
+    return task;
+  }
+  clear() {
+    this.active.clear();
+  }
+};
+
 // src/core/source-reconciliation.ts
 function hasPendingSourceReconciliation(state) {
   return state.building || state.rebuildPending || state.livePending > 0 || state.liveApplyTimerPending || state.liveApplyActive || state.relationshipResolvePending || state.relationshipResolveTimerPending || state.relationshipResolveActive;
@@ -2526,6 +2555,7 @@ var Indexer = class {
     this.pendingLocalReads = /* @__PURE__ */ new Set();
     this.requestedLocalReads = /* @__PURE__ */ new Set();
     this.requestedHydrationPaths = /* @__PURE__ */ new Set();
+    this.requestedHydrationFlights = new SingleFlightByKey();
     /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
     this.semanticRevision = 0;
     /** Paths whose derived cache buckets no longer match the last committed cache generation. */
@@ -2707,25 +2737,30 @@ var Indexer = class {
         if (epoch !== this.hydrationEpoch) break;
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof import_obsidian.TFile) || file.extension !== "md" || !this.mayHaveLocalModel(file)) continue;
-        const revision = (this.localRevision.get(path) ?? 0) + 1;
-        this.localRevision.set(path, revision);
-        this.requestedHydrationPaths.add(path);
-        let task;
-        task = this.app.vault.cachedRead(file).then((text) => {
-          if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-          this.local.set(path, parseLocalModel(text));
-          this.localReadErrors.delete(path);
-          this.bumpRevision(path);
-        }).catch((e) => {
-          if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-          this.localReadErrors.set(path, e.message);
-          this.bumpRevision(path);
-        }).finally(() => {
-          this.requestedLocalReads.delete(task);
-          this.requestedHydrationPaths.delete(path);
+        const task = this.requestedHydrationFlights.run(path, async () => {
+          const revision = (this.localRevision.get(path) ?? 0) + 1;
+          this.localRevision.set(path, revision);
+          this.requestedHydrationPaths.add(path);
+          try {
+            const text = await this.app.vault.cachedRead(file);
+            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            this.local.set(path, parseLocalModel(text));
+            this.localReadErrors.delete(path);
+            this.bumpRevision(path);
+          } catch (e) {
+            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            this.localReadErrors.set(path, e.message);
+            this.bumpRevision(path);
+          } finally {
+            this.requestedHydrationPaths.delete(path);
+          }
         });
         this.requestedLocalReads.add(task);
-        await task;
+        try {
+          await task;
+        } finally {
+          this.requestedLocalReads.delete(task);
+        }
         await budget.checkpoint(yieldToUi);
       }
       if (epoch === this.hydrationEpoch) return;
@@ -2753,6 +2788,8 @@ var Indexer = class {
     this.hydrationTask = null;
     this.hydrationDemanded = false;
     this.requestedLocalReads.clear();
+    this.requestedHydrationFlights.clear();
+    this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
     this.deferredHydrationPaths = this.app.vault.getMarkdownFiles().filter((file) => this.mayHaveLocalModel(file)).map((file) => file.path).sort();
     this.deferredHydrationEpoch = this.hydrationEpoch;
