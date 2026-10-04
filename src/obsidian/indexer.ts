@@ -41,6 +41,7 @@ export interface BuildStats {
 
 export interface RelationshipReresolutionSample {
   at: number;
+  mode: "targeted" | "full";
   changedPaths: string[];
   fanOut: Array<{ path: string; candidates: number }>;
   candidateCount: number;
@@ -199,6 +200,16 @@ export class Indexer {
     return sample
       ? { ...sample, changedPaths: [...sample.changedPaths], fanOut: sample.fanOut.map((row) => ({ ...row })) }
       : null;
+  }
+
+  private recordRelationshipReresolution(sample: RelationshipReresolutionSample): void {
+    this.relationshipReresolutionHistoryValue.push(sample);
+    if (this.relationshipReresolutionHistoryValue.length > RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT) {
+      this.relationshipReresolutionHistoryValue.splice(
+        0,
+        this.relationshipReresolutionHistoryValue.length - RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT,
+      );
+    }
   }
 
   get localHydrationCostSummary(): HydrationCostSummary {
@@ -671,10 +682,20 @@ export class Indexer {
         throw new Error(`Relationship dependency evidence is incomplete or inconsistent; full rebuild required: ${consistency.issues[0] ?? "unknown mismatch"}`);
       }
       const changedPaths = [...plan.added, ...plan.deleted];
+      const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
       const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
-      await this.reResolveRelationships(
-        shouldUseFullRelationshipReresolution(candidates.length) ? undefined : candidates,
-      );
+      const full = shouldUseFullRelationshipReresolution(candidates.length);
+      const startedAt = performance.now();
+      const changedSourceCount = await this.reResolveRelationships(full ? undefined : candidates);
+      this.recordRelationshipReresolution({
+        at: Date.now(),
+        mode: full ? "full" : "targeted",
+        changedPaths,
+        fanOut,
+        candidateCount: candidates.length,
+        changedSourceCount,
+        elapsedMs: performance.now() - startedAt,
+      });
     }
 
     // Changes arriving during reconciliation are replayed once. Concurrent path-set changes
@@ -788,25 +809,19 @@ export class Indexer {
     }
     const fanOut = this.relationshipDependencies.candidateFanOutForPathChanges(changedPaths);
     const candidates = this.relationshipDependencies.candidatesForPathChanges(changedPaths);
+    const full = shouldUseFullRelationshipReresolution(candidates.length);
     const startedAt = performance.now();
-    task = this.reResolveRelationships(
-      shouldUseFullRelationshipReresolution(candidates.length) ? undefined : candidates,
-    )
+    task = this.reResolveRelationships(full ? undefined : candidates)
       .then((changedSourceCount) => {
-        this.relationshipReresolutionHistoryValue.push({
+        this.recordRelationshipReresolution({
           at: Date.now(),
+          mode: full ? "full" : "targeted",
           changedPaths,
           fanOut,
           candidateCount: candidates.length,
           changedSourceCount,
           elapsedMs: performance.now() - startedAt,
         });
-        if (this.relationshipReresolutionHistoryValue.length > RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT) {
-          this.relationshipReresolutionHistoryValue.splice(
-            0,
-            this.relationshipReresolutionHistoryValue.length - RELATIONSHIP_RERESOLUTION_HISTORY_LIMIT,
-          );
-        }
       })
       .finally(() => {
         if (this.relationshipResolveTask === task) this.relationshipResolveTask = null;
