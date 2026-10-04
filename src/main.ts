@@ -517,8 +517,10 @@ export default class MdseWorkbench extends Plugin {
     try {
       this.schema = await this.loadSchema();
     } catch (e) {
+      const message = (e as Error).message || String(e);
+      this.lastCoreError = `schema: ${message}`;
       this.setRuntimeStatus("error", "schema");
-      new Notice(`MDSE Workbench: could not read the schema files. ${(e as Error).message} Check the paths in settings.`);
+      new Notice(`MDSE Workbench: could not read the schema files. ${message} Check the paths in settings.`);
       return;
     }
 
