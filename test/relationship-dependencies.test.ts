@@ -146,3 +146,56 @@ test("candidate matching normalizes case, separators, leading slash, and md exte
   assert.deepEqual(index.candidatesForPathChanges(["folder/controller.md"]), ["Source.md"]);
   assert.deepEqual(index.candidatesForPathChanges(["/FOLDER/CONTROLLER.MD"]), ["Source.md"]);
 });
+
+
+test("dependency consistency confirms complete source and reverse evidence", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", ["Folder/Target.md"], ["Folder/Target"]);
+
+  const result = index.consistency([
+    {
+      sourcePath: "Source.md",
+      targetPaths: ["Folder/Target.md"],
+      authoredLinkpaths: ["Folder/Target"],
+    },
+  ]);
+
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test("dependency consistency fails closed when an expected source is missing", () => {
+  const index = new ReversePathDependencyIndex();
+
+  const result = index.consistency([
+    {
+      sourcePath: "Source.md",
+      targetPaths: ["Target.md"],
+      authoredLinkpaths: ["Target"],
+    },
+  ]);
+
+  assert.equal(result.complete, false);
+  assert.equal(result.issues.some((issue) => issue.includes("Source.md")), true);
+});
+
+test("dependency consistency detects internally inconsistent reverse evidence", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("Source.md", ["Target.md"], ["Target"]);
+
+  const internals = index as unknown as {
+    byTarget: Map<string, Set<string>>;
+  };
+  internals.byTarget.delete("Target.md");
+
+  const result = index.consistency([
+    {
+      sourcePath: "Source.md",
+      targetPaths: ["Target.md"],
+      authoredLinkpaths: ["Target"],
+    },
+  ]);
+
+  assert.equal(result.complete, false);
+  assert.equal(result.issues.some((issue) => issue.includes("missing reverse target entry")), true);
+});
