@@ -185,9 +185,14 @@ export class Indexer {
     this.startLocalHydration(files, epoch);
   }
 
-  /** Wait until all asynchronous semantic work that can affect occurrence-aware queries has settled. */
-  async whenLocalSettled(): Promise<void> {
-    this.beginDeferredLocalHydration(false);
+  /**
+   * Wait for asynchronous semantic work.
+   * - demanded=true: an explicit occurrence-aware consumer promotes hydration and finishes it.
+   * - demanded=false: background/cache callers may start background hydration but never steal
+   *   priority from resumed foreground activity.
+   */
+  async whenLocalSettled(demanded = true): Promise<void> {
+    this.beginDeferredLocalHydration(!demanded);
     while (this.hydrationTask || this.pendingLocalReads.size || this.livePending.size || this.liveApplyTimer !== null || this.liveApplyTask || this.relationshipResolvePending || this.relationshipResolveTimer !== null || this.relationshipResolveTask) {
       const work: Promise<unknown>[] = [...this.pendingLocalReads];
       if (this.liveApplyTask) work.push(this.liveApplyTask);
