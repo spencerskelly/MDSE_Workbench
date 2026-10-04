@@ -3182,6 +3182,12 @@ var Indexer = class {
   }
   setSchema(schema) {
     this.schema = schema;
+    this.index = new ModelIndex(schema);
+    this.relationshipDependencies.clear();
+    this.relationshipReresolutionHistoryValue = [];
+    this.stats = null;
+    this.cacheDirtyPaths.clear();
+    this.bumpRevision();
   }
   relationshipDependentsOf(paths) {
     return this.relationshipDependencies.dependentsOf(paths);
