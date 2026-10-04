@@ -13,6 +13,7 @@ import {
 import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { ModelIndex } from "../src/core/model";
 import { fixtureSchema, note } from "./helpers";
+import { probeCoreCacheStartup } from "../src/core/startup-cache";
 
 class MemoryStorage implements CacheStorage {
   readonly files = new Map<string, string>();
@@ -419,4 +420,113 @@ test("malformed per-shard generation references fail closed on core, local, and 
   assert.equal((await readCoreCacheGeneration(storage, "runtime/cache")).header.producerVersion, "fallback-old");
   assert.equal((await readLocalCacheGeneration(storage, "runtime/cache")).header.producerVersion, "fallback-old");
   assert.equal((await readSemanticCacheGeneration(storage, "runtime/cache")).header.producerVersion, "fallback-old");
+});
+
+
+test("startup recovery probe reports missing semantic cache without publishing restored state", async () => {
+  const storage = new MemoryStorage();
+  const { schema } = sampleCache();
+  const scope = { vaultUid: "20261003190000001skellyspencer" };
+
+  const result = await probeCoreCacheStartup(
+    () => readCoreCacheGeneration(storage, "runtime/cache"),
+    schema,
+    scope,
+  );
+
+  assert.equal(result.restored, false);
+  if (!result.restored) assert.match(result.reason, /No semantic cache manifest is available/);
+});
+
+test("startup recovery probe falls back to an older complete generation when newest is corrupt or partial", async () => {
+  const old = sampleCache(100).cache;
+  old.header.producerVersion = "startup-old";
+  const latest = sampleCache(200).cache;
+  latest.header.producerVersion = "startup-latest";
+  const storage = new MemoryStorage();
+  const { schema } = sampleCache();
+  const scope = { vaultUid: "20261003190000001skellyspencer" };
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", old, "startup-old", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+  await writeSemanticCacheGeneration(storage, "runtime/cache", latest, "startup-latest", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  const newest = committedSlots(storage)[0];
+  const newestRoot = cacheSlotPaths("runtime/cache")[newest.slot];
+
+  storage.files.set(newestRoot + "/notes-00000.json", "{broken");
+  let result = await probeCoreCacheStartup(
+    () => readCoreCacheGeneration(storage, "runtime/cache"),
+    schema,
+    scope,
+  );
+  assert.equal(result.restored, true);
+  if (result.restored) assert.equal(result.cache.header.producerVersion, "startup-old");
+
+  // Restore the latest shard, then simulate a torn generation by deleting one required shard.
+  const replacementStorage = new MemoryStorage();
+  await writeSemanticCacheGeneration(replacementStorage, "runtime/cache", old, "startup-old", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+  await writeSemanticCacheGeneration(replacementStorage, "runtime/cache", latest, "startup-latest", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+  const latestCommitted = committedSlots(replacementStorage)[0];
+  const latestRoot = cacheSlotPaths("runtime/cache")[latestCommitted.slot];
+  replacementStorage.files.delete(latestRoot + "/fingerprints-00000.json");
+
+  result = await probeCoreCacheStartup(
+    () => readCoreCacheGeneration(replacementStorage, "runtime/cache"),
+    schema,
+    scope,
+  );
+  assert.equal(result.restored, true);
+  if (result.restored) assert.equal(result.cache.header.producerVersion, "startup-old");
+});
+
+test("startup recovery probe rejects a complete but schema-incompatible generation", async () => {
+  const { cache, schema } = sampleCache(300);
+  const storage = new MemoryStorage();
+  const scope = { vaultUid: "20261003190000001skellyspencer" };
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "startup-incompatible", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+
+  const changedSchema = {
+    ...schema,
+    commonProperties: [...schema.commonProperties, "semanticChangeWithoutVersionBump"],
+  };
+
+  const result = await probeCoreCacheStartup(
+    () => readCoreCacheGeneration(storage, "runtime/cache"),
+    changedSchema,
+    scope,
+  );
+
+  assert.equal(result.restored, false);
+  if (!result.restored) assert.match(result.reason, /Incompatible semantic cache: schema semantics/);
+});
+
+test("startup recovery probe reports no usable generation when every committed generation is damaged", async () => {
+  const { cache, schema } = sampleCache();
+  const storage = new MemoryStorage();
+  const scope = { vaultUid: "20261003190000001skellyspencer" };
+
+  await writeSemanticCacheGeneration(storage, "runtime/cache", cache, "startup-bad", {
+    noteBuckets: 2, localBuckets: 2, fingerprintBuckets: 2,
+  });
+  storage.files.delete("runtime/cache/slots/a/notes-00000.json");
+
+  const result = await probeCoreCacheStartup(
+    () => readCoreCacheGeneration(storage, "runtime/cache"),
+    schema,
+    scope,
+  );
+
+  assert.equal(result.restored, false);
+  if (!result.restored) assert.match(result.reason, /No complete core semantic cache generation is readable/);
 });
