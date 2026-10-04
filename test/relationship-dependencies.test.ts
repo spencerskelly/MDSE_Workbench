@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {\n  ReversePathDependencyIndex,\n  TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES,\n  shouldUseFullRelationshipReresolution,\n} from "../src/core/relationship-dependencies";
+import {
+  ReversePathDependencyIndex,
+  TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES,
+  shouldUseFullRelationshipReresolution,
+} from "../src/core/relationship-dependencies";
 
 test("reverse dependency index finds source notes by resolved target path", () => {
   const index = new ReversePathDependencyIndex();
