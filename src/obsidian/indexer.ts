@@ -56,6 +56,9 @@ export class Indexer {
   private hydrationEpoch = 0;
   private hydrationTask: Promise<void> | null = null;
   private hydrationRemaining = 0;
+  private hydrationStartedAt: number | null = null;
+  private lastHydrationMsValue: number | null = null;
+  private lastHydrationCandidatesValue = 0;
   /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
   private relationshipResolveTimer: number | null = null;
   private relationshipResolveTask: Promise<void> | null = null;
@@ -79,6 +82,14 @@ export class Indexer {
 
   get localHydrationPending(): number {
     return this.hydrationRemaining;
+  }
+
+  get lastLocalHydrationMs(): number | null {
+    return this.lastHydrationMsValue;
+  }
+
+  get lastLocalHydrationCandidates(): number {
+    return this.lastHydrationCandidatesValue;
   }
 
   private bumpRevision(): void {
@@ -122,6 +133,9 @@ export class Indexer {
     this.hydrationEpoch++;
     this.hydrationTask = null;
     this.hydrationRemaining = 0;
+    this.hydrationStartedAt = null;
+    this.lastHydrationMsValue = 0;
+    this.lastHydrationCandidatesValue = 0;
     this.index = state.index;
     this.local = state.local;
     this.fingerprints.clear();
@@ -359,8 +373,12 @@ export class Indexer {
    */
   private startLocalHydration(files: TFile[], epoch: number): void {
     this.hydrationRemaining = files.length;
+    this.lastHydrationCandidatesValue = files.length;
+    this.hydrationStartedAt = performance.now();
     if (!files.length) {
       this.hydrationTask = null;
+      this.lastHydrationMsValue = 0;
+      this.hydrationStartedAt = null;
       return;
     }
     let task: Promise<void>;
@@ -388,6 +406,10 @@ export class Indexer {
       if (this.hydrationTask === task) {
         this.hydrationTask = null;
         this.hydrationRemaining = 0;
+        if (this.hydrationStartedAt !== null) {
+          this.lastHydrationMsValue = Math.round(performance.now() - this.hydrationStartedAt);
+          this.hydrationStartedAt = null;
+        }
       }
     });
     this.hydrationTask = task;
