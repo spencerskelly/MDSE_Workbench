@@ -648,13 +648,14 @@ export class Indexer {
     let task: Promise<void>;
     task = (async () => {
       let pathSetChanged = false;
+      const liveBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         const existed = this.fingerprints.has(path);
         this.apply(path);
         const existsNow = this.fingerprints.has(path);
         if (existed !== existsNow) pathSetChanged = true;
-        await reconcileBudget.checkpoint(yieldToUi);
+        await liveBudget.checkpoint(yieldToUi);
       }
       if (pathSetChanged) this.scheduleRelationshipReresolution();
     })().finally(() => {
