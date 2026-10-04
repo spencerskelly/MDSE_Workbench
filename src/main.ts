@@ -5,6 +5,8 @@
  */
 import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import type { NoteRecord } from "./core/model";
+import { serializeSemanticState } from "./core/cache";
+import { writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
@@ -17,6 +19,7 @@ import { nodeAt, parseTranslate, undefinedName, type CanvasNodeJson } from "./co
 import { ReviewView, REVIEW_VIEW } from "./obsidian/review";
 import { RelationshipWriter } from "./obsidian/writer";
 import { scanLocalModel, writeFindingsReport } from "./obsidian/localmodel";
+import { ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from "./obsidian/cache";
 
 /** Quiet time with no cache activity before the first index build starts. */
 const QUIET_START_MS = 8000;
@@ -59,6 +62,9 @@ export default class MdseWorkbench extends Plugin {
   lastFindingsMs = 0;
   detail: NoteDetailPanel | null = null;
   private statusEl: HTMLElement | null = null;
+  private cacheWriteTimer: number | null = null;
+  private lastCacheWriteAt: number | null = null;
+  private lastCacheWriteError: string | null = null;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
   private lastChange = Date.now();
   private unloaded = false;
@@ -165,7 +171,10 @@ export default class MdseWorkbench extends Plugin {
     this.addCommand({ id: "local-model-findings", name: "Check Local Model (write findings report)", callback: () => void this.checkLocalModel() });
     this.addRibbonIcon("list-checks", "Workbench Review", () => void this.openReview());
     this.registerEvent(this.app.metadataCache.on("changed", () => (this.lastChange = Date.now())));
-    this.register(() => (this.unloaded = true));
+    this.register(() => {
+      this.unloaded = true;
+      if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
+    });
     this.app.workspace.onLayoutReady(() => void this.start(false));
   }
 
@@ -190,6 +199,51 @@ export default class MdseWorkbench extends Plugin {
 
   async saveAll(): Promise<void> {
     await this.saveData({ settings: this.settings, views: this.views } satisfies Stored);
+  }
+
+  /**
+   * RTA-2 save-only cache path. Runtime restore is intentionally not enabled yet.
+   * The write happens after Workbench is already ready and only after a short quiet period,
+   * so cache persistence cannot block startup usability.
+   */
+  private scheduleSemanticCacheWrite(): void {
+    if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
+    this.cacheWriteTimer = window.setTimeout(() => {
+      this.cacheWriteTimer = null;
+      if (this.unloaded) return;
+      if (Date.now() - this.lastChange < 1500) {
+        this.scheduleSemanticCacheWrite();
+        return;
+      }
+      void this.persistSemanticCache();
+    }, 2000);
+  }
+
+  private async persistSemanticCache(): Promise<void> {
+    if (!this.schema || !this.indexer || this.indexer.building || !this.indexer.stats) return;
+    try {
+      const createdAt = Date.now();
+      const cache = serializeSemanticState(
+        this.indexer.index,
+        this.indexer.local,
+        this.indexer.fingerprints,
+        this.schema,
+        this.manifest.version,
+        createdAt,
+      );
+      const generation = `g-${createdAt}`;
+      await writeSemanticCacheGeneration(
+        new ObsidianCacheStorage(this.app),
+        WORKBENCH_CACHE_ROOT,
+        cache,
+        generation,
+      );
+      this.lastCacheWriteAt = Date.now();
+      this.lastCacheWriteError = null;
+    } catch (e) {
+      // Cache is disposable. Failure is diagnostic only and never makes the model unavailable.
+      this.lastCacheWriteError = (e as Error).message;
+    }
   }
 
   private withActive(checking: boolean, run: (f: TFile) => void): boolean {
@@ -251,6 +305,7 @@ export default class MdseWorkbench extends Plugin {
     this.setRuntimeStatus("indexing");
     const stats = await this.indexer.build();
     this.setRuntimeStatus("ready", `${stats.elements} elements`);
+    this.scheduleSemanticCacheWrite();
     if (rebuild || schema.warnings.length) {
       new Notice(`MDSE Workbench: indexed ${stats.elements} model notes in ${(stats.ms / 1000).toFixed(1)} s${schema.warnings.length ? `; ${schema.warnings.length} schema warning(s), see diagnostics` : ""}.`);
     }
@@ -316,6 +371,8 @@ export default class MdseWorkbench extends Plugin {
       ["relationships.yaml", schema.relationshipsVersion],
       ["element-types.yaml", schema.elementTypesVersion],
       ["Editing", editingBlocked(schema) ? "off (schema too old)" : "on", editingBlocked(schema)],
+      ["Semantic cache mode", "save-only (warm restore disabled)"],
+      ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
     ];
     if (mem) rows.push(["JavaScript heap in use", `${Math.round(mem.usedJSHeapSize / 1048576)} MB (whole Obsidian window)`]);
     new ReportModal(this.app, "MDSE Workbench diagnostics", rows, schema.warnings).open();
