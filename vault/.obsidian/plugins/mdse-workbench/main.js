@@ -132,6 +132,40 @@ function canStartRuntimeWork(requested, active) {
   return !active.some((kind) => RuntimeWorkPriority[kind] > requestedPriority);
 }
 
+// src/core/cache-persistence.ts
+var CACHE_PERSIST_QUIET_MS = 8e3;
+var MIN_CACHE_PERSIST_INTERVAL_MS = 3e4;
+function cachePersistenceDelayMs(nowMs, lastWriteAt, quietMs = CACHE_PERSIST_QUIET_MS, minimumIntervalMs = MIN_CACHE_PERSIST_INTERVAL_MS) {
+  const sinceLast = lastWriteAt === null ? Number.POSITIVE_INFINITY : Math.max(0, nowMs - lastWriteAt);
+  return Math.max(quietMs, minimumIntervalMs - sinceLast, 0);
+}
+
+// src/core/cache-size.ts
+async function cacheTreeSizeBytes(storage, root) {
+  let total = 0;
+  const pending = [root];
+  while (pending.length) {
+    const folder = pending.pop();
+    const listed = await storage.list(folder);
+    pending.push(...listed.folders);
+    for (const file of listed.files) {
+      const stat = await storage.stat(file);
+      if (stat && Number.isFinite(stat.size) && stat.size >= 0) total += stat.size;
+    }
+  }
+  return total;
+}
+function formatCacheBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unavailable";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024) return `${kib.toFixed(kib < 10 ? 1 : 0)} KiB`;
+  const mib = kib / 1024;
+  if (mib < 1024) return `${mib.toFixed(mib < 10 ? 1 : 0)} MiB`;
+  const gib = mib / 1024;
+  return `${gib.toFixed(gib < 10 ? 2 : 1)} GiB`;
+}
+
 // src/core/startup-handoff.ts
 function scheduleStartupHandoff(schedule, cancel, run) {
   let active = true;
@@ -4954,6 +4988,15 @@ async function clearWorkbenchCache(app) {
   const a = app.vault.adapter;
   if (await a.exists(WORKBENCH_CACHE_ROOT)) await a.rmdir(WORKBENCH_CACHE_ROOT, true);
 }
+async function workbenchCacheSizeBytes(app) {
+  const adapter = app.vault.adapter;
+  if (!await adapter.exists(WORKBENCH_CACHE_ROOT)) return 0;
+  try {
+    return await cacheTreeSizeBytes(adapter, WORKBENCH_CACHE_ROOT);
+  } catch {
+    return null;
+  }
+}
 
 // src/obsidian/assurance.ts
 var AssuranceManager = class {
@@ -5050,8 +5093,6 @@ function emptyFindings() {
 var QUIET_START_MS = 8e3;
 var CORE_AFTER_METADATA_DELAY_MS = 1e3;
 var LOCAL_BACKGROUND_DELAY_MS = 3e3;
-var CACHE_QUIET_MS = 8e3;
-var MIN_CACHE_WRITE_INTERVAL_MS = 3e4;
 var DEFAULTS = {
   relationshipsPath: "99_System/03_Schemas/relationships.yaml",
   elementTypesPath: "99_System/03_Schemas/element-types.yaml",
@@ -5422,14 +5463,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
     const indexer = this.indexer;
     if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
-    const sinceLast = this.lastCacheWriteAt === null ? Infinity : Date.now() - this.lastCacheWriteAt;
-    const delay = Math.max(CACHE_QUIET_MS, MIN_CACHE_WRITE_INTERVAL_MS - sinceLast);
+    const delay = cachePersistenceDelayMs(Date.now(), this.lastCacheWriteAt);
     this.cacheWriteTimer = window.setTimeout(() => {
       this.cacheWriteTimer = null;
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -5800,6 +5840,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const f = assurance.model;
     const dirtyBuckets = cacheDirtyBucketsForPaths(this.indexer.cacheDirtyPathsSnapshot());
     const mem = performance.memory;
+    const cacheSizeBytes = await workbenchCacheSizeBytes(this.app);
     const rows = [
       ["Index mode", s.mode],
       ["Markdown files", String(s.files)],
@@ -5835,6 +5876,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
       ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
       ["Semantic cache persistence", this.cacheWriteTask ? "writing" : this.indexer.revision === this.lastCachedRevision ? "current" : "pending/coalesced"],
+      ["Semantic cache size", cacheSizeBytes === null ? "unavailable" : formatCacheBytes(cacheSizeBytes)],
       ["Cache dirty paths", String(this.indexer.cacheDirtyPathCount)],
       ["Cache dirty buckets", `${dirtyBuckets.notes.length} note \xB7 ${dirtyBuckets.localRegions.length} local \xB7 ${dirtyBuckets.fingerprints.length} fingerprint`]
     ];
