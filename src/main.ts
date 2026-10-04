@@ -395,18 +395,21 @@ export default class MdseWorkbench extends Plugin {
 
         if (initialMode !== "full") {
           indexer.installRestored(restored, cache.header.createdAt);
-          this.lastWarmRestore = initialPlan.changed.length ? `restored; ${initialPlan.changed.length} changed path(s) to reconcile` : "restored; cache matched current file fingerprints";
+          const initialChanges = initialPlan.changed.length + initialPlan.added.length + initialPlan.deleted.length;
+          this.lastWarmRestore = initialChanges
+            ? `restored; ${initialChanges} path change(s) to reconcile`
+            : "restored; cache matched current file fingerprints";
           indexer.enableLiveChanges();
-          this.setRuntimeStatus("indexing", initialPlan.changed.length ? `reconciling ${initialPlan.changed.length} changed` : "validating cached state");
-          stats = await indexer.reconcileStablePaths(initialPlan.changed);
+          this.setRuntimeStatus("indexing", initialChanges ? `reconciling ${initialChanges} path change(s)` : "validating cached state");
+          stats = await indexer.reconcilePlan(initialPlan);
 
           // Catch changes that happened after the first fingerprint snapshot. One bounded
-          // incremental retry is allowed; anything still moving or any path-set change uses
-          // the proven full build instead of guessing.
+          // incremental retry is allowed; if the vault remains busy or exceeds the incremental
+          // budget, fall back to the proven full build instead of chasing a moving target.
           let after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
           let afterMode = reconciliationMode(after);
           if (afterMode === "incremental") {
-            stats = await indexer.reconcileStablePaths(after.changed);
+            stats = await indexer.reconcilePlan(after);
             after = planReconciliation(indexer.fingerprints, indexer.currentFingerprints());
             afterMode = reconciliationMode(after);
           }
@@ -491,10 +494,12 @@ export default class MdseWorkbench extends Plugin {
         ["Safe next-start mode", mode],
       ];
       new ReportModal(this.app, "MDSE semantic cache", rows, [
-        "Inspection is read-only. Warm restore is still disabled; the vault remains authoritative.",
-        mode === "full" && (plan.added.length || plan.deleted.length)
-          ? "A path-set change can alter wikilink resolution, so the current safe policy requires a full rebuild."
-          : "",
+        "Inspection is read-only. The vault remains authoritative; cache state is always disposable.",
+        mode === "incremental" && (plan.added.length || plan.deleted.length)
+          ? "Path-set changes are safe to reconcile because semantic-cache v2 retains authored relationship links and re-resolves them against current Obsidian metadata."
+          : mode === "full"
+            ? "The pending change set exceeds the bounded incremental startup budget, so the safe next-start path is a full chunked rebuild."
+            : "",
       ].filter(Boolean)).open();
     } catch (e) {
       new Notice(`Semantic cache is unavailable or invalid: ${(e as Error).message}`, 15000);
