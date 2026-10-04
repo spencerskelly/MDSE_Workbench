@@ -7,6 +7,7 @@ import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSetti
 import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
+import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
 import { scheduleStartupHandoff } from "./core/startup-handoff";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreCoreSemanticState, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readCoreCacheGeneration, readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
@@ -29,8 +30,6 @@ import { AssuranceManager, type AssuranceSnapshot } from "./obsidian/assurance";
 const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
 const CORE_AFTER_METADATA_DELAY_MS = 1000;
 const LOCAL_BACKGROUND_DELAY_MS = 3000;
-const CACHE_QUIET_MS = 8000;
-const MIN_CACHE_WRITE_INTERVAL_MS = 30000;
 
 interface Settings {
   relationshipsPath: string;
@@ -484,14 +483,13 @@ export default class MdseWorkbench extends Plugin {
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
     const indexer = this.indexer;
     if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
-    const sinceLast = this.lastCacheWriteAt === null ? Infinity : Date.now() - this.lastCacheWriteAt;
-    const delay = Math.max(CACHE_QUIET_MS, MIN_CACHE_WRITE_INTERVAL_MS - sinceLast);
+    const delay = cachePersistenceDelayMs(Date.now(), this.lastCacheWriteAt);
     this.cacheWriteTimer = window.setTimeout(() => {
       this.cacheWriteTimer = null;
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_QUIET_MS) {
+      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS) {
         this.scheduleSemanticCacheWrite();
         return;
       }
