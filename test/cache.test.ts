@@ -341,7 +341,7 @@ test("all restore surfaces reject incompatible schema before deserializing paylo
   ];
 
   for (const [name, mutate, expected] of mutations) {
-    const bad = structuredClone(base);
+    const bad: any = structuredClone(base);
     mutate(bad);
     // If compatibility were checked too late, these malformed payloads would fail for the wrong reason.
     bad.notes = [{ nonsense: true }];
