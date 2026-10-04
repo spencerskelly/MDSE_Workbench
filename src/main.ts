@@ -7,6 +7,7 @@ import { App, getLinkpath, normalizePath, Notice, parseYaml, Plugin, PluginSetti
 import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
+import { scheduleStartupHandoff } from "./core/startup-handoff";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
 import { validateLocalModels } from "./core/localmodel";
@@ -90,7 +91,7 @@ export default class MdseWorkbench extends Plugin {
   writer: RelationshipWriter | null = null;
   detail: NoteDetailPanel | null = null;
   private statusEl: HTMLElement | null = null;
-  private startupHandoffTimer: number | null = null;
+  private cancelStartupHandoff: (() => void) | null = null;
   private healthRefreshTimer: number | null = null;
   private localBackgroundTimer: number | null = null;
   private cacheWriteTimer: number | null = null;
@@ -244,19 +245,25 @@ export default class MdseWorkbench extends Plugin {
     }));
     this.register(() => {
       this.unloaded = true;
-      if (this.startupHandoffTimer !== null) window.clearTimeout(this.startupHandoffTimer);
+      this.cancelStartupHandoff?.();
+      this.cancelStartupHandoff = null;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
       if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
       if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     });
     this.app.workspace.onLayoutReady(() => {
-      // Startup safety slice: onLayoutReady only schedules Workbench. It does not read schemas,
-      // build indexes, restore caches, hydrate Local Models, or run assurance in the callback.
-      // Obsidian gets the current event-loop turn back before Workbench begins any model work.
-      this.startupHandoffTimer = window.setTimeout(() => {
-        this.startupHandoffTimer = null;
-        if (!this.unloaded) void this.start(false);
-      }, 0);
+      // Startup safety slice: onLayoutReady only enqueues Workbench. The shared handoff helper
+      // guarantees that this call stack returns before schemas, indexes, caches, Local Models,
+      // assurance, or any other Workbench startup work can run.
+      const handoff = scheduleStartupHandoff(
+        (run) => window.setTimeout(run, 0),
+        (handle) => window.clearTimeout(handle as number),
+        () => {
+          this.cancelStartupHandoff = null;
+          if (!this.unloaded) void this.start(false);
+        },
+      );
+      this.cancelStartupHandoff = handoff.cancel;
     });
   }
 
