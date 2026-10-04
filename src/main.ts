@@ -10,6 +10,7 @@ import { BACKGROUND_MAX_DEFERRAL_MS, BACKGROUND_RESUME_QUIET_MS, canRunBackgroun
 import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
 import { CacheMutationGate } from "./core/cache-mutation";
 import { TransactionManager } from "./core/transaction";
+import { ModelEditService } from "./core/model-edit";
 import { canPublishCoreReady } from "./core/core-readiness";
 import { recoverWithColdBuild } from "./core/startup-recovery";
 import { formatCacheBytes } from "./core/cache-size";
@@ -94,6 +95,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
+  modelEditor: ModelEditService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
   detail: NoteDetailPanel | null = null;
@@ -834,6 +836,19 @@ export default class MdseWorkbench extends Plugin {
       this.indexer = new Indexer(this.app, schema);
       this.indexer.setBackgroundIdleCheck(() => this.backgroundWorkAllowed("backgroundHydration", this.indexer));
       this.writer = new RelationshipWriter(this.app, () => this.schema as Schema, () => (this.indexer as Indexer).index, this.transactions);
+      const localFile = (path: string): TFile => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile)) throw new Error(path + " no longer exists.");
+        return file;
+      };
+      this.modelEditor = new ModelEditService(
+        {
+          read: (path) => this.app.vault.read(localFile(path)),
+          write: (path, text) => this.app.vault.modify(localFile(path), text),
+        },
+        (path) => (this.indexer as Indexer).index.notes.get(path)?.uid ?? null,
+        this.transactions,
+      );
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
         // Assurance ranks below background occurrence hydration. It waits for occurrence work
