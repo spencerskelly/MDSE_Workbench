@@ -183,28 +183,37 @@ test("serialization is deterministic for paths regardless of insertion order", (
 test("bounded sharding reassembles one complete generation and rejects partial/mixed generations", () => {
   const { index, local, fingerprints } = state();
   const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17", 5);
-  const sharded = shardSemanticCache(cache, "g-0001", 1, 1);
+  const sharded = shardSemanticCache(cache, "g-0001", 2, 2, 2);
 
   assert.equal(sharded.manifest.notes.count, 2);
-  assert.equal(sharded.manifest.localRegions.count, 1);
-  assert.deepEqual(joinSemanticCache(sharded.manifest, [...sharded.noteShards].reverse(), sharded.localShards), cache);
+  assert.equal(sharded.manifest.localRegions.count, 2);
+  assert.equal(sharded.manifest.fingerprints.count, 2);
+  assert.deepEqual(
+    joinSemanticCache(
+      sharded.manifest,
+      [...sharded.fingerprintShards].reverse(),
+      [...sharded.noteShards].reverse(),
+      [...sharded.localShards].reverse(),
+    ),
+    cache,
+  );
 
   assert.throws(
-    () => joinSemanticCache(sharded.manifest, sharded.noteShards.slice(0, 1), sharded.localShards),
+    () => joinSemanticCache(sharded.manifest, sharded.fingerprintShards, sharded.noteShards.slice(0, 1), sharded.localShards),
     /note shard count mismatch/,
   );
 
   const mixed = JSON.parse(JSON.stringify(sharded.noteShards));
   mixed[0].generation = "old-generation";
   assert.throws(
-    () => joinSemanticCache(sharded.manifest, mixed, sharded.localShards),
+    () => joinSemanticCache(sharded.manifest, sharded.fingerprintShards, mixed, sharded.localShards),
     /Malformed semantic cache note shard/,
   );
 
   const duplicate = JSON.parse(JSON.stringify(sharded.noteShards));
   duplicate[1].index = 0;
   assert.throws(
-    () => joinSemanticCache(sharded.manifest, duplicate, sharded.localShards),
+    () => joinSemanticCache(sharded.manifest, sharded.fingerprintShards, duplicate, sharded.localShards),
     /Duplicate semantic cache note shard index/,
   );
 });
@@ -212,8 +221,9 @@ test("bounded sharding reassembles one complete generation and rejects partial/m
 test("invalid shard sizing and empty generation are refused before anything can be persisted", () => {
   const { index, local, fingerprints } = state();
   const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
-  assert.throws(() => shardSemanticCache(cache, "", 10, 10), /generation/);
-  assert.throws(() => shardSemanticCache(cache, "g", 0, 10), /positive integers/);
+  assert.throws(() => shardSemanticCache(cache, "", 10, 10, 10), /generation/);
+  assert.throws(() => shardSemanticCache(cache, "g", 0, 10, 10), /bucket count/);
+  assert.throws(() => shardSemanticCache(cache, "g", 10, 10, 257), /bucket count/);
 });
 
 
@@ -260,4 +270,33 @@ test("schema signature ignores object identity but changes with parsed semantic 
 
   const changed = { ...b, commonProperties: [...b.commonProperties, "newSemanticProperty"] };
   assert.notEqual(schemaSignature(a), schemaSignature(changed));
+});
+
+
+test("path-bucket sharding keeps existing paths in stable shard identities when unrelated notes are added", () => {
+  const a = state();
+  const base = serializeSemanticState(a.index, a.local, a.fingerprints, schema, scope, "0.1.17", 1);
+  const before = shardSemanticCache(base, "g1", 8, 4, 8);
+
+  const addedIndex = new ModelIndex(schema);
+  for (const rec of a.index.notes.values()) addedIndex.upsert(rec);
+  addedIndex.upsert({
+    path: "ZZZ/New Note.md",
+    name: "New Note",
+    type: "Object",
+    uid: "20261003170000006skellyspencer",
+    authoredLinks: [],
+    fields: new Map(),
+    unresolved: 0,
+  });
+  const addedFp = new Map(a.fingerprints);
+  addedFp.set("ZZZ/New Note.md", { ctime: 2000, mtime: 2000, size: 100 });
+  const next = serializeSemanticState(addedIndex, a.local, addedFp, schema, scope, "0.1.17", 2);
+  const after = shardSemanticCache(next, "g2", 8, 4, 8);
+
+  const bucketOf = (shards: Array<{ index: number; notes: Array<{ path: string }> }>, path: string) =>
+    shards.find((s) => s.notes.some((n) => n.path === path))?.index;
+  for (const path of ["Assembly.md", "Target.md"]) {
+    assert.equal(bucketOf(before.noteShards, path), bucketOf(after.noteShards, path));
+  }
 });
