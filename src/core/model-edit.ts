@@ -1,6 +1,6 @@
 import { localRef, type ModelRef } from "./localmodel";
-import { planLocalRecordPatch, type LocalRecordPatch, type PlannedLocalEdit } from "./localmodel-edit";
-import { TransactionManager, type AppliedEdit } from "./transaction";
+import { planLocalRecordCreate, planLocalRecordPatch, type LocalRecordPatch, type NewLocalRecord, type PlannedLocalEdit } from "./localmodel-edit";
+import { TransactionManager, type AppliedEdit, type EditTransaction } from "./transaction";
 
 export interface TextDocumentStore {
   read(path: string): Promise<string>;
@@ -12,6 +12,18 @@ export interface LocalPatchResult {
   plan: PlannedLocalEdit;
 }
 
+export interface StagedLocalCreate {
+  transaction: EditTransaction;
+  plan: PlannedLocalEdit;
+  path: string;
+}
+
+interface PendingLocalCreate {
+  path: string;
+  plan: PlannedLocalEdit;
+  label: string;
+}
+
 /**
  * WB-114 atomic Local Model editor.
  *
@@ -21,6 +33,7 @@ export interface LocalPatchResult {
  */
 export class ModelEditService {
   private sequence = 0;
+  private readonly pendingCreates = new Map<string, PendingLocalCreate>();
 
   constructor(
     private readonly store: TextDocumentStore,
@@ -63,6 +76,69 @@ export class ModelEditService {
     }
 
     return { changed: true, plan };
+  }
+
+  /**
+   * Stage creation of one Local Model record. Planning and validation happen now, but the vault is
+   * untouched until applyLocalCreate(). This is the first structural Review / Apply / Cancel path.
+   */
+  async stageLocalRecordCreate(path: string, input: NewLocalRecord): Promise<StagedLocalCreate> {
+    const before = await this.store.read(path);
+    const plan = planLocalRecordCreate(before, input);
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+
+    const txId = `local-struct-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `create ${input.kind} ${input.heading.trim()}`;
+    this.transactions.begin(txId, label, "structural");
+    const transaction = this.transactions.add(txId, {
+      id: txId + "-create",
+      label,
+      changes: [{
+        kind: "local.create",
+        summary: label,
+        refs: [localRef(uid, input.kind, input.localId)],
+        metadata: { path, localId: input.localId, localKind: input.kind },
+      }],
+    });
+    this.pendingCreates.set(txId, { path, plan, label });
+    return { transaction, plan, path };
+  }
+
+  reviewLocalCreate(transactionId: string): StagedLocalCreate {
+    const pending = this.requirePendingCreate(transactionId);
+    return {
+      transaction: this.transactions.review(transactionId),
+      plan: pending.plan,
+      path: pending.path,
+    };
+  }
+
+  async applyLocalCreate(transactionId: string): Promise<void> {
+    const pending = this.requirePendingCreate(transactionId);
+    try {
+      await this.transactions.apply(transactionId, {
+        apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label),
+      });
+      this.pendingCreates.delete(transactionId);
+    } catch (error) {
+      // Keep a stale/failed structural proposal available for Review or Cancel. Apply never mutates
+      // semantic history unless the guarded storage write succeeds.
+      throw error;
+    }
+  }
+
+  cancelLocalCreate(transactionId: string): EditTransaction {
+    this.requirePendingCreate(transactionId);
+    const cancelled = this.transactions.cancel(transactionId);
+    this.pendingCreates.delete(transactionId);
+    return cancelled;
+  }
+
+  private requirePendingCreate(transactionId: string): PendingLocalCreate {
+    const pending = this.pendingCreates.get(transactionId);
+    if (!pending) throw new Error(`Structural Local Model transaction ${transactionId} does not exist.`);
+    return pending;
   }
 
   private async applyGuarded(path: string, before: string, after: string, label: string): Promise<AppliedEdit> {
