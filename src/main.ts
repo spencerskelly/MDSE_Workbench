@@ -8,6 +8,7 @@ import type { NoteRecord } from "./core/model";
 import { summarizeRuntimeHealth } from "./core/runtime-health";
 import { BACKGROUND_RESUME_QUIET_MS, canRunBackgroundWork, canStartRuntimeWork, type RuntimeWorkKind } from "./core/background";
 import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-persistence";
+import { CacheMutationGate } from "./core/cache-mutation";
 import { formatCacheBytes } from "./core/cache-size";
 import { scheduleStartupHandoff } from "./core/startup-handoff";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreCoreSemanticState, restoreSemanticState, serializeSemanticState } from "./core/cache";
@@ -96,6 +97,7 @@ export default class MdseWorkbench extends Plugin {
   private localBackgroundTimer: number | null = null;
   private cacheWriteTimer: number | null = null;
   private cacheWriteTask: Promise<void> | null = null;
+  private readonly cacheMutationGate = new CacheMutationGate();
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
   private lastCacheWriteError: string | null = null;
@@ -481,6 +483,7 @@ export default class MdseWorkbench extends Plugin {
    * so cache persistence cannot block startup usability.
    */
   private scheduleSemanticCacheWrite(): void {
+    if (!this.cacheMutationGate.writesAllowed()) return;
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
     const indexer = this.indexer;
     if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
@@ -793,12 +796,8 @@ export default class MdseWorkbench extends Plugin {
       window.clearTimeout(this.cacheWriteTimer);
       this.cacheWriteTimer = null;
     }
-    if (this.cacheWriteTask) {
-      new Notice("MDSE Workbench: cache persistence is finishing. Try Clear semantic cache again in a moment.");
-      return;
-    }
     try {
-      await clearWorkbenchCache(this.app);
+      await this.cacheMutationGate.clear(this.cacheWriteTask, () => clearWorkbenchCache(this.app));
       this.lastCacheWriteAt = null;
       this.lastCacheWriteMs = null;
       this.lastCacheWriteError = null;
