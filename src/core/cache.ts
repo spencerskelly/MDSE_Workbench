@@ -707,6 +707,12 @@ export function planReconciliation(
 export type ReconciliationMode = "none" | "incremental" | "full";
 
 /**
+ * Maximum number of changed/added/deleted Markdown paths allowed in one warm-start
+ * reconciliation. Above this point the proven cooperative full rebuild is safer and bounded.
+ */
+export const MAX_INCREMENTAL_RECONCILIATION_PATHS = 300;
+
+/**
  * Warm-start policy after semantic-cache v2.
  *
  * Cached notes retain their authored relationship-link evidence, so added/deleted/renamed paths
@@ -714,7 +720,10 @@ export type ReconciliationMode = "none" | "incremental" | "full";
  * Obsidian's current metadata cache. Large bursts still fall back to the proven chunked full rebuild
  * so incremental startup cannot become an unbounded foreground job.
  */
-export function reconciliationMode(plan: ReconciliationPlan, incrementalLimit = 300): ReconciliationMode {
+export function reconciliationMode(
+  plan: ReconciliationPlan,
+  incrementalLimit = MAX_INCREMENTAL_RECONCILIATION_PATHS,
+): ReconciliationMode {
   if (!Number.isInteger(incrementalLimit) || incrementalLimit < 1) throw new Error("incrementalLimit must be a positive integer.");
   const changed = plan.changed.length + plan.added.length + plan.deleted.length;
   if (!changed) return "none";
