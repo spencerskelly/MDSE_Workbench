@@ -7,7 +7,7 @@
  */
 import { LocalModelIndex, READABLE_VERSIONS, type LinkRef, type LocalFinding, type LocalRecord, type LocalRegion } from "./localmodel";
 import { ModelIndex, type NoteRecord } from "./model";
-import type { Schema } from "./schema";
+import { schemaSignature, type Schema } from "./schema";
 
 export const CACHE_FORMAT_VERSION = 1;
 /** Bump when semantic parsing/resolution meaning changes even if the JSON shape does not. */
@@ -32,6 +32,7 @@ export interface CacheCompatibility {
   vaultUid: string;
   relationshipsVersion: string;
   elementTypesVersion: string;
+  schemaSignature: string;
   /** Reader contract, not the active writer version. */
   localModelReadableVersions: string[];
 }
@@ -85,6 +86,7 @@ export function expectedCompatibility(schema: Schema, scope: CacheScope): CacheC
     vaultUid: scope.vaultUid,
     relationshipsVersion: schema.relationshipsVersion,
     elementTypesVersion: schema.elementTypesVersion,
+    schemaSignature: schemaSignature(schema),
     localModelReadableVersions: [...READABLE_VERSIONS],
   };
 }
@@ -98,6 +100,7 @@ export function cacheCompatibilityProblem(cache: unknown, expected: CacheCompati
   if (header.vaultUid !== expected.vaultUid) return `vault identity ${String(header.vaultUid)} != ${expected.vaultUid}`;
   if (header.relationshipsVersion !== expected.relationshipsVersion) return `relationships schema ${String(header.relationshipsVersion)} != ${expected.relationshipsVersion}`;
   if (header.elementTypesVersion !== expected.elementTypesVersion) return `element-types schema ${String(header.elementTypesVersion)} != ${expected.elementTypesVersion}`;
+  if (header.schemaSignature !== expected.schemaSignature) return `schema semantics ${String(header.schemaSignature)} != ${expected.schemaSignature}`;
   if (!sameStrings(header.localModelReadableVersions, expected.localModelReadableVersions)) return "Local Model reader contract changed";
   return null;
 }
