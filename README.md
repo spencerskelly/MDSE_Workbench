@@ -22,11 +22,23 @@ Start from the methodology vault's `00_Workspace/00 - Current State.md`: it list
 
 **Fixtures are copies only where independent Workbench tests require them.** `test/fixtures/relationships.yaml`, `element-types.yaml`, and `local-model.yaml` must exactly equal the current authority schemas. `local-model-0.1.yaml` is a frozen historical compatibility fixture and must not be updated to current semantics. After any current-schema change, sync the current fixture and run `npm test`. The vault's `python3 Base Vault/Tools/v0.8.0/check-release.py --workbench <this clone>` fails if they differ or if the version in `package.json`, `manifest.json` and the release manifest disagree (W-320, WB-108).
 
-**CI note.** The CI and release workflows are kept in `ci-workflows/` and are not active (see the Workbench Decision Log). Until they are switched on, run `npm run build` and `npm test` before every push.
+**CI/build note.** `.github/workflows/build-artifact.yml` is now present and is defined to run `npm ci`, `npm test` and `npm run build` on pushes to `main` and pull requests; artifact synchronization is restricted to pushes on `main`. A connector-created probe PR did not expose a workflow run in the current tooling, so the latest RTA source must still be treated as **not yet build-gated** until a real GitHub/local run reports success. Do not promote or vendor the candidate solely from source presence.
 
-## Status: Phase 0 spike (M0)
+## Status: v0.8 pre-release candidate
 
-M0 replaces the riskiest assumptions with measurements before more is built (WB-081, gate R0 in WB-090). It is not for everyday use.
+The original Phase 0 measurements remain below as historical performance evidence, but current `main` is the WB-106 development line: occurrence-aware Local Model navigation/editing, Internal Structure, and the W-343/W-344 runtime architecture.
+
+Current runtime work is intentionally staged:
+
+- commands/status are registered immediately;
+- the existing chunked full build remains the recovery baseline;
+- a vault/schema-bound disposable semantic cache is written only after Workbench is ready;
+- the cache uses bounded crash-safe A/B slots and can be inspected with **Inspect semantic cache**;
+- an opt-in **Warm cache preview** setting exercises validated restore + conservative stable-path reconciliation; it is **off by default** and is not yet a released runtime behavior;
+- Local Model validation uses the shared semantic index rather than rereading every Local Model region;
+- adding/deleting/renaming Markdown paths still falls back to a full rebuild because that can change wikilink resolution in unchanged notes.
+
+See `docs/Architecture/MDSE Runtime Architecture.md` for the governing runtime plan.
 
 | M0 question | How this build answers it |
 |---|---|
@@ -55,12 +67,13 @@ These are the pure index in Node. In Obsidian on the same vault (0.0.2), **Show 
 
 - **Show diagnostics**: index size and timings, Review counts (missing inverses, inverses with no forward link, links that break endpoint rules, provisional `tracesTo` links, unresolved links), schema versions and warnings.
 - **Rebuild index**
-- **Explore structure of current note**: follows `hasPart`, `hasChild`, `hasState`, `includes`, `hasPort`, `exposes`, `hasFlow` two levels down as a left-to-right tree. Each note shows up to 12 children; the 80-note limit is shared evenly across each level and wins over depth (WB-082); "+N more" shows what was left out. One label per relationship group, colored by relationship.
+- **Explore structure of current note**: shows definition/navigation composition (`hasPart`, `hasChild`, `hasState`, `includes`) plus contextual Local Model **part occurrences**. It deliberately does not treat reusable Port/Item Flow notes as the assembly's internal topology; contextual endpoints/connections/flows belong in **Internal** and **Interfaces**. Each note shows up to 12 children; the 80-item limit wins over depth; "+N more" shows what was left out.
+- **Explore internal structure of current Object**: occurrence-native view of one Local Model context. The selected Object is the visual boundary; part occurrences sit inside; boundary and part-owned endpoint occurrences are placed around their owning context; local connections join endpoint occurrences; connection-owned flows are summarized on those connections; `exposes` links boundary to internal endpoints. Reusable definitions remain references rather than being flattened into the context.
 - **Explore functional view of current note**: starts from an Object or a Function. From an Object it shows the functions it performs, their sub-functions, what precedes or follows them. From a Function it shows who performs it, its parent function and sub-functions, and what comes before and after it. Arrows follow the stored direction; the same limits apply (12 children per note, 80 notes, two levels). Missing functions show as undefined cards. The requirements a function satisfies are in the Requirements view.
 - **Explore requirements view of current note**: starts from a Requirement, or from an Object, Function, Design, State, Use Case or Verification. From a Requirement it shows where it sits (owner element and parent requirement), its sub-requirements, what it is derived from and what is derived from it, what it refines or is refined by, what it references, and what satisfies, verifies, applies to or drives it. Function and Design may reach Requirements through `satisfies`; State and State Machine never satisfy Requirements and reach scoped Requirements through inverse `appliesTo`. Other start types use only the relationships valid for their class, and each reached Requirement opens one more level. Arrows follow the stored direction; the same limits apply. Missing requirements and sources show as undefined cards.
 - **Explore view of current note…** lists the views that can start from the note's type, with a line on each, and opens the one chosen. Each view also has its own command (**Explore where-used view…**, and so on). Every view uses the same limits (12 children per note, 80 notes), draws arrows in the stored direction, labels every link with its relationship, shows missing notes as undefined cards, and refreshes from **Check whether this view is current**:
   - **Where Used**: from any note, what contains or uses it, three levels up: parent assemblies (`hasPart`), notes that include it, owners, the Object that has a State, a Port or a Design, the Objects that perform a Function, Use Cases it realizes or takes part in, notes that depend on it.
-  - **Interfaces**: from an Object, Port or Item Flow: ports, the port each faces (`interfaces`, drawn without an arrowhead) and that port's owner, outer and inner ports (`exposes`), and item flows (`transmits`, `receives`, `exchanges`, `hasFlow`). Three levels.
+  - **Interfaces**: from an Object, Port or Item Flow definition, combines note-level definition relationships with occurrence-aware topology. From an Object, Local Model endpoint, connection and flow occurrences are materialized without inventing notes; exposure/parent/connection links remain contextual. Starting from a reusable Port or Item Flow definition also shows where that definition occurs.
   - **Verification**: from a Requirement, Verification, Function, Design or State: what verifies a requirement, what else a verification covers, the valid Function/Design satisfiers, and—for a State—the Requirements that apply to that State.
   - **Design**: from an Object, Document or Design: its designs, sub-designs and the requirements each satisfies.
   - **Scenario**: from a Use Case: participants, realizing Functions and Designs, included and optional Use Cases, driven requirements, and the order of the realizing functions.
@@ -133,6 +146,6 @@ npm run bench:generate -- 60000 && npm run bench
 
 `test/fixtures/` holds copies of the vault's relationship, element and Local Model schemas (the current 0.2 authority copy and the frozen 0.1 compatibility copy); `test/localmodel.test.ts` tests the reader against both.
 
-The CI and release workflows are in `ci-workflows/` because the access token used so far cannot write workflow files (it lacks the Workflows permission; GitHub refuses the push). With a token that has it, move both files to `.github/workflows/`. CI then runs the tests and the build on every push to `main` and on pull requests; the release workflow runs when a tag `v<version>` is pushed, checks the tag against `manifest.json`, builds, and publishes `main.js`, `manifest.json`, `styles.css` and the 60,000-note synthetic vault as a GitHub release. Both files parse, and the commands they run (`npm ci`, `npm test`, `npm run build`, `npm run bench:generate`) work here; neither workflow has run on GitHub yet.
+The active build workflow is `.github/workflows/build-artifact.yml`. It is intended to run tests and the TypeScript/bundle build on `main` pushes and pull requests, and to synchronize the checked-in plugin artifact only from a successful `main` push. Until a run is visibly confirmed, also run `npm ci && npm test && npm run build` before promotion. Historical workflow material under `ci-workflows/`, if retained, is reference only unless explicitly activated.
 
 To release: bump `version` in `manifest.json`, `package.json` and `versions.json`, commit, and push a tag `v<version>`.
