@@ -2340,8 +2340,9 @@ function blockId(link) {
 }
 
 // src/core/cooperative.ts
+var UI_WORK_SLICE_BUDGET_MS = 12;
 var CooperativeBudget = class {
-  constructor(budgetMs = 12, now = () => performance.now()) {
+  constructor(budgetMs = UI_WORK_SLICE_BUDGET_MS, now = () => performance.now()) {
     this.budgetMs = budgetMs;
     this.now = now;
     if (!(budgetMs > 0) || !Number.isFinite(budgetMs)) throw new Error("Cooperative budget must be a positive finite number.");
@@ -2367,7 +2368,7 @@ var LOCAL_BLOCK_PREFIX = /^(part|ep|conn|flow)-/;
 var BURST_REBUILD = 300;
 var QUIET_MS = 3e3;
 var LIVE_DEBOUNCE_MS = 250;
-var WORK_SLICE_MS = 12;
+var WORK_SLICE_MS = UI_WORK_SLICE_BUDGET_MS;
 var yieldToUi = () => new Promise((resolve) => window.setTimeout(resolve, 0));
 var Indexer = class {
   constructor(app, schema) {
