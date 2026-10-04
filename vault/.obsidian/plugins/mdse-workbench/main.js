@@ -117,8 +117,9 @@ function summarizeRuntimeHealth(input) {
 
 // src/core/background.ts
 var BACKGROUND_RESUME_QUIET_MS = 3e3;
+var BACKGROUND_MAX_DEFERRAL_MS = 3e4;
 function canRunBackgroundWork(state) {
-  return !state.unloaded && state.ready && !state.building && !state.rebuildPending && state.liveUpdatePending === 0 && state.quietForMs >= state.minimumQuietMs;
+  return !state.unloaded && state.ready && !state.building && !state.rebuildPending && state.liveUpdatePending === 0 && (state.quietForMs >= state.minimumQuietMs || state.maxDeferralMs !== void 0 && state.waitingForMs !== void 0 && state.waitingForMs >= state.maxDeferralMs);
 }
 var RuntimeWorkPriority = {
   cacheWrite: 100,
@@ -5557,6 +5558,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.pendingRebuild = false;
     /** Last foreground model/UI activity; background subsystems share this preemption signal. */
     this.lastChange = Date.now();
+    /** First time each optional background lane became pending; intermittent edits must not starve it forever. */
+    this.backgroundPendingSince = /* @__PURE__ */ new Map();
     /** Latched once Obsidian says its metadata/link-resolution pass is complete. */
     this.metadataResolved = false;
     this.unloaded = false;
@@ -5760,20 +5763,31 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (this.cacheWriteTask) active.push("cacheWrite");
     return active;
   }
+  markBackgroundPending(kind) {
+    if (!this.backgroundPendingSince.has(kind)) this.backgroundPendingSince.set(kind, Date.now());
+  }
+  clearBackgroundPending(kind) {
+    this.backgroundPendingSince.delete(kind);
+  }
   backgroundWorkAllowed(kind, indexer = this.indexer) {
     if (!indexer || this.indexer !== indexer) return false;
+    const now = Date.now();
+    const pendingSince = this.backgroundPendingSince.get(kind);
     const base3 = canRunBackgroundWork({
       unloaded: this.unloaded,
       ready: this.isReady(),
       building: indexer.building,
       rebuildPending: indexer.rebuildPending,
       liveUpdatePending: indexer.liveUpdatePending,
-      quietForMs: Date.now() - this.lastChange,
-      minimumQuietMs: BACKGROUND_RESUME_QUIET_MS
+      quietForMs: now - this.lastChange,
+      minimumQuietMs: kind === "cacheWrite" ? CACHE_PERSIST_QUIET_MS : BACKGROUND_RESUME_QUIET_MS,
+      waitingForMs: pendingSince === void 0 ? 0 : now - pendingSince,
+      maxDeferralMs: BACKGROUND_MAX_DEFERRAL_MS
     });
     return base3 && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
   }
   async waitForBackgroundWork(kind, indexer) {
+    this.markBackgroundPending(kind);
     while (!this.unloaded && this.indexer === indexer && !this.backgroundWorkAllowed(kind, indexer)) {
       await new Promise((r) => window.setTimeout(r, 250));
     }
@@ -5857,7 +5871,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   scheduleBackgroundLocalHydration() {
     if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     const indexer = this.indexer;
-    if (!indexer || !this.isReady() || !indexer.localHydrationPending) return;
+    if (!indexer || !this.isReady() || !indexer.localHydrationPending) {
+      this.clearBackgroundPending("backgroundHydration");
+      return;
+    }
+    this.markBackgroundPending("backgroundHydration");
     this.localBackgroundTimer = window.setTimeout(() => {
       this.localBackgroundTimer = null;
       if (this.unloaded || this.indexer !== indexer || !this.isReady()) return;
@@ -5870,6 +5888,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       void indexer.whenLocalSettled(false).then(() => {
         if (this.unloaded || this.indexer !== indexer) return;
         this.lastOccurrenceError = null;
+        if (!indexer.localHydrationPending) this.clearBackgroundPending("backgroundHydration");
         void this.markOccurrenceReady(indexer);
         this.refreshRuntimeHealth();
         this.scheduleSemanticCacheWrite();
@@ -5889,14 +5908,18 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (!this.cacheMutationGate.writesAllowed()) return;
     if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
     const indexer = this.indexer;
-    if (!indexer?.stats || indexer.revision === this.lastCachedRevision) return;
+    if (!indexer?.stats || indexer.revision === this.lastCachedRevision) {
+      this.clearBackgroundPending("cacheWrite");
+      return;
+    }
+    this.markBackgroundPending("cacheWrite");
     const delay = cachePersistenceDelayMs(Date.now(), this.lastCacheWriteAt);
     this.cacheWriteTimer = window.setTimeout(() => {
       this.cacheWriteTimer = null;
       if (this.unloaded) return;
       const current = this.indexer;
       if (!current?.stats || current.revision === this.lastCachedRevision) return;
-      if (!this.backgroundWorkAllowed("cacheWrite", current) || Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS) {
+      if (!this.backgroundWorkAllowed("cacheWrite", current)) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -5924,7 +5947,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const t0 = performance.now();
     try {
       await indexer.whenLocalSettled(false);
-      if (indexer.building || indexer.rebuildPending || !this.backgroundWorkAllowed("cacheWrite", indexer) || Date.now() - this.lastChange < CACHE_PERSIST_QUIET_MS) {
+      if (indexer.building || indexer.rebuildPending || !this.backgroundWorkAllowed("cacheWrite", indexer)) {
         this.scheduleSemanticCacheWrite();
         return;
       }
@@ -5958,6 +5981,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       if (indexer.revision === revision) {
         this.lastCachedRevision = revision;
         indexer.markCacheCommitted(revision);
+        this.clearBackgroundPending("cacheWrite");
       } else this.scheduleSemanticCacheWrite();
       indexer.trimLocalRetention();
       this.refreshRuntimeHealth();
@@ -6269,9 +6293,14 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   async getAssurance(force = false) {
     if (!this.assurance || !this.indexer || !this.schema) throw new Error("Workbench assurance is not ready.");
-    const snapshot = await this.assurance.get(force);
-    this.refreshRuntimeHealth();
-    return snapshot;
+    if (!force) this.markBackgroundPending("assurance");
+    try {
+      const snapshot = await this.assurance.get(force);
+      this.refreshRuntimeHealth();
+      return snapshot;
+    } finally {
+      this.clearBackgroundPending("assurance");
+    }
   }
   async diagnostics() {
     this.markForegroundActivity();
