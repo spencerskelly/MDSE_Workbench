@@ -110,7 +110,9 @@ export class ReversePathDependencyIndex {
    * is mirrored by the matching reverse entry and every reverse entry points back to canonical
    * source-side evidence. Any mismatch means the derived accelerator may be incomplete.
    */
-  consistency(): RelationshipDependencyConsistency {
+  consistency(
+    expected: Iterable<{ sourcePath: string; targetPaths: Iterable<string>; authoredLinkpaths?: Iterable<string> }> = [],
+  ): RelationshipDependencyConsistency {
     const issues: string[] = [];
 
     for (const [source, targets] of this.bySource) {
@@ -140,6 +142,23 @@ export class ReversePathDependencyIndex {
         if (!(this.authoredBySource.get(source)?.has(key) ?? false)) {
           issues.push(`orphan reverse authored entry: ${key} <- ${source}`);
         }
+      }
+    }
+
+    for (const row of expected) {
+      const expectedTargets = new Set([...row.targetPaths].filter((path) => path && path !== row.sourcePath));
+      const actualTargets = this.bySource.get(row.sourcePath) ?? new Set<string>();
+      if (!sameSet(expectedTargets, actualTargets)) {
+        issues.push(`target evidence mismatch for ${row.sourcePath}`);
+      }
+
+      const expectedAuthored = new Set<string>();
+      for (const linkpath of row.authoredLinkpaths ?? []) {
+        for (const key of linkpathKeys(linkpath)) expectedAuthored.add(key);
+      }
+      const actualAuthored = this.authoredBySource.get(row.sourcePath) ?? new Set<string>();
+      if (!sameSet(expectedAuthored, actualAuthored)) {
+        issues.push(`authored evidence mismatch for ${row.sourcePath}`);
       }
     }
 
@@ -178,4 +197,10 @@ function linkpathKeys(value: string): string[] {
   const slash = clean.lastIndexOf("/");
   const base = slash >= 0 ? clean.slice(slash + 1) : clean;
   return base === clean ? [clean] : [clean, base];
+}
+
+function sameSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
 }
