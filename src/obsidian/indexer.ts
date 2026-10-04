@@ -52,6 +52,8 @@ export class Indexer {
   private readonly pendingLocalReads = new Set<Promise<void>>();
   /** Monotonic in-session semantic revision used to coalesce disposable cache writes. */
   private semanticRevision = 0;
+  /** Paths whose derived cache buckets no longer match the last committed cache generation. */
+  private readonly cacheDirtyPaths = new Set<string>();
   /** Cold-build Local Model hydration is deliberately decoupled from core note-graph readiness. */
   private hydrationEpoch = 0;
   private hydrationTask: Promise<void> | null = null;
@@ -109,8 +111,22 @@ export class Indexer {
       }));
   }
 
-  private bumpRevision(): void {
+  private bumpRevision(path?: string): void {
     this.semanticRevision++;
+    if (path) this.cacheDirtyPaths.add(path);
+  }
+
+  get cacheDirtyPathCount(): number {
+    return this.cacheDirtyPaths.size;
+  }
+
+  cacheDirtyPathsSnapshot(): string[] {
+    return [...this.cacheDirtyPaths].sort();
+  }
+
+  /** Clear dirty evidence only if no newer semantic revision appeared during persistence. */
+  markCacheCommitted(revision: number): void {
+    if (this.semanticRevision === revision) this.cacheDirtyPaths.clear();
   }
 
   enableLiveChanges(): void {
@@ -159,6 +175,7 @@ export class Indexer {
     this.fingerprints.clear();
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
+    this.cacheDirtyPaths.clear();
     this.burst = 0;
     this.bumpRevision();
     this.stats = this.makeStats("restored", 0, createdAt);
@@ -253,7 +270,7 @@ export class Indexer {
       this.localReadErrors.delete(path);
       this.fingerprints.delete(path);
       this.localRevision.set(path, (this.localRevision.get(path) ?? 0) + 1);
-      this.bumpRevision();
+      this.bumpRevision(path);
     }
 
     for (let i = 0; i < changedOrAdded.length; i++) {
@@ -317,6 +334,7 @@ export class Indexer {
           repeat: resolved.repeat,
           localRefs: resolved.localRefs,
         });
+        this.cacheDirtyPaths.add(rec.path);
         changed++;
       }
       if (i % CHUNK === CHUNK - 1) await new Promise((r) => window.setTimeout(r, 0));
@@ -421,11 +439,13 @@ export class Indexer {
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
             this.local.set(path, parseLocalModel(text));
             this.localReadErrors.delete(path);
+            this.cacheDirtyPaths.add(path);
             changed = true;
           }
         } catch (e) {
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
             this.localReadErrors.set(path, (e as Error).message);
+            this.cacheDirtyPaths.add(path);
             changed = true;
           }
         } finally {
@@ -478,7 +498,11 @@ export class Indexer {
     this.index = index;
     this.local = local;
     this.fingerprints.clear();
-    for (const [path, fp] of fingerprints) this.fingerprints.set(path, fp);
+    this.cacheDirtyPaths.clear();
+    for (const [path, fp] of fingerprints) {
+      this.fingerprints.set(path, fp);
+      this.cacheDirtyPaths.add(path);
+    }
     this.bumpRevision();
     this.startLocalHydration(localCandidates, epoch);
     // Apply what changed while building. A large backlog (first-time caching, a big pull)
@@ -500,7 +524,7 @@ export class Indexer {
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
     this.applyLocal(path, f instanceof TFile ? f : null);
-    this.bumpRevision();
+    this.bumpRevision(path);
   }
 
   /** Update one governed Local Model region without rebuilding the whole vault. */
@@ -521,12 +545,12 @@ export class Indexer {
         // Local Model body parsing completes after the note/frontmatter apply. Treat that as
         // a second semantic revision so Review/cache consumers cannot mistake pre-parse state
         // for the final semantic state of this edit.
-        this.bumpRevision();
+        this.bumpRevision(path);
       })
       .catch((e) => {
         if (this.localRevision.get(path) !== revision) return;
         this.localReadErrors.set(path, (e as Error).message);
-        this.bumpRevision();
+        this.bumpRevision(path);
       })
       .finally(() => this.pendingLocalReads.delete(task));
     this.pendingLocalReads.add(task);
