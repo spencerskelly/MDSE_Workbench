@@ -436,15 +436,15 @@ export function shardSemanticCache(
   }
 
   const noteShards: NoteCacheShard[] = Array.from({ length: noteBuckets }, (_, index) => ({ generation, index, notes: [] }));
-  for (const rec of cache.notes) noteShards[pathBucket(rec.path, noteBuckets)].notes.push(rec);
+  for (const rec of cache.notes) noteShards[cacheBucketForPath(rec.path, noteBuckets)].notes.push(rec);
   for (const shard of noteShards) shard.notes.sort((a, b) => a.path.localeCompare(b.path));
 
   const localShards: LocalCacheShard[] = Array.from({ length: localBuckets }, (_, index) => ({ generation, index, localRegions: [] }));
-  for (const entry of cache.localRegions) localShards[pathBucket(entry[0], localBuckets)].localRegions.push(entry);
+  for (const entry of cache.localRegions) localShards[cacheBucketForPath(entry[0], localBuckets)].localRegions.push(entry);
   for (const shard of localShards) shard.localRegions.sort((a, b) => a[0].localeCompare(b[0]));
 
   const fingerprintShards: FingerprintCacheShard[] = Array.from({ length: fingerprintBuckets }, (_, index) => ({ generation, index, fingerprints: [] }));
-  for (const entry of Object.entries(cache.fingerprints)) fingerprintShards[pathBucket(entry[0], fingerprintBuckets)].fingerprints.push(entry);
+  for (const entry of Object.entries(cache.fingerprints)) fingerprintShards[cacheBucketForPath(entry[0], fingerprintBuckets)].fingerprints.push(entry);
   for (const shard of fingerprintShards) shard.fingerprints.sort((a, b) => a[0].localeCompare(b[0]));
 
   return {
@@ -540,7 +540,8 @@ function joinLocalShards(manifest: CacheDiskManifest, shards: readonly unknown[]
   return regions;
 }
 
-function pathBucket(path: string, count: number): number {
+export function cacheBucketForPath(path: string, count: number): number {
+  if (!Number.isInteger(count) || count < 1) throw new Error("Cache bucket count must be a positive integer.");
   // FNV-1a 32-bit: fast, deterministic across runtimes, and sufficient for local cache distribution.
   let h = 0x811c9dc5;
   for (let i = 0; i < path.length; i++) {
@@ -548,6 +549,35 @@ function pathBucket(path: string, count: number): number {
     h = Math.imul(h, 0x01000193);
   }
   return (h >>> 0) % count;
+}
+
+export interface CacheDirtyBuckets {
+  fingerprints: number[];
+  notes: number[];
+  localRegions: number[];
+}
+
+/**
+ * Map changed vault paths to the stable cache buckets they can affect. This is intentionally pure:
+ * the persistence layer can later rewrite only these buckets while a manifest commit keeps the
+ * previous complete generation recoverable.
+ */
+export function cacheDirtyBucketsForPaths(
+  paths: Iterable<string>,
+  noteBuckets = 32,
+  localBuckets = 16,
+  fingerprintBuckets = 32,
+): CacheDirtyBuckets {
+  const fp = new Set<number>();
+  const notes = new Set<number>();
+  const local = new Set<number>();
+  for (const path of paths) {
+    fp.add(cacheBucketForPath(path, fingerprintBuckets));
+    notes.add(cacheBucketForPath(path, noteBuckets));
+    local.add(cacheBucketForPath(path, localBuckets));
+  }
+  const sorted = (s: Set<number>) => [...s].sort((a, b) => a - b);
+  return { fingerprints: sorted(fp), notes: sorted(notes), localRegions: sorted(local) };
 }
 
 function isDiskManifest(v: unknown): v is CacheDiskManifest {
