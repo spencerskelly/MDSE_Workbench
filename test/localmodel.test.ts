@@ -282,3 +282,34 @@ test("the 0.2 schema fixture agrees with the parser's constants", () => {
   assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->"/);
   for (const k of ["part-", "ep-", "conn-", "flow-"]) assert.ok(yaml.includes(`prefix: "${k}"`));
 });
+
+
+test("Local Model fingerprint ignores unrelated note text but changes with governed semantics", () => {
+  const region = [
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### Board",
+    "- definition: [[Board]]",
+    "^part-20261003170000002skellyspencer",
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const a = ["# Before A", region, "After A"].join("\n");
+  const b = ["# Different heading", region, "Completely different body after"].join("\n");
+  assert.equal(localModelSourceFingerprint(a), localModelSourceFingerprint(b));
+
+  const changed = b.replace("- definition: [[Board]]", "- definition: [[Other Board]]");
+  assert.notEqual(localModelSourceFingerprint(a), localModelSourceFingerprint(changed));
+});
+
+test("Local Model fingerprint includes duplicate markers that affect validation", () => {
+  const valid = [
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+  const duplicate = valid + "\ntext outside\n<!-- MDSE:LOCAL-MODEL END -->";
+  assert.notEqual(localModelSourceFingerprint(valid), localModelSourceFingerprint(duplicate));
+  assert.equal(parseLocalModel(duplicate)?.sourceFingerprint, localModelSourceFingerprint(duplicate));
+});
