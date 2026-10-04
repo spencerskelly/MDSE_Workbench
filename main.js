@@ -1398,7 +1398,8 @@ function planReconciliation(cached, current) {
   for (const path of [...cached.keys()].sort()) if (!current.has(path)) deleted.push(path);
   return { unchanged, changed, added, deleted };
 }
-function reconciliationMode(plan, incrementalLimit = 300) {
+var MAX_INCREMENTAL_RECONCILIATION_PATHS = 300;
+function reconciliationMode(plan, incrementalLimit = MAX_INCREMENTAL_RECONCILIATION_PATHS) {
   if (!Number.isInteger(incrementalLimit) || incrementalLimit < 1) throw new Error("incrementalLimit must be a positive integer.");
   const changed = plan.changed.length + plan.added.length + plan.deleted.length;
   if (!changed) return "none";
