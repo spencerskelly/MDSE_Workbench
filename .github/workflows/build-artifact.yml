@@ -3,6 +3,8 @@ name: Build Workbench artifact
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,12 +24,14 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Sync checked-in plugin artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           mkdir -p vault/.obsidian/plugins/mdse-workbench
           cp main.js vault/.obsidian/plugins/mdse-workbench/main.js
           cp manifest.json vault/.obsidian/plugins/mdse-workbench/manifest.json
           cp styles.css vault/.obsidian/plugins/mdse-workbench/styles.css
       - name: Commit built artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
