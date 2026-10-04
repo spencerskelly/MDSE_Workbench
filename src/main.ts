@@ -90,6 +90,7 @@ export default class MdseWorkbench extends Plugin {
   private healthRefreshTimer: number | null = null;
   private localBackgroundTimer: number | null = null;
   private cacheWriteTimer: number | null = null;
+  private cacheWriteTask: Promise<void> | null = null;
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
   private lastCacheWriteError: string | null = null;
@@ -410,7 +411,16 @@ export default class MdseWorkbench extends Plugin {
         this.scheduleSemanticCacheWrite();
         return;
       }
-      void this.persistSemanticCache();
+      if (this.cacheWriteTask) return;
+      let task: Promise<void>;
+      task = this.persistSemanticCache().finally(() => {
+        if (this.cacheWriteTask === task) this.cacheWriteTask = null;
+        const latest = this.indexer;
+        if (!this.unloaded && latest?.stats && latest.revision !== this.lastCachedRevision) {
+          this.scheduleSemanticCacheWrite();
+        }
+      });
+      this.cacheWriteTask = task;
     }, delay);
   }
 
@@ -679,6 +689,10 @@ export default class MdseWorkbench extends Plugin {
       window.clearTimeout(this.cacheWriteTimer);
       this.cacheWriteTimer = null;
     }
+    if (this.cacheWriteTask) {
+      new Notice("MDSE Workbench: cache persistence is finishing. Try Clear semantic cache again in a moment.");
+      return;
+    }
     try {
       await clearWorkbenchCache(this.app);
       this.lastCacheWriteAt = null;
@@ -809,7 +823,7 @@ export default class MdseWorkbench extends Plugin {
       ["Warm restore", this.lastWarmRestore ?? "not attempted"],
       ["Semantic cache", this.lastCacheWriteError ? `write failed: ${this.lastCacheWriteError}` : this.lastCacheWriteAt ? `saved ${new Date(this.lastCacheWriteAt).toLocaleTimeString()}` : "not written yet", !!this.lastCacheWriteError],
       ["Semantic cache write", this.lastCacheWriteMs === null ? "not measured" : `${this.lastCacheWriteMs} ms`],
-      ["Semantic cache persistence", this.indexer!.revision === this.lastCachedRevision ? "current" : "pending/coalesced"],
+      ["Semantic cache persistence", this.cacheWriteTask ? "writing" : this.indexer!.revision === this.lastCachedRevision ? "current" : "pending/coalesced"],
       ["Cache dirty paths", String(this.indexer!.cacheDirtyPathCount)],
       ["Cache dirty buckets", `${dirtyBuckets.notes.length} note · ${dirtyBuckets.localRegions.length} local · ${dirtyBuckets.fingerprints.length} fingerprint`],
     ];
