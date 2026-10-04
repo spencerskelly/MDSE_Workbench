@@ -198,3 +198,37 @@ export function parseSchema(relationshipsYaml: unknown, elementTypesYaml: unknow
 export function editingBlocked(schema: Schema): boolean {
   return compareVersions(schema.relationshipsVersion, MIN_RELATIONSHIPS_VERSION) < 0;
 }
+
+
+/**
+ * Deterministic semantic fingerprint for cache compatibility (W-343).
+ * It intentionally derives from the parsed rules, not YAML bytes, so comments/formatting do
+ * not invalidate the cache while any rule/class/property change does.
+ */
+export function schemaSignature(schema: Schema): string {
+  const endpoint = (v: Endpoint) => v === "any" ? "any" : v.join(",");
+  const rows = [
+    `relationshipsVersion=${schema.relationshipsVersion}`,
+    `elementTypesVersion=${schema.elementTypesVersion}`,
+    `common=${schema.commonProperties.join(",")}`,
+    `optional=${schema.optionalProperties.join(",")}`,
+    `translatedOnly=${schema.translatedOnlyProperties.join(",")}`,
+    ...schema.classes.map((c) => `class|${c.name}|${c.prefix ?? ""}|${c.subtypes.join(",")}`),
+    ...schema.relationships.map((r) =>
+      [
+        "rel", r.order, r.field, r.inverse ?? "", r.kind,
+        endpoint(r.from), endpoint(r.to),
+        r.sameClass ? "1" : "0",
+        r.excludePairs.map((p) => p.join(">")).join(","),
+        r.provisional ? "1" : "0",
+        r.temporary ? "1" : "0",
+      ].join("|"),
+    ),
+  ].join("\n");
+  let h = 2166136261;
+  for (const ch of rows) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
