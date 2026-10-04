@@ -12,6 +12,7 @@ import { CooperativeBudget, UI_WORK_SLICE_BUDGET_MS } from "../core/cooperative"
 import { MetadataChangeBurst } from "../core/metadata-burst";
 import { requeueHydrationPaths } from "../core/hydration-cancel";
 import { SingleFlightByKey } from "../core/single-flight";
+import { canPublishOccurrence, shouldPauseBackgroundOccurrence } from "../core/occurrence-hydration";
 import { DEFAULT_LOCAL_REGION_RETENTION_LIMIT, localRegionEvictions } from "../core/local-retention";
 import { summarizeHydrationCosts, type HydrationCost, type HydrationCostSummary } from "../core/hydration-metrics";
 import { hasPendingSourceReconciliation } from "../core/source-reconciliation";
@@ -411,12 +412,12 @@ export class Indexer {
         const task = (async () => {
           try {
             const { text, readStartedAt, readFinishedAt } = await this.occurrenceBody(path, file);
-            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            if (!canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) return;
             this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.bumpRevision(path);
           } catch (e) {
-            if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
+            if (!canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) return;
             this.localReadErrors.set(path, (e as Error).message);
             this.bumpRevision(path);
           } finally {
@@ -962,10 +963,12 @@ export class Indexer {
       const hydrationBudget = new CooperativeBudget(WORK_SLICE_MS);
       for (let i = 0; i < files.length; i++) {
         if (epoch !== this.hydrationEpoch) return;
-        while (
-          !this.hydrationDemanded &&
-          (!this.backgroundIdle() || this.liveUpdatePending > 0 || this.requestedLocalReads.size > 0)
-        ) {
+        while (shouldPauseBackgroundOccurrence({
+          demanded: this.hydrationDemanded,
+          backgroundIdle: this.backgroundIdle(),
+          liveUpdatePending: this.liveUpdatePending,
+          requestedActive: this.requestedLocalReads.size,
+        })) {
           await new Promise((r) => window.setTimeout(r, 250));
           if (epoch !== this.hydrationEpoch) return;
         }
@@ -976,14 +979,14 @@ export class Indexer {
         this.localRevision.set(path, revision);
         try {
           const { text, readStartedAt, readFinishedAt } = await this.occurrenceBody(path, file);
-          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+          if (canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) {
             this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.cacheDirtyPaths.add(path);
             changed = true;
           }
         } catch (e) {
-          if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
+          if (canPublishOccurrence(epoch, this.hydrationEpoch, revision, this.localRevision.get(path))) {
             this.localReadErrors.set(path, (e as Error).message);
             this.cacheDirtyPaths.add(path);
             changed = true;
