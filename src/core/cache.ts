@@ -10,6 +10,13 @@ import { ModelIndex, type NoteRecord } from "./model";
 import type { Schema } from "./schema";
 
 export const CACHE_FORMAT_VERSION = 1;
+/** Bump when semantic parsing/resolution meaning changes even if the JSON shape does not. */
+export const CACHE_SEMANTIC_VERSION = 1;
+
+export interface CacheScope {
+  /** Binds disposable state to one initialized MDSE vault identity. */
+  vaultUid: string;
+}
 
 /** Cheap evidence used to decide which files require reconciliation after warm restore. */
 export interface FileFingerprint {
@@ -21,6 +28,8 @@ export interface FileFingerprint {
 
 export interface CacheCompatibility {
   formatVersion: number;
+  semanticVersion: number;
+  vaultUid: string;
   relationshipsVersion: string;
   elementTypesVersion: string;
   /** Reader contract, not the active writer version. */
@@ -69,9 +78,11 @@ export interface RestoredSemanticState {
   fingerprints: Map<string, FileFingerprint>;
 }
 
-export function expectedCompatibility(schema: Schema): CacheCompatibility {
+export function expectedCompatibility(schema: Schema, scope: CacheScope): CacheCompatibility {
   return {
     formatVersion: CACHE_FORMAT_VERSION,
+    semanticVersion: CACHE_SEMANTIC_VERSION,
+    vaultUid: scope.vaultUid,
     relationshipsVersion: schema.relationshipsVersion,
     elementTypesVersion: schema.elementTypesVersion,
     localModelReadableVersions: [...READABLE_VERSIONS],
@@ -83,6 +94,8 @@ export function cacheCompatibilityProblem(cache: unknown, expected: CacheCompati
   const header = cache.header;
   if (!isObject(header)) return "cache header is missing";
   if (header.formatVersion !== expected.formatVersion) return `cache format ${String(header.formatVersion)} != ${expected.formatVersion}`;
+  if (header.semanticVersion !== expected.semanticVersion) return `semantic cache contract ${String(header.semanticVersion)} != ${expected.semanticVersion}`;
+  if (header.vaultUid !== expected.vaultUid) return `vault identity ${String(header.vaultUid)} != ${expected.vaultUid}`;
   if (header.relationshipsVersion !== expected.relationshipsVersion) return `relationships schema ${String(header.relationshipsVersion)} != ${expected.relationshipsVersion}`;
   if (header.elementTypesVersion !== expected.elementTypesVersion) return `element-types schema ${String(header.elementTypesVersion)} != ${expected.elementTypesVersion}`;
   if (!sameStrings(header.localModelReadableVersions, expected.localModelReadableVersions)) return "Local Model reader contract changed";
@@ -94,6 +107,7 @@ export function serializeSemanticState(
   local: LocalModelIndex,
   fingerprints: ReadonlyMap<string, FileFingerprint>,
   schema: Schema,
+  scope: CacheScope,
   producerVersion: string,
   createdAt = Date.now(),
 ): SemanticCache {
@@ -104,7 +118,7 @@ export function serializeSemanticState(
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([path, region]) => [path, serializeRegion(region)]);
   return {
-    header: { ...expectedCompatibility(schema), createdAt, producerVersion },
+    header: { ...expectedCompatibility(schema, scope), createdAt, producerVersion },
     fingerprints: Object.fromEntries([...fingerprints.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
     notes,
     localRegions,
@@ -115,8 +129,8 @@ export function serializeSemanticState(
  * Strictly restore a cache into fresh indexes. Any malformed structure throws and the caller
  * must discard/rebuild the cache rather than trying to "repair" derived semantics.
  */
-export function restoreSemanticState(cache: unknown, schema: Schema): RestoredSemanticState {
-  const problem = cacheCompatibilityProblem(cache, expectedCompatibility(schema));
+export function restoreSemanticState(cache: unknown, schema: Schema, scope: CacheScope): RestoredSemanticState {
+  const problem = cacheCompatibilityProblem(cache, expectedCompatibility(schema, scope));
   if (problem) throw new Error(`Incompatible semantic cache: ${problem}.`);
   if (!isObject(cache) || !Array.isArray(cache.notes) || !Array.isArray(cache.localRegions) || !isObject(cache.fingerprints)) {
     throw new Error("Malformed semantic cache payload.");
