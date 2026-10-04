@@ -440,6 +440,15 @@ export class Indexer {
 
   setSchema(schema: Schema): void {
     this.schema = schema;
+    // Relationship definitions change how NoteRecord fields become graph edges and therefore
+    // invalidate every relationship-derived accelerator. Do not leave the previous schema's
+    // ModelIndex/readiness visible while the required full rebuild is being scheduled/run.
+    this.index = new ModelIndex(schema);
+    this.relationshipDependencies.clear();
+    this.relationshipReresolutionHistoryValue = [];
+    this.stats = null;
+    this.cacheDirtyPaths.clear();
+    this.bumpRevision();
   }
 
   relationshipDependentsOf(paths: Iterable<string>): string[] {
