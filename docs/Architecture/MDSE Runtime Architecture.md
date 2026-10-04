@@ -77,12 +77,12 @@ On warm startup:
 
 1. restore compatible derived state;
 2. compare current files to cached fingerprints;
-3. if the Markdown path set is unchanged, parse only changed files in bounded batches;
-4. if any Markdown path was added/deleted/renamed, use the proven full rebuild until the cache retains sufficient authored-link information to safely re-resolve unchanged wikilinks;
-5. update affected forward/reverse relationships and Local Model references;
+3. parse changed/new files in bounded batches and remove deleted paths;
+4. when the path set changes, re-resolve cached authored relationship links for unchanged notes through Obsidian's current metadata cache rather than rereading those Markdown bodies;
+5. update affected forward/reverse relationships, broken references, duplicate-source evidence and Local Model frontmatter targets;
 6. yield between bounded work batches so Obsidian remains responsive.
 
-This conservative path-set rule is intentional: Workbench currently caches resolved relationship targets. A new/deleted/renamed note can change how an unchanged wikilink resolves. Correctness wins over an unsafe incremental shortcut. A later cache revision may retain authored link evidence and safely narrow that fallback.
+Semantic-cache v2 retains the authored relationship field, original wikilink text and Obsidian linkpath for each governed relationship link. This means a new/deleted/renamed note can safely trigger metadata re-resolution of otherwise unchanged notes without assuming that the old resolved target is still correct. Large change sets still use the proven full chunked rebuild.
 
 A large Git pull may therefore choose a full chunked rebuild, but it must not force the UI to wait for a single unbroken processing loop.
 
@@ -250,12 +250,14 @@ Targets are acceptance budgets, not promises until measured on the real model.
 
 RTA-1 is implemented at source level: Workbench exposes explicit startup/indexing/ready status and retains the current chunked full rebuild as the safe fallback.
 
-RTA-2 foundation is now implemented through the save-only runtime boundary:
-- `src/core/cache.ts` defines cache format v1 plus semantic-parser contract v1, vault binding, parsed-schema semantic signatures, deterministic serialization/restoration, bounded note/Local Model shards, corruption refusal, file-fingerprint reconciliation planning and the conservative reconciliation-mode policy;
+RTA-2 foundation is implemented through the save-only runtime boundary, and RTA-3 has advanced into bounded warm-reconciliation preview:
+- `src/core/cache.ts` defines cache format v1 plus semantic-parser contract v2, vault binding, parsed-schema semantic signatures, deterministic serialization/restoration, bounded note/Local Model shards, corruption refusal, file-fingerprint reconciliation planning and the bounded reconciliation policy;
 - `src/core/cache-storage.ts` uses two fixed A/B slots with unique generation tokens. Each target slot writes shards first and its manifest last; a partial/torn target slot cannot displace the opposite complete slot, and disk usage is bounded;
 - `src/obsidian/cache.ts` is the thin Obsidian storage adapter;
 - Workbench now writes the cache **after it is already Ready**, after a short quiet period. Cache-write failure is diagnostic only and cannot make the model unavailable;
-- **MDSE Workbench: Inspect semantic cache** performs a read-only restore/compatibility/reconciliation check without allowing startup to trust the cache yet;
+- semantic-cache v2 retains authored relationship-link evidence, allowing added/deleted/renamed Markdown paths to reconcile safely by re-resolving unchanged notes through Obsidian metadata instead of rereading their bodies;
+- **MDSE Workbench: Inspect semantic cache** performs a read-only restore/compatibility/reconciliation check;
+- an opt-in **Warm cache preview** can now restore validated cache state and reconcile bounded path/content changes after Obsidian's metadata pass; controlled bases keep this off until representative runtime acceptance passes;
 - the indexer now discards pre-build metadata-event backlog at the start of a full build because that state is already captured by the build, preventing a redundant second whole-vault rebuild after Obsidian's startup metadata burst;
 - diagnostics report startup quiet-wait time, index time and cache-write time;
 - generated Base Vaults ignore `.obsidian/plugins/mdse-workbench/cache/`.
