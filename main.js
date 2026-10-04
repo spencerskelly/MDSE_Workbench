@@ -2544,6 +2544,30 @@ function localRegionEvictions(oldestToNewest, protectedPaths, limit = DEFAULT_LO
   return evict;
 }
 
+// src/core/hydration-metrics.ts
+function summarizeHydrationCosts(costs) {
+  const rows = [...costs];
+  if (!rows.length) return { owners: 0, averageMs: 0, maxMs: 0, maxPath: null, averageReadMs: 0, averageParseMs: 0 };
+  let total = 0;
+  let read = 0;
+  let parse = 0;
+  let max = rows[0];
+  for (const row of rows) {
+    total += row.totalMs;
+    read += row.readMs;
+    parse += row.parseMs;
+    if (row.totalMs > max.totalMs || row.totalMs === max.totalMs && row.path.localeCompare(max.path) < 0) max = row;
+  }
+  return {
+    owners: rows.length,
+    averageMs: total / rows.length,
+    maxMs: max.totalMs,
+    maxPath: max.path,
+    averageReadMs: read / rows.length,
+    averageParseMs: parse / rows.length
+  };
+}
+
 // src/core/source-reconciliation.ts
 function hasPendingSourceReconciliation(state) {
   return state.building || state.rebuildPending || state.livePending > 0 || state.liveApplyTimerPending || state.liveApplyActive || state.relationshipResolvePending || state.relationshipResolveTimerPending || state.relationshipResolveActive;
@@ -2600,6 +2624,8 @@ var Indexer = class {
     this.hydrationStartedAt = null;
     this.lastHydrationMsValue = null;
     this.lastHydrationCandidatesValue = 0;
+    /** Latest per-owner occurrence hydration cost; one row per owner, not an unbounded history. */
+    this.hydrationCosts = /* @__PURE__ */ new Map();
     /** Read failures are scoped findings; they never make ordinary Markdown unusable. */
     this.localReadErrors = /* @__PURE__ */ new Map();
     /** Hydration/use recency for bounded steady-state Local Model retention. */
@@ -2668,6 +2694,13 @@ var Indexer = class {
   get lastLocalHydrationCandidates() {
     return this.lastHydrationCandidatesValue;
   }
+  get localHydrationCostSummary() {
+    return summarizeHydrationCosts(this.hydrationCosts.values());
+  }
+  hydrationCost(path) {
+    const row = this.hydrationCosts.get(path);
+    return row ? { ...row } : void 0;
+  }
   get localReadErrorCount() {
     return this.localReadErrors.size;
   }
@@ -2678,6 +2711,20 @@ var Indexer = class {
       message: `Could not read this note's Local Model body: ${message}`,
       path
     }));
+  }
+  measureHydration(path, text, readStartedAt, readFinishedAt) {
+    const parseStartedAt = performance.now();
+    const region = parseLocalModel(text);
+    const parseFinishedAt = performance.now();
+    this.hydrationCosts.set(path, {
+      path,
+      readMs: readFinishedAt - readStartedAt,
+      parseMs: parseFinishedAt - parseStartedAt,
+      totalMs: parseFinishedAt - readStartedAt,
+      bytes: new TextEncoder().encode(text).byteLength,
+      records: region?.records.length ?? 0
+    });
+    return region;
   }
   setLocalRegion(path, region) {
     this.local.set(path, region);
@@ -2804,9 +2851,11 @@ var Indexer = class {
           this.localRevision.set(path, revision);
           this.requestedHydrationPaths.add(path);
           try {
+            const readStartedAt = performance.now();
             const text = await this.app.vault.cachedRead(file);
+            const readFinishedAt = performance.now();
             if (epoch !== this.hydrationEpoch || this.localRevision.get(path) !== revision) return;
-            this.setLocalRegion(path, parseLocalModel(text));
+            this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.bumpRevision(path);
           } catch (e) {
@@ -2853,6 +2902,7 @@ var Indexer = class {
     this.requestedHydrationFlights.clear();
     this.requestedHydrationPaths.clear();
     this.local = new LocalModelIndex();
+    this.hydrationCosts.clear();
     this.coldLocalPaths.clear();
     this.localRetentionOrder.clear();
     this.localRetentionClock = 0;
@@ -3164,9 +3214,11 @@ var Indexer = class {
         const revision = (this.localRevision.get(path) ?? 0) + 1;
         this.localRevision.set(path, revision);
         try {
+          const readStartedAt = performance.now();
           const text = await this.app.vault.cachedRead(file);
+          const readFinishedAt = performance.now();
           if (epoch === this.hydrationEpoch && this.localRevision.get(path) === revision) {
-            this.setLocalRegion(path, parseLocalModel(text));
+            this.setLocalRegion(path, this.measureHydration(path, text, readStartedAt, readFinishedAt));
             this.localReadErrors.delete(path);
             this.cacheDirtyPaths.add(path);
             changed = true;
@@ -5731,6 +5783,14 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       ["Authored links", String(s.links)],
       ["Local Model hydration", this.indexer.localHydrationPending ? `${this.indexer.localHydrationPending} note(s) pending` : "settled"],
       ["Local Model read errors", String(this.indexer.localReadErrorCount), this.indexer.localReadErrorCount > 0],
+      ["Hydration cost / Object", (() => {
+        const h = this.indexer.localHydrationCostSummary;
+        return h.owners ? `${h.averageMs.toFixed(2)} ms avg \xB7 read ${h.averageReadMs.toFixed(2)} ms \xB7 parse ${h.averageParseMs.toFixed(2)} ms \xB7 ${h.owners} owner(s)` : "not measured";
+      })()],
+      ["Slowest hydrated Object", (() => {
+        const h = this.indexer.localHydrationCostSummary;
+        return h.maxPath ? `${h.maxPath} \xB7 ${h.maxMs.toFixed(2)} ms` : "not measured";
+      })()],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1e3).toFixed(2)} s`],
       ["Time to core ready", this.lastTimeToCoreReadyMs === null ? "not measured" : `${(this.lastTimeToCoreReadyMs / 1e3).toFixed(2)} s`],
       ["Time to occurrence ready", this.lastTimeToOccurrenceReadyMs === null ? this.indexer.localHydrationPending ? "pending" : "not measured" : `${(this.lastTimeToOccurrenceReadyMs / 1e3).toFixed(2)} s`],
