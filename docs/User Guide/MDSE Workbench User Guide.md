@@ -26,8 +26,30 @@ Start with:
 - **MDSE Workbench: Rebuild index** after a large pull/import or when the displayed model appears stale.
 - **MDSE Workbench: Open Review** to inspect model-health findings.
 - **MDSE Workbench: Check Local Model** when validating imported or heavily edited Local Model content.
+- **MDSE Workbench: Inspect semantic cache** in a development/integration vault when validating the W-343/W-344 runtime candidate.
 
-Workbench normally updates its index incrementally as files change.
+Workbench normally updates its semantic index incrementally as files change. The vault's Markdown/YAML remains authoritative; Workbench's index, semantic cache, findings and generated views are derived and disposable.
+
+### Runtime status
+
+Candidate Workbench builds expose startup state in the status bar:
+
+- **starting** — schemas/runtime are being prepared;
+- **waiting for vault** — Workbench is deliberately letting Obsidian finish its own metadata-cache activity;
+- **indexing** — the semantic model is being built or reconciled;
+- **ready** — Workbench queries/views can be used.
+
+A missing or invalid Workbench cache is a performance/recovery condition, not a model failure. Workbench must be able to rebuild from the vault.
+
+### Semantic cache candidate
+
+**Candidate — W-343/W-344 / RTA-2 and RTA-3.**
+
+The development line writes a local, Git-ignored semantic cache after Workbench is already Ready. The cache is bound to the vault identity and schema/parser contract and uses two crash-safe A/B slots. It may be deleted at any time.
+
+**Warm cache preview** is an explicit pre-release setting and is OFF by default. When enabled in an integration vault, Workbench may restore a validated cache and reconcile a small set of changed existing files. Added/deleted/renamed Markdown paths deliberately use the full-build fallback because such path changes can alter how unchanged wikilinks resolve.
+
+Do not enable Warm cache preview in a controlled release merely because the setting exists; it remains a validation feature until the runtime acceptance sheet passes.
 
 ## 2. Opening a note from a Canvas
 
@@ -231,7 +253,7 @@ Do not:
 
 Try these in order:
 
-1. **Rebuild index.**
+1. **Rebuild index.** If a cache-related problem is suspected in a candidate build, **Inspect semantic cache** first; deleting the disposable cache is also a supported recovery action.
 2. Open the source note/occurrence and confirm the underlying model content.
 3. Run **Check Local Model** for occurrence/interface/connection issues.
 4. Open **Review** for broken or off-rule relationships.
@@ -243,4 +265,4 @@ Try these in order:
 
 The engineering Base Vault may still pin an older Workbench while a newer candidate is being developed. The pinned version shown in **Enabled Plugin Stack** is the runtime truth.
 
-The current WB-106 development line adds structured Local Model editing and the Internal occurrence-native view. Those capabilities are not considered released until the Workbench build passes its tests/build, is copied into the controlled runtime payload, the plugin lock and release manifest are updated, and the release checker passes.
+The current WB-106 development line adds structured Local Model editing, the Internal occurrence-native view, and the W-343/W-344 runtime architecture. Save-only semantic-cache behavior and opt-in warm-cache preview are candidate capabilities, not released merely because their source exists. Promotion still requires the Workbench test/typecheck/build gate, runtime acceptance on representative vaults, controlled payload/lock/release updates, and release-checker success.
