@@ -27,8 +27,8 @@ Do not promote warm restore because source exists. The candidate must first pass
 
 ## B. Cache is derived and disposable
 
-- [ ] Delete the entire cache directory while Obsidian is closed.
-- [ ] Reopen with Warm cache preview OFF.
+- [ ] Run **MDSE Workbench: Clear semantic cache** and confirm that it reports only derived state was removed.
+- [ ] Close/reopen with Warm cache preview OFF.
 - [ ] Workbench performs a normal full build and becomes Ready.
 - [ ] No Markdown/YAML model file changed because the cache was missing.
 - [ ] A new cache is written after Ready.
@@ -111,7 +111,7 @@ While Workbench is waiting/indexing, invoke **Rebuild index**:
 ## J. Recovery and model-authority proof
 
 - [ ] Disable Workbench: model Markdown and native block links remain usable.
-- [ ] Delete cache: no model data is lost.
+- [ ] Use **Clear semantic cache**: no model data is lost and no arbitrary `.obsidian` cleanup is required.
 - [ ] Put malformed JSON in both cache manifests: Workbench falls back safely; no model file is rewritten.
 - [ ] Put an unsupported/future Local Model version in a test note: Markdown remains readable and structured handling is refused rather than guessed.
 - [ ] `git diff` shows no semantic model edit caused merely by startup, cache restore, cache inspection or cache recovery.
