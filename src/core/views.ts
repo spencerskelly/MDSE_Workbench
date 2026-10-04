@@ -720,6 +720,8 @@ export function profileNeedsLocalOccurrences(profile: ViewProfile): boolean {
 }
 
 export function withLocalOccurrences(index: ModelIndex, local: LocalModelIndex, resolve: ResolvePath, base: ViewResult, profile: ViewProfile): ViewResult {
+  // Definition-only profiles must remain independent from Local Model parsing/hydration.
+  if (!profileNeedsLocalOccurrences(profile)) return base;
   switch (profile.name) {
     case "Internal": return withLocalInternal(index, local, resolve, base, profile);
     case "Structure": return withLocalStructure(index, local, base, profile);
