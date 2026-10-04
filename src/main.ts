@@ -221,8 +221,9 @@ export default class MdseWorkbench extends Plugin {
     this.cacheWriteTimer = window.setTimeout(() => {
       this.cacheWriteTimer = null;
       if (this.unloaded) return;
-      if (Date.now() - this.lastChange < 1500) {
-        this.scheduleSemanticCacheWrite();
+      const indexer = this.indexer;
+      if (!indexer?.stats || indexer.building || indexer.rebuildPending || Date.now() - this.lastChange < 1500) {
+        if (indexer?.stats) this.scheduleSemanticCacheWrite();
         return;
       }
       void this.persistSemanticCache();
@@ -236,6 +237,10 @@ export default class MdseWorkbench extends Plugin {
     const t0 = performance.now();
     try {
       await indexer.whenLocalSettled();
+      if (indexer.building || indexer.rebuildPending) {
+        this.scheduleSemanticCacheWrite();
+        return;
+      }
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
       const cache = serializeSemanticState(
@@ -328,14 +333,20 @@ export default class MdseWorkbench extends Plugin {
 
       this.registerEvent(
         this.app.metadataCache.on("changed", (file) => {
-          if (!schemaPaths().includes(file.path)) this.indexer?.changed(file.path);
+          if (schemaPaths().includes(file.path)) return;
+          this.indexer?.changed(file.path);
+          if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         }),
       );
-      this.registerEvent(this.app.vault.on("delete", (f) => this.indexer?.removed(f.path)));
+      this.registerEvent(this.app.vault.on("delete", (f) => {
+        this.indexer?.removed(f.path);
+        if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
+      }));
       this.registerEvent(
         this.app.vault.on("rename", (f, old) => {
           this.indexer?.removed(old);
           this.indexer?.changed(f.path);
+          if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         }),
       );
       this.registerEvent(
