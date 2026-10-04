@@ -425,6 +425,12 @@ export const CACHE_MANIFEST_VERSION = 3;
 export interface CacheShardSet {
   count: number;
   total: number;
+  /**
+   * Expected generation token for each fixed-path shard. This lets publication reuse an
+   * unchanged shard already present in the inactive slot without weakening mixed-write checks.
+   * Older manifests may omit this and implicitly expect the manifest generation for every shard.
+   */
+  generations?: string[];
 }
 
 export interface CacheDiskManifest {
@@ -499,9 +505,9 @@ export function shardSemanticCache(
       sequence: 0,
       generation,
       header: cache.header,
-      fingerprints: { count: fingerprintShards.length, total: Object.keys(cache.fingerprints).length },
-      notes: { count: noteShards.length, total: cache.notes.length },
-      localRegions: { count: localShards.length, total: cache.localRegions.length },
+      fingerprints: { count: fingerprintShards.length, total: Object.keys(cache.fingerprints).length, generations: fingerprintShards.map(() => generation) },
+      notes: { count: noteShards.length, total: cache.notes.length, generations: noteShards.map(() => generation) },
+      localRegions: { count: localShards.length, total: cache.localRegions.length, generations: localShards.map(() => generation) },
     },
     fingerprintShards,
     noteShards,
@@ -553,7 +559,7 @@ function joinFingerprintShards(manifest: CacheDiskManifest, shards: readonly unk
   if (shards.length !== manifest.fingerprints.count) throw new Error("Semantic cache fingerprint shard count mismatch.");
   const ordered = new Array<FingerprintCacheShard>(shards.length);
   for (const raw of shards) {
-    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.fingerprints)) {
+    if (!isObject(raw) || raw.generation !== expectedShardGeneration(manifest.fingerprints, raw.index, manifest.generation) || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.fingerprints)) {
       throw new Error("Malformed semantic cache fingerprint shard.");
     }
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache fingerprint shard index.");
@@ -577,7 +583,7 @@ function joinNoteShards(manifest: CacheDiskManifest, shards: readonly unknown[])
   if (shards.length !== manifest.notes.count) throw new Error("Semantic cache note shard count mismatch.");
   const ordered = new Array<NoteCacheShard>(shards.length);
   for (const raw of shards) {
-    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.notes)) {
+    if (!isObject(raw) || raw.generation !== expectedShardGeneration(manifest.notes, raw.index, manifest.generation) || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.notes)) {
       throw new Error("Malformed semantic cache note shard.");
     }
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache note shard index.");
@@ -592,7 +598,7 @@ function joinLocalShards(manifest: CacheDiskManifest, shards: readonly unknown[]
   if (shards.length !== manifest.localRegions.count) throw new Error("Semantic cache Local Model shard count mismatch.");
   const ordered = new Array<LocalCacheShard>(shards.length);
   for (const raw of shards) {
-    if (!isObject(raw) || raw.generation !== manifest.generation || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.localRegions)) {
+    if (!isObject(raw) || raw.generation !== expectedShardGeneration(manifest.localRegions, raw.index, manifest.generation) || typeof raw.index !== "number" || !Number.isInteger(raw.index) || raw.index < 0 || raw.index >= shards.length || !Array.isArray(raw.localRegions)) {
       throw new Error("Malformed semantic cache Local Model shard.");
     }
     if (ordered[raw.index]) throw new Error("Duplicate semantic cache Local Model shard index.");
@@ -649,7 +655,15 @@ function isDiskManifest(v: unknown): v is CacheDiskManifest {
 }
 
 function isShardSet(v: unknown): v is CacheShardSet {
-  return isObject(v) && Number.isInteger(v.count) && Number.isInteger(v.total) && (v.count as number) >= 0 && (v.total as number) >= 0;
+  if (!isObject(v) || !Number.isInteger(v.count) || !Number.isInteger(v.total) || (v.count as number) < 0 || (v.total as number) < 0) return false;
+  if (v.generations === undefined) return true;
+  return Array.isArray(v.generations) &&
+    v.generations.length === v.count &&
+    v.generations.every((generation) => typeof generation === "string" && generation.length > 0);
+}
+
+function expectedShardGeneration(set: CacheShardSet, index: number, fallback: string): string {
+  return set.generations?.[index] ?? fallback;
 }
 
 
