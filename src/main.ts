@@ -83,6 +83,7 @@ export default class MdseWorkbench extends Plugin {
   writer: RelationshipWriter | null = null;
   detail: NoteDetailPanel | null = null;
   private statusEl: HTMLElement | null = null;
+  private healthRefreshTimer: number | null = null;
   private cacheWriteTimer: number | null = null;
   private lastCacheWriteAt: number | null = null;
   private lastCacheWriteMs: number | null = null;
@@ -211,6 +212,7 @@ export default class MdseWorkbench extends Plugin {
     this.register(() => {
       this.unloaded = true;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
+      if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
     });
     this.app.workspace.onLayoutReady(() => void this.start(false));
   }
@@ -266,6 +268,21 @@ export default class MdseWorkbench extends Plugin {
       "This view is lightweight: it reports already-known runtime state and does not trigger a whole-model assurance scan.",
       "Engineering findings are not treated as a runtime failure; open Review when you want the current global assurance results.",
     ]).open();
+  }
+
+  private scheduleRuntimeHealthRefresh(): void {
+    this.refreshRuntimeHealth();
+    if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
+    this.healthRefreshTimer = window.setTimeout(() => {
+      this.healthRefreshTimer = null;
+      this.refreshRuntimeHealth();
+      const indexer = this.indexer;
+      if (indexer && this.isReady() && indexer.liveUpdatePending + indexer.localHydrationPending > 0) {
+        void indexer.whenLocalSettled().then(() => {
+          if (!this.unloaded && this.indexer === indexer) this.refreshRuntimeHealth();
+        });
+      }
+    }, 400);
   }
 
   /**
@@ -471,20 +488,20 @@ export default class MdseWorkbench extends Plugin {
         this.app.metadataCache.on("changed", (file) => {
           if (schemaPaths().includes(file.path)) return;
           this.indexer?.changed(file.path);
-          this.refreshRuntimeHealth();
+          this.scheduleRuntimeHealthRefresh();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         }),
       );
       this.registerEvent(this.app.vault.on("delete", (f) => {
         this.indexer?.removed(f.path);
-        this.refreshRuntimeHealth();
+        this.scheduleRuntimeHealthRefresh();
         if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
       }));
       this.registerEvent(
         this.app.vault.on("rename", (f, old) => {
           this.indexer?.removed(old);
           this.indexer?.changed(f.path);
-          this.refreshRuntimeHealth();
+          this.scheduleRuntimeHealthRefresh();
           if (this.indexer?.stats) this.scheduleSemanticCacheWrite();
         }),
       );
