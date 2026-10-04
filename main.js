@@ -27,75 +27,55 @@ var import_obsidian8 = require("obsidian");
 
 // src/core/runtime-health.ts
 function summarizeRuntimeHealth(input) {
-  if (!input.ready) {
-    if (input.coreError) {
-      return {
-        level: "attention",
-        label: "Workbench \xB7 core unavailable",
-        detail: "Workbench core model startup failed, but Obsidian remains usable.",
-        rows: [
-          ["Model service", "unavailable", true],
-          ["Core error", input.coreError, true],
-          ["Recovery", "Correct the reported issue, then run Rebuild index"]
-        ]
-      };
-    }
-    const level = input.building ? "syncing" : "starting";
-    return {
-      level,
-      label: input.building ? "Workbench \xB7 indexing" : "Workbench \xB7 starting",
-      detail: "Model service is not ready yet.",
-      rows: [
-        ["Model service", input.building ? "indexing" : "starting"],
-        ["Local Model", input.localQueued ? `${input.localQueued} queued` : input.localPending ? `${input.localPending} pending` : "not yet available"]
-      ]
-    };
-  }
-  const rows = [];
-  const assuranceError = input.assurance?.current ? input.assurance.error ?? null : null;
-  const hardAttention = input.localReadErrors > 0 || !!input.occurrenceError || !!input.cacheWriteError || input.schemaWarnings > 0 || !!assuranceError;
-  rows.push(["Model service", input.livePending ? `${input.livePending} live update(s) pending` : "ready"]);
   const activeLocal = Math.max(0, input.localPending - input.localQueued);
-  rows.push([
-    "Local Model",
-    input.occurrenceError ? `background processing issue: ${input.occurrenceError}` : input.localReadErrors ? `${input.localReadErrors} read error(s)` : activeLocal ? `${activeLocal} note(s) hydrating` : input.localQueued ? `${input.localQueued} note(s) queued for later` : "settled",
-    !!input.occurrenceError || input.localReadErrors > 0
-  ]);
-  rows.push(["Schema", input.schemaWarnings ? `${input.schemaWarnings} warning(s)` : "compatible", input.schemaWarnings > 0]);
-  rows.push([
-    "Semantic cache",
-    input.cacheWriteError ? `write issue: ${input.cacheWriteError}` : input.cacheCurrent ? "current" : "pending/coalesced",
-    !!input.cacheWriteError
-  ]);
-  if (!input.assurance) {
-    rows.push(["Global assurance", "not run for current model revision"]);
-  } else if (!input.assurance.current) {
-    rows.push(["Global assurance", "stale; recomputes on demand"]);
-  } else if (input.assurance.error) {
-    rows.push(["Global assurance", `unavailable: ${input.assurance.error}`, true]);
-  } else {
-    rows.push([
-      "Global assurance",
-      input.assurance.findings ? `${input.assurance.findings} finding(s)` : "current \xB7 no findings",
-      input.assurance.findings > 0
-    ]);
-  }
-  if (hardAttention) {
-    const issues = input.localReadErrors + input.schemaWarnings + (input.occurrenceError ? 1 : 0) + (input.cacheWriteError ? 1 : 0) + (assuranceError ? 1 : 0);
+  const assuranceCurrent = !!input.assurance?.current;
+  const assuranceError = assuranceCurrent ? input.assurance?.error ?? null : null;
+  const capabilities = {
+    core: input.coreError ? { state: "failed", detail: input.coreError } : input.ready ? { state: "ready", detail: input.livePending ? `${input.livePending} live update(s) pending` : "ready" } : { state: "pending", detail: input.building ? "indexing" : input.schemaError ? "blocked by schema" : "starting" },
+    occurrence: input.occurrenceError ? { state: "failed", detail: input.occurrenceError } : input.localReadErrors ? { state: "failed", detail: `${input.localReadErrors} read error(s)` } : activeLocal ? { state: "pending", detail: `${activeLocal} note(s) hydrating` } : input.localQueued ? { state: "pending", detail: `${input.localQueued} note(s) queued` } : input.ready ? { state: "ready", detail: "settled" } : { state: "pending", detail: "not yet available" },
+    cache: input.cacheWriteError ? { state: "failed", detail: input.cacheWriteError } : input.cacheCurrent ? { state: "ready", detail: "current" } : { state: "pending", detail: input.cachePending ? "pending/coalesced" : "not current" },
+    schema: input.schemaError ? { state: "failed", detail: input.schemaError } : input.schemaLoaded ? { state: "ready", detail: input.schemaWarnings ? `${input.schemaWarnings} warning(s)` : "compatible" } : { state: "pending", detail: "not loaded" },
+    assurance: assuranceError ? { state: "failed", detail: assuranceError } : assuranceCurrent ? {
+      state: "ready",
+      detail: input.assurance.findings ? `${input.assurance.findings} finding(s)` : "current \xB7 no findings"
+    } : {
+      state: "pending",
+      detail: input.assuranceActive ? "computing" : input.assurance ? "stale; recomputes on demand" : "not run for current model revision"
+    }
+  };
+  const rows = [
+    ["Core", `${capabilities.core.state} \xB7 ${capabilities.core.detail}`, capabilities.core.state === "failed"],
+    ["Occurrence", `${capabilities.occurrence.state} \xB7 ${capabilities.occurrence.detail}`, capabilities.occurrence.state === "failed"],
+    ["Cache", `${capabilities.cache.state} \xB7 ${capabilities.cache.detail}`, capabilities.cache.state === "failed"],
+    ["Schema", `${capabilities.schema.state} \xB7 ${capabilities.schema.detail}`, capabilities.schema.state === "failed"],
+    ["Assurance", `${capabilities.assurance.state} \xB7 ${capabilities.assurance.detail}`, capabilities.assurance.state === "failed"]
+  ];
+  const failed = Object.values(capabilities).filter((capability) => capability.state === "failed").length;
+  if (failed) {
     return {
       level: "attention",
-      label: `Workbench \xB7 ${issues} issue${issues === 1 ? "" : "s"}`,
-      detail: "The model remains readable; inspect runtime health for the affected subsystem.",
+      label: `Workbench \xB7 ${failed} subsystem issue${failed === 1 ? "" : "s"}`,
+      detail: "Capabilities are isolated; inspect runtime health for the affected subsystem.",
+      capabilities,
       rows
     };
   }
-  const pending = input.livePending + input.localPending;
-  if (pending > 0) {
-    const activeOccurrence = Math.max(0, input.localPending - input.localQueued);
+  const pending = Object.values(capabilities).filter((capability) => capability.state === "pending").length;
+  if (!input.ready) {
+    return {
+      level: input.building ? "syncing" : "starting",
+      label: input.building ? "Workbench \xB7 indexing" : "Workbench \xB7 starting",
+      detail: "Core model is not ready yet; other subsystem states are reported independently.",
+      capabilities,
+      rows
+    };
+  }
+  if (input.livePending || input.localPending) {
     return {
       level: "syncing",
-      label: input.livePending ? `Workbench \u2713 \xB7 applying ${input.livePending}` : activeOccurrence ? "Workbench \u2713 \xB7 occurrence data loading" : "Workbench \u2713 \xB7 occurrence data queued",
-      detail: input.livePending ? "Core model remains usable while coalesced live edits finish." : activeOccurrence ? "Core model is ready; occurrence-aware capabilities are loading in the background." : "Core model is ready; occurrence-aware capabilities are intentionally deferred until the vault is quiet or one is requested.",
+      label: input.livePending ? `Workbench \u2713 \xB7 applying ${input.livePending}` : activeLocal ? "Workbench \u2713 \xB7 occurrence data loading" : "Workbench \u2713 \xB7 occurrence data queued",
+      detail: "Core availability is preserved while derived capability work finishes.",
+      capabilities,
       rows
     };
   }
@@ -104,13 +84,15 @@ function summarizeRuntimeHealth(input) {
       level: "ready",
       label: `Workbench \u2713 \xB7 ${input.assurance.findings} review`,
       detail: "Runtime is healthy; engineering findings are available in Review.",
+      capabilities,
       rows
     };
   }
   return {
     level: "ready",
     label: "Workbench \u2713",
-    detail: input.assurance?.current ? "Runtime and current assurance are healthy." : "Runtime is healthy; global assurance runs on demand.",
+    detail: pending ? "Core runtime is healthy; one or more optional capabilities are pending." : "Runtime capabilities are healthy.",
+    capabilities,
     rows
   };
 }
@@ -5543,6 +5525,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.lastCacheWriteAt = null;
     this.lastCacheWriteMs = null;
     this.lastCacheWriteError = null;
+    this.lastSchemaError = null;
     this.lastCoreError = null;
     this.lastOccurrenceError = null;
     this.lastCachedRevision = null;
@@ -5724,9 +5707,13 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       localQueued: indexer?.localHydrationQueued ?? 0,
       livePending: indexer?.liveUpdatePending ?? 0,
       localReadErrors: indexer?.localReadErrorCount ?? 0,
+      schemaLoaded: !!this.schema,
+      schemaError: this.lastSchemaError,
       schemaWarnings: this.schema?.warnings.length ?? 0,
       cacheWriteError: this.lastCacheWriteError,
       cacheCurrent: !!indexer && indexer.revision === this.lastCachedRevision,
+      cachePending: !!indexer?.stats && (!!this.cacheWriteTask || this.cacheWriteTimer !== null || indexer.revision !== this.lastCachedRevision),
+      assuranceActive: !!this.assurance?.active,
       assurance: cachedAssurance ? {
         current: cachedAssurance.revision === indexer?.revision && !cachedAssurance.stale,
         findings: cachedAssurance.all.length,
@@ -6041,6 +6028,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     const runStartedAt = performance.now();
     this.coreReadyPublished = false;
     this.lastCoreError = null;
+    this.lastSchemaError = null;
     const firstStart = !this.indexer;
     if (firstStart) {
       this.startupRunStartedAt = runStartedAt;
@@ -6059,7 +6047,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.schema = await this.loadSchema();
     } catch (e) {
       const message = e.message || String(e);
-      this.lastCoreError = `schema: ${message}`;
+      this.lastSchemaError = message;
       this.setRuntimeStatus("error", "schema");
       new import_obsidian8.Notice(`MDSE Workbench: could not read the schema files. ${message} Check the paths in settings.`);
       return;
