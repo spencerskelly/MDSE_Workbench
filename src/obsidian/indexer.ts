@@ -53,6 +53,15 @@ export class Indexer {
     return this.running !== null;
   }
 
+  /** Current Markdown path/mtime/size evidence without parsing note bodies. */
+  currentFingerprints(): Map<string, FileFingerprint> {
+    const out = new Map<string, FileFingerprint>();
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      out.set(file.path, { mtime: file.stat.mtime, size: file.stat.size });
+    }
+    return out;
+  }
+
   setSchema(schema: Schema): void {
     this.schema = schema;
   }
