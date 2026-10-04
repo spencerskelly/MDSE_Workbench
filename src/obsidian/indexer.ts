@@ -321,6 +321,27 @@ export class Indexer {
     };
   }
 
+  /** UI-safe stats pass for startup/reconciliation paths that may contain tens of thousands of notes. */
+  private async makeStatsCooperative(mode: BuildStats["mode"], ms: number, builtAt: number): Promise<BuildStats> {
+    let elements = 0;
+    let links = 0;
+    const budget = new CooperativeBudget(WORK_SLICE_MS);
+    for (const r of this.index.notes.values()) {
+      if (this.index.isElement(r)) elements++;
+      links += this.index.out(r.path).length;
+      await budget.checkpoint(yieldToUi);
+    }
+    return {
+      mode,
+      files: this.fingerprints.size,
+      notes: this.index.size,
+      elements,
+      links,
+      ms,
+      builtAt,
+    };
+  }
+
   private async doReconcilePlan(plan: ReconciliationPlan): Promise<BuildStats> {
     const t0 = performance.now();
     const changedOrAdded = [...new Set([...plan.changed, ...plan.added])].sort();
@@ -368,7 +389,7 @@ export class Indexer {
       if (needsFull) this.scheduleRebuild();
     }
 
-    this.stats = this.makeStats("reconciled", Math.round(performance.now() - t0), Date.now());
+    this.stats = await this.makeStatsCooperative("reconciled", Math.round(performance.now() - t0), Date.now());
     return this.stats;
   }
 
@@ -575,9 +596,11 @@ export class Indexer {
     this.local = local;
     this.fingerprints.clear();
     this.cacheDirtyPaths.clear();
+    const finalizeBudget = new CooperativeBudget(WORK_SLICE_MS);
     for (const [path, fp] of fingerprints) {
       this.fingerprints.set(path, fp);
       this.cacheDirtyPaths.add(path);
+      await finalizeBudget.checkpoint(yieldToUi);
     }
     this.bumpRevision();
     // Core graph readiness comes first. Governed Local Model bodies are deferred until either
@@ -590,11 +613,16 @@ export class Indexer {
     // Apply what changed while building. A large backlog (first-time caching, a big pull)
     // is cheaper as one more chunked build after things go quiet than as one long loop.
     const backlog = this.dirty.size;
-    if (backlog <= CHUNK) for (const path of this.dirty) this.apply(path);
+    if (backlog <= CHUNK) {
+      for (const path of this.dirty) {
+        this.apply(path);
+        await finalizeBudget.checkpoint(yieldToUi);
+      }
+    }
     this.dirty.clear();
     if (backlog > CHUNK) this.scheduleRebuild();
     this.burst = 0;
-    this.stats = this.makeStats("full", Math.round(performance.now() - t0), Date.now());
+    this.stats = await this.makeStatsCooperative("full", Math.round(performance.now() - t0), Date.now());
     return this.stats;
   }
 
