@@ -57,8 +57,8 @@ interface RuntimeSample {
   files: number;
   elements: number;
   coreMs: number;
-  /** User-visible elapsed time from Workbench startup handoff to core model readiness. */
-  timeToCoreReadyMs: number | null;
+  /** User-visible elapsed time from Workbench startup handoff to core model readiness. Optional for pre-W-360 local history. */
+  timeToCoreReadyMs?: number | null;
   startupWaitMs: number | null;
   localHydrationMs: number | null;
   localCandidates: number;
@@ -346,7 +346,7 @@ export default class MdseWorkbench extends Plugin {
     const rows: Array<[string, string]> = recent.length
       ? recent.map((s) => [
           new Date(s.at).toLocaleString(),
-          `${s.mode} · ready ${s.timeToCoreReadyMs === null ? "n/a" : (s.timeToCoreReadyMs / 1000).toFixed(2) + " s"} · core ${(s.coreMs / 1000).toFixed(2)} s · Local ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1000).toFixed(2) + " s"} (${s.localCandidates}) · wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1000).toFixed(2) + " s"}`,
+          `${s.mode} · ready ${s.timeToCoreReadyMs == null ? "n/a" : (s.timeToCoreReadyMs / 1000).toFixed(2) + " s"} · core ${(s.coreMs / 1000).toFixed(2)} s · Local ${s.localHydrationMs === null ? "deferred" : (s.localHydrationMs / 1000).toFixed(2) + " s"} (${s.localCandidates}) · wait ${s.startupWaitMs === null ? "n/a" : (s.startupWaitMs / 1000).toFixed(2) + " s"}`,
         ])
       : [["Runtime history", "No completed startup samples yet."]];
     new ReportModal(this.app, "MDSE Workbench runtime history", rows, [
