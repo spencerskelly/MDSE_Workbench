@@ -932,12 +932,16 @@ export default class MdseWorkbench extends Plugin {
     this.markForegroundActivity();
     if (!this.ready()) return;
     const indexer = this.indexer as Indexer;
+    await indexer.whenSourceSettled();
     if (profileNeedsLocalOccurrences(profile)) {
       this.setRuntimeStatus("ready", `${indexer.stats?.elements ?? 0} elements · loading occurrence data for ${profile.name}`);
       await indexer.whenLocalSettled();
       void this.markOccurrenceReady(indexer);
       this.refreshRuntimeHealth();
     }
+    // Source files may have changed while occurrence hydration was running; cross the source
+    // barrier again so traversal never writes a derived canvas from a half-reconciled revision.
+    await indexer.whenSourceSettled();
     const index = indexer.index;
     const t0 = performance.now();
     if (profile.startTypes) {
@@ -1059,10 +1063,12 @@ export default class MdseWorkbench extends Plugin {
       return;
     }
     const profile = PROFILES[meta.profile] ?? STRUCTURE_PROFILE;
+    await indexer.whenSourceSettled();
     if (profileNeedsLocalOccurrences(profile)) {
       await indexer.whenLocalSettled();
       void this.markOccurrenceReady(indexer);
     }
+    await indexer.whenSourceSettled();
     const index = indexer.index;
     const baseView = traverse(index, meta.starts, profile);
     const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
