@@ -1,7 +1,9 @@
-import { App, FuzzySuggestModal, Modal, SuggestModal, type FuzzyMatch } from "obsidian";
+import { App, FuzzySuggestModal, Modal, Notice, SuggestModal, type FuzzyMatch } from "obsidian";
 import type { NoteRecord } from "../core/model";
 import type { RelationshipOption } from "../core/rules";
 import type { ViewProfile } from "../core/views";
+import type { NewLocalRecord } from "../core/localmodel-edit";
+import type { StagedLocalCreate } from "../core/model-edit";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -114,5 +116,160 @@ export class ConfirmModal extends Modal {
   }
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+
+export class LocalPartCreateModal extends Modal {
+  private staged: StagedLocalCreate | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly localId: string,
+    private readonly stage: (input: NewLocalRecord) => Promise<StagedLocalCreate>,
+    private readonly apply: (transactionId: string) => Promise<void>,
+    private readonly cancel: (transactionId: string) => void,
+    private readonly onApplied: (localId: string) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.renderCompose();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try { this.cancel(staged.transaction.id); } catch { /* already cancelled */ }
+    }
+  }
+
+  private renderCompose(): void {
+    this.titleEl.setText("Add part occurrence");
+    this.contentEl.empty();
+
+    this.contentEl.createEl("p", {
+      text: `Create a contextual part occurrence inside ${this.ownerName}. Nothing is written until Review → Apply.`,
+    });
+
+    const field = (label: string, value = "", placeholder = ""): HTMLInputElement => {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: label });
+      const input = row.createEl("input", { type: "text", cls: "mdse-detail-input", value });
+      if (placeholder) input.setAttr("placeholder", placeholder);
+      input.onkeydown = (e) => e.stopPropagation();
+      return input;
+    };
+
+    const heading = field("Occurrence name", "", "K1");
+    const definition = field("Reusable definition", "", "[[Main Contactor]]");
+    const usage = field("Usage", "standard", "standard");
+    const multiplicity = field("Multiplicity", "", "optional");
+
+    const id = this.contentEl.createEl("p", { cls: "mdse-muted", text: `Local ID: ${this.localId}` });
+    id.setAttr("title", "Generated from the governed timestamp + author-suffix identity format.");
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => {
+      void (async () => {
+        review.disabled = true;
+        try {
+          const fields: Record<string, string> = {
+            definition: definition.value.trim(),
+          };
+          if (usage.value.trim() && usage.value.trim() !== "standard") fields.usage = usage.value.trim();
+          if (multiplicity.value.trim()) fields.multiplicity = multiplicity.value.trim();
+
+          const staged = await this.stage({
+            kind: "part",
+            localId: this.localId,
+            heading: heading.value.trim(),
+            fields,
+          });
+          this.staged = staged;
+          this.renderReview(staged, {
+            heading: heading.value.trim(),
+            definition: definition.value.trim(),
+            usage: usage.value.trim() || "standard",
+            multiplicity: multiplicity.value.trim(),
+          });
+        } catch (e) {
+          new Notice(`Cannot stage occurrence: ${(e as Error).message}`, 12000);
+          review.disabled = false;
+        }
+      })();
+    };
+  }
+
+  private renderReview(
+    staged: StagedLocalCreate,
+    values: { heading: string; definition: string; usage: string; multiplicity: string },
+  ): void {
+    this.titleEl.setText("Review new part occurrence");
+    this.contentEl.empty();
+
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const row = (key: string, value: string) => {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value || "—" });
+    };
+    row("Owner", this.ownerName);
+    row("Transaction", staged.transaction.label);
+    row("Scope", staged.transaction.scope);
+    row("Occurrence", values.heading);
+    row("Reusable definition", values.definition);
+    row("Usage", values.usage);
+    row("Multiplicity", values.multiplicity);
+    row("Local ID", staged.plan.localId);
+
+    const findings = staged.plan.findings;
+    const blocking = findings.filter((finding) => finding.severity === "error");
+    if (findings.length) {
+      const box = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      box.createEl("strong", { text: blocking.length ? "Validation findings" : "Validation warnings" });
+      for (const finding of findings) {
+        box.createEl("p", {
+          text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+          cls: finding.severity === "error" ? "mdse-warn" : undefined,
+        });
+      }
+    } else {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will write one structural Local Model change." });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.setAttr("title", blocking.length ? "Resolve blocking validation findings before Apply." : "Apply this staged structural change.");
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied(staged.plan.localId);
+          new Notice(`Created part occurrence ${values.heading}.`, 5000);
+        } catch (e) {
+          new Notice(`Not applied: ${(e as Error).message}`, 12000);
+          apply.disabled = false;
+        }
+      })();
+    };
   }
 }
