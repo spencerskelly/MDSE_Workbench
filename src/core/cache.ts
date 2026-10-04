@@ -5,7 +5,7 @@
  * into plain JSON-compatible data and restores it after strict compatibility checks.
  * No filesystem/Obsidian imports belong here.
  */
-import { LocalModelIndex, READABLE_VERSIONS, type LocalFinding, type LocalRecord, type LocalRegion } from "./localmodel";
+import { LocalModelIndex, READABLE_VERSIONS, type LinkRef, type LocalFinding, type LocalRecord, type LocalRegion } from "./localmodel";
 import { ModelIndex, type NoteRecord } from "./model";
 import type { Schema } from "./schema";
 
@@ -168,19 +168,26 @@ function deserializeNote(raw: unknown): NoteRecord {
     fields.set(entry[0], [...entry[1]]);
   }
   const repeat = raw.repeat === undefined ? undefined : pairsNumber(raw.repeat, "repeat");
+  const type = optionalString(raw, "type");
+  const id = optionalString(raw, "id");
+  const uid = optionalString(raw, "uid");
+  if (raw.broken !== undefined && !arrayOfBroken(raw.broken)) throw new Error(`Malformed cached broken links for ${raw.path}.`);
+  if (raw.localRefs !== undefined && !arrayOfLocalRefs(raw.localRefs)) throw new Error(`Malformed cached local references for ${raw.path}.`);
+  if (raw.abstract !== undefined && typeof raw.abstract !== "boolean") throw new Error(`Malformed cached abstract value for ${raw.path}.`);
+  if (raw.abstractInvalid !== undefined && typeof raw.abstractInvalid !== "boolean") throw new Error(`Malformed cached abstract-invalid value for ${raw.path}.`);
   return {
     path: raw.path,
     name: raw.name,
-    ...(stringProp(raw, "type") !== undefined ? { type: stringProp(raw, "type") } : {}),
-    ...(stringProp(raw, "id") !== undefined ? { id: stringProp(raw, "id") } : {}),
-    ...(stringProp(raw, "uid") !== undefined ? { uid: stringProp(raw, "uid") } : {}),
+    ...(type !== undefined ? { type } : {}),
+    ...(id !== undefined ? { id } : {}),
+    ...(uid !== undefined ? { uid } : {}),
     fields,
     unresolved: raw.unresolved,
-    ...(arrayOfBroken(raw.broken) ? { broken: raw.broken.map((x) => ({ ...x })) } : {}),
+    ...(raw.broken !== undefined ? { broken: raw.broken.map((x) => ({ ...x })) } : {}),
     ...(repeat ? { repeat } : {}),
-    ...(typeof raw.abstract === "boolean" ? { abstract: raw.abstract } : {}),
-    ...(typeof raw.abstractInvalid === "boolean" ? { abstractInvalid: raw.abstractInvalid } : {}),
-    ...(arrayOfLocalRefs(raw.localRefs) ? { localRefs: raw.localRefs.map((x) => ({ ...x })) } : {}),
+    ...(raw.abstract !== undefined ? { abstract: raw.abstract } : {}),
+    ...(raw.abstractInvalid !== undefined ? { abstractInvalid: raw.abstractInvalid } : {}),
+    ...(raw.localRefs !== undefined ? { localRefs: raw.localRefs.map((x) => ({ ...x })) } : {}),
   };
 }
 
@@ -250,13 +257,18 @@ function deserializeLocalRecord(raw: unknown): LocalRecord {
 type Obj = Record<string, unknown>;
 const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const sameStrings = (a: unknown, b: readonly string[]) => Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i]);
-const stringProp = (o: Obj, k: string) => (o[k] === undefined ? undefined : typeof o[k] === "string" ? o[k] as string : undefined);
+function optionalString(o: Obj, k: string): string | undefined {
+  const v = o[k];
+  if (v === undefined) return undefined;
+  if (typeof v !== "string") throw new Error(`Malformed cached ${k}.`);
+  return v;
+}
 const nullableString = (v: unknown): string | null => v === null || v === undefined ? null : typeof v === "string" ? v : null;
 const isLocalKind = (v: unknown): v is LocalRecord["kind"] => v === "part" || v === "endpoint" || v === "connection" || v === "flow";
 const isFingerprint = (v: unknown): v is FileFingerprint => isObject(v) && typeof v.mtime === "number" && typeof v.size === "number" && (v.hash === undefined || typeof v.hash === "string");
-const isLink = (v: unknown) => isObject(v) && typeof v.text === "string" && typeof v.target === "string" && typeof v.blockId === "string" && (v.alias === undefined || typeof v.alias === "string");
-const linkOrNull = (v: unknown): LocalRecord["definition"] => v === null || v === undefined ? null : isLink(v) ? { text: v.text, target: v.target, blockId: v.blockId, ...(typeof v.alias === "string" ? { alias: v.alias } : {}) } : null;
-const links = (v: unknown) => Array.isArray(v) ? v.filter(isLink).map((x) => linkOrNull(x)!).filter(Boolean) : [];
+const isLink = (v: unknown): v is LinkRef => isObject(v) && typeof v.text === "string" && typeof v.target === "string" && typeof v.blockId === "string" && (v.alias === undefined || typeof v.alias === "string");
+const linkOrNull = (v: unknown): LinkRef | null => v === null || v === undefined ? null : isLink(v) ? { text: v.text, target: v.target, blockId: v.blockId, ...(typeof v.alias === "string" ? { alias: v.alias } : {}) } : null;
+const links = (v: unknown): LinkRef[] => Array.isArray(v) ? v.filter(isLink).map((x) => ({ ...x })) : [];
 const isFinding = (v: unknown): v is LocalFinding => isObject(v) && typeof v.code === "string" && (v.severity === "error" || v.severity === "warning") && typeof v.message === "string";
 const arrayOfBroken = (v: unknown): v is Array<{ field: string; link: string }> => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.link === "string");
 const arrayOfLocalRefs = (v: unknown): v is Array<{ field: string; path: string; localId: string }> => Array.isArray(v) && v.every((x) => isObject(x) && typeof x.field === "string" && typeof x.path === "string" && typeof x.localId === "string");
