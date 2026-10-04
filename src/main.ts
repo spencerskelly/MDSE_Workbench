@@ -309,6 +309,10 @@ export default class MdseWorkbench extends Plugin {
         this.scheduleSemanticCacheWrite();
         return;
       }
+      if (indexer.localReadErrorCount) {
+        this.lastCacheWriteError = `cache not updated: ${indexer.localReadErrorCount} Local Model read error(s)`;
+        return;
+      }
       const revision = indexer.revision;
       const createdAt = Date.now();
       const scope = { vaultUid: await this.loadVaultUid() };
@@ -407,7 +411,10 @@ export default class MdseWorkbench extends Plugin {
         localFindings: () => {
           const indexer = this.indexer as Indexer;
           const resolve = (target: string, from: string) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), from)?.path;
-          return validateLocalModels({ index: indexer.index, local: indexer.local, resolve });
+          return [
+            ...validateLocalModels({ index: indexer.index, local: indexer.local, resolve }),
+            ...indexer.localReadFindings(),
+          ];
         },
       });
       const schemaPaths = () => [normalizePath(this.settings.relationshipsPath), normalizePath(this.settings.elementTypesPath)];
@@ -648,6 +655,7 @@ export default class MdseWorkbench extends Plugin {
       ["Model notes", String(s.elements)],
       ["Authored links", String(s.links)],
       ["Local Model hydration", this.indexer!.localHydrationPending ? `${this.indexer!.localHydrationPending} note(s) pending` : "settled"],
+      ["Local Model read errors", String(this.indexer!.localReadErrorCount), this.indexer!.localReadErrorCount > 0],
       ["Startup quiet wait", this.lastStartupWaitMs === null ? "not measured" : `${(this.lastStartupWaitMs / 1000).toFixed(2)} s`],
       ["Index build", `${(s.ms / 1000).toFixed(2)} s (target under 60 s)`, s.ms > 60000],
       ["Assurance snapshot", `${assurance.ms} ms · revision ${assurance.revision}${assurance.stale ? " · stale/retrying" : ""}`],
