@@ -22,7 +22,7 @@ import { analyzeLocalModel, writeFindingsReport } from "./obsidian/localmodel";
 import { clearWorkbenchCache, ObsidianCacheStorage, WORKBENCH_CACHE_ROOT } from "./obsidian/cache";
 
 /** Quiet time with no cache activity before the first index build starts. */
-const QUIET_START_MS = 8000;
+const QUIET_START_MS = 8000; // fallback only when Obsidian's metadata "resolved" signal is not observed
 
 interface Settings {
   relationshipsPath: string;
@@ -75,6 +75,8 @@ export default class MdseWorkbench extends Plugin {
   private pendingRebuild = false;
   /** Last time Obsidian reported a note changed; first-time caching reports one per note. */
   private lastChange = Date.now();
+  /** Latched once Obsidian says its metadata/link-resolution pass is complete. */
+  private metadataResolved = false;
   private unloaded = false;
 
   async onload(): Promise<void> {
@@ -181,6 +183,9 @@ export default class MdseWorkbench extends Plugin {
     this.addCommand({ id: "local-model-findings", name: "Check Local Model (write findings report)", callback: () => void this.checkLocalModel() });
     this.addRibbonIcon("list-checks", "Workbench Review", () => void this.openReview());
     this.registerEvent(this.app.metadataCache.on("changed", () => (this.lastChange = Date.now())));
+    this.registerEvent(this.app.metadataCache.on("resolved", () => {
+      this.metadataResolved = true;
+    }));
     this.register(() => {
       this.unloaded = true;
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
@@ -200,10 +205,16 @@ export default class MdseWorkbench extends Plugin {
     this.statusEl.setAttr("aria-label", "MDSE Workbench runtime status");
   }
 
-  /** Resolves once the layout is ready and no note has changed for QUIET_START_MS. */
+  /**
+   * Prefer Obsidian's own metadata/link-resolution completion signal over a fixed startup delay.
+   * The quiet timer remains a conservative fallback for versions/environments that do not emit it
+   * after Workbench loads.
+   */
   private async whenVaultQuiet(): Promise<void> {
-    while (!this.unloaded && Date.now() - this.lastChange < QUIET_START_MS) {
-      await new Promise((r) => window.setTimeout(r, 1000));
+    while (!this.unloaded) {
+      if (this.metadataResolved) return;
+      if (Date.now() - this.lastChange >= QUIET_START_MS) return;
+      await new Promise((r) => window.setTimeout(r, 250));
     }
   }
 
