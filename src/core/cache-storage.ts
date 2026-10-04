@@ -14,6 +14,7 @@
 import {
   joinSemanticCache,
   shardSemanticCache,
+  type LocalCacheShard,
   type CacheDiskManifest,
   type SemanticCache,
   type ShardedSemanticCache,
@@ -85,6 +86,50 @@ export async function writeSemanticCacheGeneration(
   // Commit marker last. A torn/corrupt manifest leaves the opposite slot available.
   await storage.write(cacheManifestPaths(clean)[slot], JSON.stringify(sharded.manifest));
   return sharded.manifest;
+}
+
+export interface LocalCacheGeneration {
+  manifest: CacheDiskManifest;
+  localShards: LocalCacheShard[];
+}
+
+/**
+ * Read only the Local Model component of the newest complete cache generation.
+ * Core startup can therefore avoid Local Model I/O and defer it until an occurrence consumer asks.
+ */
+export async function readLocalCacheGeneration(storage: CacheStorage, root: string): Promise<LocalCacheGeneration> {
+  const clean = cleanRoot(root);
+  const manifests = await readManifestSlots(storage, clean);
+  const candidates = manifests
+    .flatMap((x, slot) => x.manifest ? [{ slot: slot as 0 | 1, manifest: x.manifest }] : [])
+    .sort((a, b) =>
+      b.manifest.sequence - a.manifest.sequence ||
+      b.manifest.header.createdAt - a.manifest.header.createdAt ||
+      b.manifest.generation.localeCompare(a.manifest.generation),
+    );
+  if (!candidates.length) throw new Error("No semantic cache manifest is available.");
+
+  const errors: string[] = [];
+  for (const { slot, manifest } of candidates) {
+    try {
+      assertGeneration(manifest.generation);
+      const slotRoot = cacheSlotPaths(clean)[slot];
+      const raw = await readJsonSeries(
+        storage,
+        Array.from({ length: manifest.localRegions.count }, (_, i) => `${slotRoot}/local-${pad(i)}.json`),
+      );
+      const localShards = raw.map((value, index) => {
+        if (!isObject(value) || value.generation !== manifest.generation || value.index !== index || !Array.isArray(value.localRegions)) {
+          throw new Error("Malformed semantic cache Local Model shard.");
+        }
+        return value as unknown as LocalCacheShard;
+      });
+      return { manifest, localShards };
+    } catch (e) {
+      errors.push(`${MANIFEST_NAMES[slot]}: ${(e as Error).message}`);
+    }
+  }
+  throw new Error(`No complete Local Model cache generation is readable. ${errors.join(" | ")}`);
 }
 
 export async function readSemanticCacheGeneration(storage: CacheStorage, root: string): Promise<SemanticCache> {
