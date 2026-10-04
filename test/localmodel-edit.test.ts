@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planLocalRecordCreate, planLocalRecordPatch } from "../src/core/localmodel-edit";
+import { nextLocalId, planLocalRecordCreate, planLocalRecordPatch } from "../src/core/localmodel-edit";
 import { parseLocalModel } from "../src/core/localmodel";
 
 const tokenA = "20261003133512742skellyspencer";
@@ -192,4 +192,17 @@ test("a staged planner may represent temporary invalidity when explicitly reques
     { allowInvalidTarget: true },
   );
   assert.ok(result.findings.some((x)=>x.localId==="part-"+tokenA && x.code==="record.missing-definition"));
+});
+
+
+test("generates governed Local Model IDs from UTC timestamp and owner author suffix", () => {
+  const id = nextLocalId("part", "20261003130000000skellyspencer", new Date("2026-10-04T23:30:45.123Z"));
+  assert.equal(id, "part-20261004233045123skellyspencer");
+});
+
+test("refuses Local Model ID generation when the owner UID has no governed author suffix", () => {
+  assert.throws(
+    () => nextLocalId("part", "bad-owner-uid", new Date("2026-10-04T23:30:45.123Z")),
+    /author suffix/,
+  );
 });
