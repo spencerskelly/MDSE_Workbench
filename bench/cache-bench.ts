@@ -66,9 +66,9 @@ t = performance.now();
 const sharded = shardSemanticCache(cache, "bench-generation");
 const shardJson = [
   JSON.stringify(sharded.manifest),
-  ...sharded.fingerprintShards.map(JSON.stringify),
-  ...sharded.noteShards.map(JSON.stringify),
-  ...sharded.localShards.map(JSON.stringify),
+  ...sharded.fingerprintShards.map((x) => JSON.stringify(x)),
+  ...sharded.noteShards.map((x) => JSON.stringify(x)),
+  ...sharded.localShards.map((x) => JSON.stringify(x)),
 ];
 const jsonBytes = shardJson.reduce((n, s) => n + Buffer.byteLength(s), 0);
 console.log(`bucket + JSON: ${fmt(performance.now() - t)}; ${sharded.fingerprintShards.length} fingerprint + ${sharded.noteShards.length} note + ${sharded.localShards.length} local buckets; ${(jsonBytes / 1048576).toFixed(1)} MB`);
