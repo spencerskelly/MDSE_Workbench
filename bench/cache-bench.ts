@@ -66,17 +66,20 @@ t = performance.now();
 const sharded = shardSemanticCache(cache, "bench-generation");
 const shardJson = [
   JSON.stringify(sharded.manifest),
+  ...sharded.fingerprintShards.map(JSON.stringify),
   ...sharded.noteShards.map(JSON.stringify),
   ...sharded.localShards.map(JSON.stringify),
 ];
 const jsonBytes = shardJson.reduce((n, s) => n + Buffer.byteLength(s), 0);
-console.log(`shard + JSON: ${fmt(performance.now() - t)}; ${sharded.noteShards.length} note shards; ${(jsonBytes / 1048576).toFixed(1)} MB`);
+console.log(`bucket + JSON: ${fmt(performance.now() - t)}; ${sharded.fingerprintShards.length} fingerprint + ${sharded.noteShards.length} note + ${sharded.localShards.length} local buckets; ${(jsonBytes / 1048576).toFixed(1)} MB`);
 
 t = performance.now();
 const parsedManifest = JSON.parse(shardJson[0]);
-const noteJson = shardJson.slice(1, 1 + sharded.noteShards.length).map((s) => JSON.parse(s));
-const localJson = shardJson.slice(1 + sharded.noteShards.length).map((s) => JSON.parse(s));
-const joined = joinSemanticCache(parsedManifest, noteJson, localJson);
+const fingerprintJson = shardJson.slice(1, 1 + sharded.fingerprintShards.length).map((s) => JSON.parse(s));
+const noteStart = 1 + sharded.fingerprintShards.length;
+const noteJson = shardJson.slice(noteStart, noteStart + sharded.noteShards.length).map((s) => JSON.parse(s));
+const localJson = shardJson.slice(noteStart + sharded.noteShards.length).map((s) => JSON.parse(s));
+const joined = joinSemanticCache(parsedManifest, fingerprintJson, noteJson, localJson);
 const restored = restoreSemanticState(joined, schema, { vaultUid: "20261003190000001skellyspencer" });
 console.log(`JSON parse + restore: ${fmt(performance.now() - t)}; notes ${restored.index.size}; links ${restored.index.edgeCount()}; heap ${mem()}`);
 
