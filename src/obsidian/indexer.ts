@@ -40,6 +40,8 @@ export class Indexer {
   readonly fingerprints = new Map<string, FileFingerprint>();
   private running: Promise<BuildStats> | null = null;
   private readonly dirty = new Set<string>();
+  /** Startup metadata-cache churn is ignored until Workbench deliberately begins model reconciliation. */
+  private liveChanges = false;
   private burst = 0;
   private burstStarted = 0;
   private timer: number | null = null;
@@ -52,6 +54,10 @@ export class Indexer {
 
   get building(): boolean {
     return this.running !== null;
+  }
+
+  enableLiveChanges(): void {
+    this.liveChanges = true;
   }
 
   /** Current Markdown path/mtime/size evidence without parsing note bodies. */
@@ -268,6 +274,7 @@ export class Indexer {
 
   /** One file changed or was created. Cheap; never starts a build directly. */
   changed(path: string): void {
+    if (!this.liveChanges) return;
     if (!this.stats || this.running) {
       this.dirty.add(path);
       return;
