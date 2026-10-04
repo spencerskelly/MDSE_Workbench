@@ -346,7 +346,7 @@ export default class MdseWorkbench extends Plugin {
     return active;
   }
 
-  private backgroundWorkAllowed(kind: "backgroundHydration" | "cacheWrite", indexer: Indexer | null = this.indexer): boolean {
+  private backgroundWorkAllowed(kind: "backgroundHydration" | "assurance" | "cacheWrite", indexer: Indexer | null = this.indexer): boolean {
     if (!indexer || this.indexer !== indexer) return false;
     const base = canRunBackgroundWork({
       unloaded: this.unloaded,
@@ -358,6 +358,13 @@ export default class MdseWorkbench extends Plugin {
       minimumQuietMs: BACKGROUND_RESUME_QUIET_MS,
     });
     return base && canStartRuntimeWork(kind, this.activeRuntimeWork(indexer));
+  }
+
+  private async waitForBackgroundWork(kind: "backgroundHydration" | "assurance" | "cacheWrite", indexer: Indexer): Promise<void> {
+    while (!this.unloaded && this.indexer === indexer && !this.backgroundWorkAllowed(kind, indexer)) {
+      await new Promise((r) => window.setTimeout(r, 250));
+    }
+    if (this.unloaded || this.indexer !== indexer) throw new Error("Workbench background work was cancelled.");
   }
 
   private scheduleRuntimeHealthRefresh(): void {
@@ -676,6 +683,7 @@ export default class MdseWorkbench extends Plugin {
             ...indexer.localReadFindings(),
           ];
         },
+        waitForBackgroundPermission: () => this.waitForBackgroundWork("assurance", this.indexer as Indexer),
       });
       const schemaPaths = () => [normalizePath(this.settings.relationshipsPath), normalizePath(this.settings.elementTypesPath)];
 
