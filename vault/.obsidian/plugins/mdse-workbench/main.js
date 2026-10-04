@@ -4610,6 +4610,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.writer = null;
     this.detail = null;
     this.statusEl = null;
+    this.startupHandoffTimer = null;
     this.healthRefreshTimer = null;
     this.localBackgroundTimer = null;
     this.cacheWriteTimer = null;
@@ -4739,11 +4740,17 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     }));
     this.register(() => {
       this.unloaded = true;
+      if (this.startupHandoffTimer !== null) window.clearTimeout(this.startupHandoffTimer);
       if (this.cacheWriteTimer !== null) window.clearTimeout(this.cacheWriteTimer);
       if (this.healthRefreshTimer !== null) window.clearTimeout(this.healthRefreshTimer);
       if (this.localBackgroundTimer !== null) window.clearTimeout(this.localBackgroundTimer);
     });
-    this.app.workspace.onLayoutReady(() => void this.start(false));
+    this.app.workspace.onLayoutReady(() => {
+      this.startupHandoffTimer = window.setTimeout(() => {
+        this.startupHandoffTimer = null;
+        if (!this.unloaded) void this.start(false);
+      }, 0);
+    });
   }
   setRuntimeStatus(state, detail = "") {
     if (!this.statusEl) return;
@@ -5012,6 +5019,14 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   async runStart(rebuild) {
     const runStartedAt = performance.now();
     this.lastCoreError = null;
+    const firstStart = !this.indexer;
+    if (firstStart) {
+      this.setRuntimeStatus("waiting");
+      const waitStarted = performance.now();
+      await this.whenVaultQuiet();
+      this.lastStartupWaitMs = Math.round(performance.now() - waitStarted);
+      if (this.unloaded) return;
+    }
     this.setRuntimeStatus("starting");
     try {
       this.schema = await this.loadSchema();
@@ -5023,7 +5038,6 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       return;
     }
     const schema = this.schema;
-    const firstStart = !this.indexer;
     if (!this.indexer) {
       this.indexer = new Indexer(this.app, schema);
       this.indexer.setBackgroundIdleCheck(() => Date.now() - this.lastChange >= LOCAL_BACKGROUND_DELAY_MS);
@@ -5069,11 +5083,6 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
         })
       );
       this.register(() => this.indexer?.dispose());
-      this.setRuntimeStatus("waiting");
-      const waitStarted = performance.now();
-      await this.whenVaultQuiet();
-      this.lastStartupWaitMs = Math.round(performance.now() - waitStarted);
-      if (this.unloaded) return;
     } else {
       this.indexer.setSchema(schema);
     }
