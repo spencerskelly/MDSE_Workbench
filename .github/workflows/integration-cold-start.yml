@@ -1,0 +1,154 @@
+name: Obsidian cold-start integration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/integration-cold-start.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cold-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NOTE_COUNT: "12000"
+      OBSIDIAN_VERSION: "1.13.7"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build current plugin
+        run: |
+          npm ci
+          npm run build
+          npm install --no-save chrome-remote-interface
+
+      - name: Install Obsidian desktop and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          curl -L --retry 3 -o "$RUNNER_TEMP/obsidian.deb" \
+            "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian_${OBSIDIAN_VERSION}_amd64.deb"
+          sudo apt-get install -y "$RUNNER_TEMP/obsidian.deb"
+
+      - name: Prepare disposable integration vault
+        run: |
+          VAULT="$RUNNER_TEMP/mdse-integration-vault"
+          echo "VAULT=$VAULT" >> "$GITHUB_ENV"
+          rm -rf "$VAULT"
+          mkdir -p "$VAULT/.obsidian/plugins/mdse-workbench"
+
+          cp -R vault/99_System "$VAULT/99_System"
+          npm run bench:generate -- "$NOTE_COUNT" "$VAULT/IntegrationData"
+
+          cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/mdse-workbench/"
+          printf '%s\n' '["mdse-workbench"]' > "$VAULT/.obsidian/community-plugins.json"
+          cat > "$VAULT/.vault.yaml" <<'EOF'
+          vault_uid: 20261004184300000integrationtest
+          vault_name: MDSE Integration
+          default_branch: main
+          EOF
+
+          export VAULT NOTE_COUNT
+          node -e 'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.NOTE_COUNT),label:"setup"},null,2))'
+
+      - name: One-time Obsidian setup — register vault and enable plugin
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg
+        run: |
+          mkdir -p "$XDG_CONFIG_HOME"
+          export VAULT NOTE_COUNT
+          xvfb-run -a bash -euo pipefail -c '
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9222 >"$RUNNER_TEMP/obsidian-setup.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+            node bench/obsidian-e2e-setup.mjs "$VAULT"
+            for i in $(seq 1 120); do
+              [ -f "$VAULT/.mdse_integration_result.json" ] && break
+              sleep 0.25
+            done
+            sleep 1
+          '
+
+      - name: Measure true cold launch through metadata resolution and core-ready
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg
+        run: |
+          rm -rf "$VAULT/.obsidian/plugins/mdse-workbench/cache"
+          rm -f "$VAULT/.mdse_integration_result.json"
+          export VAULT NOTE_COUNT
+
+          xvfb-run -a bash -euo pipefail -c '
+            node -e '"'"'const fs=require("fs");fs.writeFileSync(process.env.VAULT+"/.mdse_integration_probe.json",JSON.stringify({launchStartedAt:Date.now(),noteCount:Number(process.env.NOTE_COUNT),label:"cold-real-obsidian"},null,2))'"'"'
+            /usr/bin/obsidian --no-sandbox --disable-gpu --remote-debugging-port=9223 >"$RUNNER_TEMP/obsidian-cold.log" 2>&1 &
+            PID=$!
+            trap "kill $PID 2>/dev/null || true" EXIT
+
+            for i in $(seq 1 360); do
+              if [ -f "$VAULT/.mdse_integration_result.json" ]; then
+                cat "$VAULT/.mdse_integration_result.json"
+                exit 0
+              fi
+              sleep 0.5
+            done
+            echo "Timed out waiting for Workbench cold-start integration result." >&2
+            tail -200 "$RUNNER_TEMP/obsidian-cold.log" >&2 || true
+            exit 1
+          '
+
+      - name: Validate cold-start evidence
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const p = process.env.VAULT + "/.mdse_integration_result.json";
+          const r = JSON.parse(fs.readFileSync(p, "utf8"));
+          const fail = (m) => { throw new Error(m); };
+          if (r.label !== "cold-real-obsidian") fail("wrong measurement label");
+          if (r.mode !== "full") fail("cold measurement did not use full rebuild");
+          if (!Number.isFinite(r.launchToMetadataResolvedMs)) fail("metadata-resolution timestamp missing");
+          if (!Number.isFinite(r.launchToCoreReadyMs)) fail("core-ready timestamp missing");
+          if (r.launchToCoreReadyMs < r.launchToMetadataResolvedMs) fail("core-ready preceded metadata resolution");
+          if (r.files < Number(process.env.NOTE_COUNT)) fail("not all generated Markdown files were parsed");
+          console.log("Validated real-Obsidian cold-start evidence:", r);
+          fs.copyFileSync(p, "obsidian-cold-start-result.json");
+          NODE
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -f obsidian-cold-start-result.json ]; then
+            node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const r=require("./obsidian-cold-start-result.json");
+          console.log("## Real Obsidian cold-start integration");
+          console.log("");
+          console.log("| Metric | Value |");
+          console.log("|---|---:|");
+          console.log("| Notes requested | "+r.noteCount+" |");
+          console.log("| Markdown files parsed | "+r.files+" |");
+          console.log("| Model elements | "+r.elements+" |");
+          console.log("| Authored links | "+r.links+" |");
+          console.log("| Launch → plugin load | "+r.launchToPluginMs+" ms |");
+          console.log("| Launch → Obsidian metadata resolved | "+r.launchToMetadataResolvedMs+" ms |");
+          console.log("| Launch → Workbench core ready | "+r.launchToCoreReadyMs+" ms |");
+          console.log("| Plugin load → core ready | "+r.pluginToCoreReadyMs+" ms |");
+          console.log("| Workbench core work | "+r.workbenchCoreWorkMs+" ms |");
+          console.log("| Index mode | "+r.mode+" |");
+          NODE
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: obsidian-cold-start-evidence
+          path: |
+            obsidian-cold-start-result.json
+            ${{ runner.temp }}/obsidian-setup.log
+            ${{ runner.temp }}/obsidian-cold.log
+          if-no-files-found: warn
