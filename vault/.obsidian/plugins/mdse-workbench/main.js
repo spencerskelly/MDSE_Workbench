@@ -2533,6 +2533,56 @@ function blockId(link) {
   return id || null;
 }
 
+// src/core/relationship-dependencies.ts
+var ReversePathDependencyIndex = class {
+  constructor() {
+    this.byTarget = /* @__PURE__ */ new Map();
+    this.bySource = /* @__PURE__ */ new Map();
+  }
+  set(sourcePath, targetPaths) {
+    this.remove(sourcePath);
+    const targets = new Set([...targetPaths].filter((path) => path && path !== sourcePath));
+    if (!targets.size) return;
+    this.bySource.set(sourcePath, targets);
+    for (const target of targets) {
+      let sources = this.byTarget.get(target);
+      if (!sources) this.byTarget.set(target, sources = /* @__PURE__ */ new Set());
+      sources.add(sourcePath);
+    }
+  }
+  remove(sourcePath) {
+    const targets = this.bySource.get(sourcePath);
+    if (!targets) return;
+    this.bySource.delete(sourcePath);
+    for (const target of targets) {
+      const sources = this.byTarget.get(target);
+      if (!sources) continue;
+      sources.delete(sourcePath);
+      if (!sources.size) this.byTarget.delete(target);
+    }
+  }
+  dependentsOf(targetPaths) {
+    const out = /* @__PURE__ */ new Set();
+    for (const target of targetPaths) {
+      for (const source of this.byTarget.get(target) ?? []) out.add(source);
+    }
+    return [...out].sort();
+  }
+  targetsOf(sourcePath) {
+    return [...this.bySource.get(sourcePath) ?? []].sort();
+  }
+  clear() {
+    this.byTarget.clear();
+    this.bySource.clear();
+  }
+  get targetCount() {
+    return this.byTarget.size;
+  }
+  get sourceCount() {
+    return this.bySource.size;
+  }
+};
+
 // src/core/cooperative.ts
 var UI_WORK_SLICE_BUDGET_MS = 12;
 var CooperativeBudget = class {
@@ -2720,6 +2770,8 @@ var Indexer = class {
     this.livePending = /* @__PURE__ */ new Set();
     this.liveApplyTimer = null;
     this.liveApplyTask = null;
+    /** Derived target-path → source-note lookup for targeted relationship re-resolution. */
+    this.relationshipDependencies = new ReversePathDependencyIndex();
     /** Path-set changes can alter Obsidian wikilink resolution in otherwise unchanged notes. */
     this.relationshipResolveTimer = null;
     this.relationshipResolveTask = null;
@@ -2974,6 +3026,26 @@ var Indexer = class {
   setSchema(schema) {
     this.schema = schema;
   }
+  relationshipDependentsOf(paths) {
+    return this.relationshipDependencies.dependentsOf(paths);
+  }
+  relationshipTargets(rec) {
+    const targets = /* @__PURE__ */ new Set();
+    for (const values of rec.fields.values()) for (const path of values) targets.add(path);
+    for (const ref of rec.localRefs ?? []) targets.add(ref.path);
+    return [...targets];
+  }
+  syncRelationshipDependency(rec, sourcePath) {
+    if (!rec) {
+      this.relationshipDependencies.remove(sourcePath);
+      return;
+    }
+    this.relationshipDependencies.set(sourcePath, this.relationshipTargets(rec));
+  }
+  rebuildRelationshipDependencies() {
+    this.relationshipDependencies.clear();
+    for (const rec of this.index.notes.values()) this.syncRelationshipDependency(rec, rec.path);
+  }
   /**
    * Install only the core semantic cache. Local Model regions remain deferred and are discovered
    * from Obsidian metadata without reading note bodies.
@@ -2999,6 +3071,7 @@ var Indexer = class {
     this.lastHydrationCandidatesValue = this.deferredHydrationPaths.length;
     this.localReadErrors.clear();
     this.index = state.index;
+    this.rebuildRelationshipDependencies();
     this.fingerprints.clear();
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
     this.dirty.clear();
@@ -3025,6 +3098,7 @@ var Indexer = class {
     this.lastHydrationCandidatesValue = 0;
     this.localReadErrors.clear();
     this.index = state.index;
+    this.rebuildRelationshipDependencies();
     this.local = state.local;
     this.fingerprints.clear();
     for (const [path, fp] of state.fingerprints) this.fingerprints.set(path, { ...fp });
@@ -3133,6 +3207,7 @@ var Indexer = class {
     const deleted = [...new Set(plan.deleted)].sort();
     for (const path of deleted) {
       this.index.remove(path);
+      this.relationshipDependencies.remove(path);
       this.removeLocalRegion(path);
       this.localReadErrors.delete(path);
       this.fingerprints.delete(path);
@@ -3188,14 +3263,16 @@ var Indexer = class {
         (linkpath, fromPath) => this.app.metadataCache.getFirstLinkpathDest(linkpath, fromPath)?.path
       );
       if (!sameResolvedEvidence(rec, resolved)) {
-        this.index.upsert({
+        const next = {
           ...rec,
           fields: resolved.fields,
           unresolved: resolved.unresolved,
           broken: resolved.broken,
           repeat: resolved.repeat,
           localRefs: resolved.localRefs
-        });
+        };
+        this.index.upsert(next);
+        this.syncRelationshipDependency(next, rec.path);
         this.cacheDirtyPaths.add(rec.path);
         changed++;
       }
@@ -3247,6 +3324,7 @@ var Indexer = class {
     const rec = this.record(file);
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
+    this.syncRelationshipDependency(rec, path);
     const revision = (this.localRevision.get(path) ?? 0) + 1;
     this.localRevision.set(path, revision);
     if (this.mayHaveLocalModel(file)) {
@@ -3364,6 +3442,7 @@ var Indexer = class {
       await buildBudget.checkpoint(yieldToUi);
     }
     this.index = index;
+    this.rebuildRelationshipDependencies();
     this.local = local;
     this.fingerprints.clear();
     this.cacheDirtyPaths.clear();
@@ -3399,6 +3478,7 @@ var Indexer = class {
     const rec = f instanceof import_obsidian.TFile ? this.record(f) : null;
     if (rec) this.index.upsert(rec);
     else this.index.remove(path);
+    this.syncRelationshipDependency(rec, path);
     this.applyLocal(path, f instanceof import_obsidian.TFile ? f : null);
     this.bumpRevision(path);
   }
