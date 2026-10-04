@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalEndpointCreateModal, LocalPartCreateModal, LocalPartDeleteModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalEndpointCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -229,8 +229,10 @@ export class NoteDetailPanel extends Component {
     if (this.editing && record.kind === "part") {
       const addEndpoint = head.createEl("button", { text: "Add endpoint…", cls: "mdse-detail-btn" });
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
-      const deletePart = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
-      deletePart.onclick = () => this.deletePartOccurrence(file, record);
+    }
+    if (this.editing && (record.kind === "part" || record.kind === "endpoint")) {
+      const deleteOccurrence = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
+      deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
     }
     const owner = head.createEl("button", { text: "Open owner", cls: "mdse-detail-btn" });
     owner.onclick = () => void this.app.workspace.getLeaf(true).openFile(file);
@@ -351,14 +353,16 @@ export class NoteDetailPanel extends Component {
     }
   }
 
-  private deletePartOccurrence(file: TFile, record: LocalRecord): void {
+  private deleteOccurrence(file: TFile, record: LocalRecord): void {
+    if (record.kind !== "part" && record.kind !== "endpoint") return;
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
-      new LocalPartDeleteModal(
+      new LocalOccurrenceDeleteModal(
         this.app,
         file.basename,
         record.identifier,
+        record.kind,
         () => editor.stageLocalRecordDelete(file.path, record.localId),
         (transactionId) => editor.applyLocalDelete(transactionId),
         (transactionId) => { editor.cancelLocalDelete(transactionId); },
