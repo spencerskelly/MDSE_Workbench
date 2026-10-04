@@ -305,3 +305,14 @@ The full-build path now:
 4. hydrates those bodies in bounded background batches.
 
 Occurrence-aware views, global assurance and semantic-cache persistence call the Local Model settle barrier before consuming contextual semantics. The status surface reports pending Local Model hydration while the core graph remains usable. Epoch/revision guards prevent stale asynchronous reads from overwriting a later edit/rebuild.
+
+
+## RTA-4 implementation note — W-349 to W-352
+
+The runtime now separates three concerns that previously risked being conflated:
+
+- **Assurance:** one shared revision-scoped service owns whole-model findings and Local Model validation. Review and Diagnostics consume the same snapshot.
+- **Health:** one lightweight runtime-health summary reports startup/sync/cache/schema/read state from already-known data only. It never triggers assurance.
+- **Live indexing:** rapid editor/metadata events are coalesced per path for 250 ms before semantic reparsing, preventing repeated Local Model body reads during a typing burst. Bursts at the existing 300-path threshold deliberately fall back to the quiet-time full rebuild.
+
+The user-facing consequence is intentional: **runtime health** answers “is the tool/model service working?”, while **Review** answers “what engineering/model findings exist?”. Engineering findings do not make the runtime itself appear broken.
