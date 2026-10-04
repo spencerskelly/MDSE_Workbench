@@ -4,6 +4,19 @@
  * Source Markdown/authored link evidence remains authoritative. These indexes only answer
  * which source notes can be affected when one or more target paths change.
  */
+/**
+ * Conservative safety guard for targeted relationship re-resolution.
+ *
+ * Step 34 deliberately defines policy before Step 37 benchmarks representative vault-scale
+ * add/delete/rename reconciliation. Candidate sets at or below this size stay targeted; larger
+ * sets use the already-cooperative whole-graph path. Tune only from measured Step 37 evidence.
+ */
+export const TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES = 5_000;
+
+export function shouldUseFullRelationshipReresolution(candidateCount: number): boolean {
+  return candidateCount > TARGETED_RELATIONSHIP_RERESOLUTION_MAX_CANDIDATES;
+}
+
 export class ReversePathDependencyIndex {
   private readonly byTarget = new Map<string, Set<string>>();
   private readonly byAuthoredKey = new Map<string, Set<string>>();
