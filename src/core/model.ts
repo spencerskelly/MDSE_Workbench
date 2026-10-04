@@ -5,6 +5,15 @@
 import { allows } from "./rules";
 import type { RelationshipDef, Schema } from "./schema";
 
+export interface AuthoredRelationshipLink {
+  /** Relationship field name as authored in frontmatter. */
+  field: string;
+  /** Full wikilink text captured from Obsidian metadata, including fragment/alias when present. */
+  link: string;
+  /** Obsidian linkpath used for target resolution (alias/fragment removed). */
+  linkpath: string;
+}
+
 export interface NoteRecord {
   path: string;
   /** File name without extension: the note name engineers see. */
@@ -12,6 +21,8 @@ export interface NoteRecord {
   type?: string;
   id?: string;
   uid?: string;
+  /** Raw relationship-link evidence retained so cached notes can be safely re-resolved after path-set changes. */
+  authoredLinks?: AuthoredRelationshipLink[];
   /** Relationship field (forward or inverse) → target note paths, resolved by the caller. */
   fields: Map<string, string[]>;
   /** Links in relationship fields whose target note does not exist. */
