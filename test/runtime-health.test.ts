@@ -10,6 +10,7 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
       coreError: null,
       occurrenceError: null,
       localPending: 0,
+      localQueued: 0,
       livePending: 0,
       localReadErrors: 0,
       schemaWarnings: 0,
@@ -26,6 +27,7 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
     coreError: null,
     occurrenceError: null,
     localPending: 12,
+    localQueued: 0,
     livePending: 0,
     localReadErrors: 0,
     schemaWarnings: 0,
@@ -42,6 +44,7 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
     coreError: null,
     occurrenceError: null,
     localPending: 0,
+    localQueued: 0,
     livePending: 0,
     localReadErrors: 0,
     schemaWarnings: 0,
@@ -59,6 +62,7 @@ test("runtime health distinguishes startup, syncing, healthy and attention witho
     coreError: null,
     occurrenceError: null,
     localPending: 0,
+    localQueued: 0,
     livePending: 0,
     localReadErrors: 2,
     schemaWarnings: 1,
@@ -77,6 +81,7 @@ test("engineering findings do not turn runtime health into a runtime failure", (
     coreError: null,
     occurrenceError: null,
     localPending: 0,
+    localQueued: 0,
     livePending: 0,
     localReadErrors: 0,
     schemaWarnings: 0,
@@ -97,6 +102,7 @@ test("coalesced live edits appear as syncing rather than runtime failure", () =>
     coreError: null,
     occurrenceError: null,
     localPending: 0,
+    localQueued: 0,
     livePending: 3,
     localReadErrors: 0,
     schemaWarnings: 0,
@@ -117,6 +123,7 @@ test("core and occurrence failures are reported as scoped runtime attention", ()
     coreError: "schema parser crashed",
     occurrenceError: null,
     localPending: 0,
+    localQueued: 0,
     livePending: 0,
     localReadErrors: 0,
     schemaWarnings: 0,
@@ -134,6 +141,7 @@ test("core and occurrence failures are reported as scoped runtime attention", ()
     coreError: null,
     occurrenceError: "background failure",
     localPending: 0,
+    localQueued: 0,
     livePending: 0,
     localReadErrors: 0,
     schemaWarnings: 0,
@@ -143,4 +151,25 @@ test("core and occurrence failures are reported as scoped runtime attention", ()
   });
   assert.equal(occurrence.level, "attention");
   assert.match(occurrence.rows.map((r) => r[1]).join(" "), /background failure/);
+});
+
+
+test("deferred occurrence work is reported as queued without implying core unavailability", () => {
+  const h = summarizeRuntimeHealth({
+    ready: true,
+    building: false,
+    coreError: null,
+    occurrenceError: null,
+    localPending: 12,
+    localQueued: 12,
+    livePending: 0,
+    localReadErrors: 0,
+    schemaWarnings: 0,
+    cacheWriteError: null,
+    cacheCurrent: false,
+    assurance: null,
+  });
+  assert.equal(h.level, "syncing");
+  assert.match(h.label, /occurrence data queued/);
+  assert.match(h.detail, /Core model is ready/);
 });
