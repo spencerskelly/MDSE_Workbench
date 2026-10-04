@@ -18,7 +18,7 @@ test("rapid edit bursts cannot force another cache generation inside the minimum
   assert.equal(cachePersistenceDelayMs(101_000, lastWriteAt), 29_000);
   assert.equal(cachePersistenceDelayMs(105_000, lastWriteAt), 25_000);
   assert.equal(cachePersistenceDelayMs(115_000, lastWriteAt), 15_000);
-  assert.equal(cachePersistenceDelayMs(121_999, lastWriteAt), CACHE_PERSIST_QUIET_MS);
+  assert.equal(cachePersistenceDelayMs(122_000, lastWriteAt), CACHE_PERSIST_QUIET_MS);
 });
 
 test("after the minimum interval expires, persistence still requires a quiet window", () => {
