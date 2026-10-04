@@ -165,6 +165,11 @@ var CacheMutationGate = class {
   }
 };
 
+// src/core/core-readiness.ts
+function canPublishCoreReady(state) {
+  return state.publicationGate && state.schemaLoaded && state.writerReady && state.statsAvailable && !state.sourceReconciliationPending && !state.building;
+}
+
 // src/core/cache-size.ts
 async function cacheTreeSizeBytes(storage, root) {
   let total = 0;
@@ -5467,6 +5472,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.lastTimeToCoreReadyMs = null;
     this.lastTimeToOccurrenceReadyMs = null;
     this.startupRunStartedAt = null;
+    /** Explicit publication gate: restored/build stats are internal until source validation settles. */
+    this.coreReadyPublished = false;
     this.startPromise = null;
     this.pendingRebuild = false;
     /** Last foreground model/UI activity; background subsystems share this preemption signal. */
@@ -5923,6 +5930,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   /** Load schema, build/restore the index, then follow vault changes (WB-033, WB-086, W-343/W-344). */
   async runStart(rebuild) {
     const runStartedAt = performance.now();
+    this.coreReadyPublished = false;
     this.lastCoreError = null;
     const firstStart = !this.indexer;
     if (firstStart) {
@@ -6040,6 +6048,10 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       this.setRuntimeStatus("indexing");
       stats = await indexer.build();
     }
+    await indexer.whenSourceSettled();
+    if (!indexer.stats) throw new Error("Core source reconciliation settled without publishable index statistics.");
+    stats = indexer.stats;
+    this.coreReadyPublished = true;
     this.lastTimeToCoreReadyMs = Math.round(performance.now() - runStartedAt);
     const localPending = indexer.localHydrationPending;
     if (!localPending) this.lastTimeToOccurrenceReadyMs = this.lastTimeToCoreReadyMs;
@@ -6057,7 +6069,15 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
   }
   /** Quiet version of ready(): no notice. Used by Review, which waits and retries. */
   isReady() {
-    return !!(this.schema && this.indexer && this.writer && !this.indexer.building && this.indexer.stats);
+    const indexer = this.indexer;
+    return canPublishCoreReady({
+      publicationGate: this.coreReadyPublished,
+      schemaLoaded: !!this.schema,
+      writerReady: !!this.writer,
+      statsAvailable: !!indexer?.stats,
+      sourceReconciliationPending: indexer?.sourceReconciliationPending ?? true,
+      building: !!indexer?.building
+    });
   }
   confirmClearSemanticCache() {
     new ConfirmModal(
