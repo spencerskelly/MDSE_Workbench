@@ -72,3 +72,17 @@ test("updating authored linkpaths removes stale add candidates", () => {
   assert.deepEqual(index.candidatesForPathChanges(["Old.md"]), []);
   assert.deepEqual(index.candidatesForPathChanges(["New.md"]), ["Source.md"]);
 });
+
+
+test("path-change fan-out reports conservative source counts per changed path without changing candidate semantics", () => {
+  const index = new ReversePathDependencyIndex();
+  index.set("A.md", ["Folder/Controller.md"], ["Controller"]);
+  index.set("B.md", [], ["Controller"]);
+  index.set("C.md", ["Other.md"], ["Other"]);
+
+  assert.deepEqual(index.candidateFanOutForPathChanges(["Other.md", "Folder/Controller.md", "Other.md"]), [
+    { path: "Folder/Controller.md", candidates: 2 },
+    { path: "Other.md", candidates: 1 },
+  ]);
+  assert.deepEqual(index.candidatesForPathChanges(["Folder/Controller.md", "Other.md"]), ["A.md", "B.md", "C.md"]);
+});
