@@ -77,3 +77,25 @@ test("supersession warns when the proposed replacement is retired", () => {
   assert.equal(plan.valid, true);
   assert.ok(plan.warnings.some((x) => /already retired/.test(x)));
 });
+
+
+test("supersession migration excludes lifecycle provenance links but retains engineering dependencies", () => {
+  const plan = planDefinitionSupersession({
+    replacedPath: "30_Objects/Old Contactor.md",
+    replacedType: "Object",
+    replacementPath: "30_Objects/New Contactor.md",
+    replacementType: "Object",
+    impact: {
+      definitionPath: "30_Objects/Old Contactor.md",
+      noteUses: [
+        { fromPath: "30_Objects/New Contactor.md", field: "supersedes" },
+        { fromPath: "30_Objects/Historical.md", field: "supersededBy" },
+        { fromPath: "10_Systems/System.md", field: "hasPart" },
+      ],
+      occurrenceUses: [],
+    },
+  });
+  assert.deepEqual(plan.migrationCandidates, [
+    { scope: "note", ownerPath: "10_Systems/System.md", field: "hasPart" },
+  ]);
+});
