@@ -477,6 +477,30 @@ export class NoteDetailPanel extends Component {
     else body.createEl("p", { cls: "mdse-detail-empty", text: "This definition has no text." });
   }
 
+  private definitionEditFromOccurrence(file: TFile): boolean {
+    return this.definitionReturn?.definitionPath === file.path;
+  }
+
+  /**
+   * Impact review is consumed by one canonical-definition mutation. This makes the gate apply
+   * immediately before Apply rather than only when edit mode was entered.
+   */
+  private async ensureDefinitionImpactReviewed(file: TFile): Promise<boolean> {
+    if (!this.definitionEditFromOccurrence(file)) return true;
+    const impact = await this.host.definitionImpact(file.path);
+    if (impact.notes + impact.occurrences === 0) return true;
+    if (this.definitionImpactReviewedPath === file.path) return true;
+    new Notice(
+      `Review impact before applying this definition change: ${impact.notes} note-level use${impact.notes === 1 ? "" : "s"} and ${impact.occurrences} occurrence${impact.occurrences === 1 ? "" : "s"} depend on ${file.basename}.`,
+      10000,
+    );
+    return false;
+  }
+
+  private consumeDefinitionImpactReview(file: TFile): void {
+    if (this.definitionEditFromOccurrence(file)) this.definitionImpactReviewedPath = null;
+  }
+
   private async reviewDefinitionImpact(file: TFile): Promise<void> {
     try {
       const impact = await this.host.definitionImpact(file.path);
@@ -1116,9 +1140,11 @@ export class NoteDetailPanel extends Component {
       }
       const save = async (v: unknown) => {
         try {
+          if (!(await this.ensureDefinitionImpactReviewed(file))) return;
           const writer = this.host.writer();
           if (!writer) throw new Error("Workbench is still starting.");
           await writer.setProperty(file.path, r.key, v);
+          this.consumeDefinitionImpactReview(file);
           new Notice(`Saved ${r.key} on ${file.basename}.`, 3000);
         } catch (e) {
           new Notice(`Not saved: ${(e as Error).message}`, 12000);
@@ -1183,7 +1209,15 @@ export class NoteDetailPanel extends Component {
     }
     if (this.editing) {
       const add = details.createEl("button", { text: "Add relationship…", cls: "mdse-detail-btn mdse-detail-add" });
-      add.onclick = () => new ElementPicker(this.app, this.host.elements(file.path), `Relate ${file.basename} to…`, (second) => this.host.relate(file.path, second.path)).open();
+      add.onclick = () => {
+        void (async () => {
+          if (!(await this.ensureDefinitionImpactReviewed(file))) return;
+          new ElementPicker(this.app, this.host.elements(file.path), `Relate ${file.basename} to…`, (second) => {
+            this.consumeDefinitionImpactReview(file);
+            this.host.relate(file.path, second.path);
+          }).open();
+        })();
+      };
     }
   }
 
@@ -1201,12 +1235,14 @@ export class NoteDetailPanel extends Component {
     new ConfirmModal(this.app, text, "Remove", () => {
       void (async () => {
         try {
+          if (!(await this.ensureDefinitionImpactReviewed(file))) return;
           const writer = this.host.writer();
           if (!writer) throw new Error("Workbench is still starting.");
           if (!target) await writer.removeMissing(file.path, field, linkText);
           else if (forward) await writer.remove(forward, file.path, target.path);
           else if (inverseOf) await writer.remove(inverseOf, target.path, file.path);
           else throw new Error(`${field} is not a relationship in this vault's schema.`);
+          this.consumeDefinitionImpactReview(file);
           new Notice(`Removed ${field} → ${shown}.`, 4000);
         } catch (e) {
           new Notice(`Not removed: ${(e as Error).message}`, 12000);
@@ -1251,9 +1287,11 @@ export class NoteDetailPanel extends Component {
     save.onclick = () => {
       void (async () => {
         try {
+          if (!(await this.ensureDefinitionImpactReviewed(file))) return;
           const writer = this.host.writer();
           if (!writer) throw new Error("Workbench is still starting.");
           await writer.setBody(file.path, this.bodyLoaded, area.value);
+          this.consumeDefinitionImpactReview(file);
           this.bodyLoaded = area.value; // clean now; the change event re-renders the popup
           sync();
           new Notice(`Saved the text of ${file.basename}.`, 3000);
