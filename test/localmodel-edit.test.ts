@@ -687,3 +687,38 @@ test("flow deletion still reports local block references when present", () => {
     impact.field === "endpointA"
   ));
 });
+
+
+test("plans endpoint part reassignment without changing endpoint identity", () => {
+  const endpointId = "ep-" + tokenC;
+  const targetPartId = "part-" + tokenB;
+  const result = planLocalRecordPatch(
+    note(),
+    endpointId,
+    { fields: { part: "[[#^" + targetPartId + "|K2]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
+  assert.equal(endpoint?.kind, "endpoint");
+  assert.equal(endpoint?.localId, endpointId);
+  assert.equal(endpoint?.part?.blockId, targetPartId);
+  assert.equal(endpoint?.part?.target, "");
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("endpoint part reassignment surfaces a missing target as blocking validation", () => {
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordPatch(
+    note(),
+    endpointId,
+    { fields: { part: "[[#^part-20261005004000099skellyspencer|Missing]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === endpointId &&
+    finding.code === "ref.local-missing" &&
+    finding.severity === "error"
+  ));
+});
