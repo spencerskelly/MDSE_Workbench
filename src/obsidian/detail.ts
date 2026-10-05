@@ -36,7 +36,9 @@ export interface DetailHost {
   stageDefinitionCreation(kind: LocalRecord["kind"], name: string, path: string): StagedDefinitionCreation;
   applyDefinitionCreation(transactionId: string): Promise<void>;
   cancelDefinitionCreation(transactionId: string): void;
-  bindOccurrenceDefinition(ownerPath: string, localId: string, definitionPath: string): Promise<void>;
+  stageOccurrenceDefinitionBinding(ownerPath: string, localId: string, definitionPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
+  applyOccurrenceDefinitionBinding(transactionId: string): Promise<void>;
+  cancelOccurrenceDefinitionBinding(transactionId: string): void;
 }
 
 export class NoteDetailPanel extends Component {
@@ -371,7 +373,9 @@ export class NoteDetailPanel extends Component {
           (name, path) => this.host.stageDefinitionCreation(record.kind, name, path),
           (transactionId) => this.host.applyDefinitionCreation(transactionId),
           (transactionId) => this.host.cancelDefinitionCreation(transactionId),
-          (definitionPath) => this.host.bindOccurrenceDefinition(file.path, record.localId, definitionPath),
+          (definitionPath) => this.host.stageOccurrenceDefinitionBinding(file.path, record.localId, definitionPath),
+          (transactionId) => this.host.applyOccurrenceDefinitionBinding(transactionId),
+          (transactionId) => this.host.cancelOccurrenceDefinitionBinding(transactionId),
           () => { void this.refreshLocal(file, record.localId, false); },
         ).open();
       };
