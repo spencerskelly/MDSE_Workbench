@@ -1296,3 +1296,109 @@ test("part definition edit rejects a block-fragment definition", () => {
     finding.severity === "error"
   ));
 });
+
+
+test("plans endpoint definition change while preserving endpoint topology and connection references", () => {
+  const partId = "part-20261005016000000skellyspencer";
+  const endpointId = "ep-20261005016000001skellyspencer";
+  const peerId = "ep-20261005016000002skellyspencer";
+  const exposureId = "ep-20261005016000003skellyspencer";
+  const equalsId = "ep-20261005016000004skellyspencer";
+  const connectionId = "conn-20261005016000005skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Contactor]]",
+    "^" + partId,
+    "",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[Old Port]]",
+    "- usage: option",
+    "- multiplicity: 2",
+    "- part: [[#^" + partId + "|K1]]",
+    "- exposes: [[#^" + exposureId + "|J3]]",
+    "- equals: [[#^" + equalsId + "|J4]]",
+    "^" + endpointId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + peerId,
+    "",
+    "#### J3",
+    "- definition: [[CAN Port]]",
+    "^" + exposureId,
+    "",
+    "#### J4",
+    "- definition: [[CAN Port]]",
+    "^" + equalsId,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointId + "|J1]]",
+    "- endpointB: [[#^" + peerId + "|J2]]",
+    "^" + connectionId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    endpointId,
+    { fields: { definition: "[[New Port]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const region = parseLocalModel(result.after);
+  const endpoint = region?.records.find((record) => record.localId === endpointId);
+  const connection = region?.records.find((record) => record.localId === connectionId);
+  assert.equal(endpoint?.definition?.target, "New Port");
+  assert.equal(endpoint?.usage, "option");
+  assert.equal(endpoint?.multiplicity, "2");
+  assert.equal(endpoint?.part?.blockId, partId);
+  assert.equal(endpoint?.exposes[0]?.blockId, exposureId);
+  assert.equal(endpoint?.equals[0]?.blockId, equalsId);
+  assert.equal(connection?.endpointA?.blockId, endpointId);
+  assert.equal(connection?.endpointB?.blockId, peerId);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("endpoint definition cannot be cleared because the definition is required", () => {
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordPatch(
+    note(),
+    endpointId,
+    { fields: { definition: null } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === endpointId &&
+    finding.code === "record.missing-definition" &&
+    finding.severity === "error"
+  ));
+});
+
+test("endpoint definition edit rejects a block-fragment definition", () => {
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordPatch(
+    note(),
+    endpointId,
+    { fields: { definition: "[[Some Note#^ep-" + tokenC + "|Bad]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === endpointId &&
+    finding.code === "definition.incompatible" &&
+    finding.severity === "error"
+  ));
+});
