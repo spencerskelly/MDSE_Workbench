@@ -163,10 +163,32 @@ export class DefinitionNoteMigrationService {
   ) {}
 
   async stage(request: DefinitionNoteMigrationServiceRequest): Promise<StagedDefinitionNoteMigration> {
-    if (!(await this.store.exists(request.replacementPath))) {
-      throw new Error(`${request.replacementPath} no longer exists.`);
-    }
+    if (!(await this.store.exists(request.ownerPath))) throw new Error(`${request.ownerPath} no longer exists.`);
+    if (!(await this.store.exists(request.replacedPath))) throw new Error(`${request.replacedPath} no longer exists.`);
+    if (!(await this.store.exists(request.replacementPath))) throw new Error(`${request.replacementPath} no longer exists.`);
+
     const ownerBefore = await this.store.read(request.ownerPath);
+    const replacedBefore = request.replacedPath === request.ownerPath
+      ? ownerBefore
+      : await this.store.read(request.replacedPath);
+    const replacementBefore = request.replacementPath === request.ownerPath
+      ? ownerBefore
+      : request.replacementPath === request.replacedPath
+        ? replacedBefore
+        : await this.store.read(request.replacementPath);
+
+    const validateUid = (text: string, path: string, expected?: string): void => {
+      if (!expected) return;
+      const parsed = frontmatter(text);
+      const storedUid = String(parsed.doc.get("uid") ?? "").trim();
+      if (!storedUid || storedUid !== expected) {
+        throw new Error(`Cannot stage relationship migration: expected ${path} uid ${expected}, found ${storedUid || "none"}.`);
+      }
+    };
+    validateUid(ownerBefore, request.ownerPath, request.ownerUid);
+    validateUid(replacedBefore, request.replacedPath, request.replacedUid);
+    validateUid(replacementBefore, request.replacementPath, request.replacementUid);
+
     const parsedOwner = frontmatter(ownerBefore);
     const currentTargets = list(parsedOwner.doc.get(request.field))
       .map((value) => linkTarget(value))
