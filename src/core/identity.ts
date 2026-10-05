@@ -84,3 +84,30 @@ export function tokenFromLocalId(localId:string): string|null {
   const m=/^(?:part|ep|conn|flow)-(\d{17}[a-z-]{13})$/.exec(localId);
   return m?.[1] ?? null;
 }
+
+
+/** Read the governed note uid from the Markdown source without depending on an index/cache. */
+export function sourceUidFromMarkdown(source: string): string | null {
+  const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(source);
+  if (!frontmatterMatch) return null;
+  const raw = /^uid:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/m.exec(frontmatterMatch[1])?.[1]?.trim() ?? "";
+  return raw || null;
+}
+
+/**
+ * Fail closed when an edit was addressed through an indexed uid but the current source no longer carries
+ * that same identity. This prevents stale index state from redirecting a semantic edit at a different note.
+ */
+export function assertIndexedNoteUidMatchesSource(
+  path: string,
+  source: string,
+  indexedUid: string,
+  operation = "edit",
+): void {
+  const sourceUid = sourceUidFromMarkdown(source);
+  if (!sourceUid || sourceUid !== indexedUid) {
+    throw new Error(
+      `Cannot ${operation} ${path}: indexed uid ${indexedUid} does not match source uid ${sourceUid ?? "none"}.`,
+    );
+  }
+}
