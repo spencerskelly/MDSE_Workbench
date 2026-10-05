@@ -578,12 +578,32 @@ export default class MdseWorkbench extends Plugin {
     definitionPath: string,
   ) {
     const editor = this.modelEditor;
-    if (!editor) throw new Error("Workbench is still starting.");
+    const indexer = this.indexer;
+    if (!editor || !indexer) throw new Error("Workbench is still starting.");
+
     const normalized = normalizePath(definitionPath);
+    const indexedDefinition = indexer.index.notes.get(normalized);
+    if (!indexedDefinition?.uid) {
+      throw new Error(`${normalized} is not an indexed model definition with a durable uid.`);
+    }
+    const definitionUid = indexedDefinition.uid;
+    const validateDefinitionIdentity = async (): Promise<void> => {
+      const file = this.app.vault.getAbstractFileByPath(normalized);
+      if (!(file instanceof TFile)) {
+        throw new Error(`${normalized} no longer exists; reopen occurrence definition review.`);
+      }
+      const text = await this.app.vault.read(file);
+      assertDefinitionSourceUid(text, normalized, definitionUid);
+    };
+    await validateDefinitionIdentity();
+
     const definitionLink = `[[${normalized.replace(/\.md$/i, "")}]]`;
-    return editor.stageAndReviewLocalRecordPatch(ownerPath, localId, {
-      fields: { definition: definitionLink },
-    });
+    return editor.stageAndReviewLocalRecordPatch(
+      ownerPath,
+      localId,
+      { fields: { definition: definitionLink } },
+      validateDefinitionIdentity,
+    );
   }
 
   private async applyOccurrenceDefinitionBinding(transactionId: string): Promise<void> {
