@@ -23,6 +23,19 @@ interface PendingDefinitionRetirement {
   after: string;
   label: string;
   plan: DefinitionRetirementPlan;
+  impactSignature: string;
+}
+
+function impactSignature(impact: DefinitionDeletionImpact): string {
+  const note = impact.noteUses
+    .map((use) => `${use.fromPath}|${use.field}`)
+    .sort()
+    .join("\n");
+  const occurrence = impact.occurrenceUses
+    .map((use) => `${use.ownerPath}|${use.kind}|${use.identifier}|${use.localId}`)
+    .sort()
+    .join("\n");
+  return `${note}\n--\n${occurrence}`;
 }
 
 export function retireDefinitionText(text: string): { text: string; currentStatus: unknown } {
@@ -94,6 +107,7 @@ export class DefinitionRetirementService {
       after: transformed.text,
       label,
       plan,
+      impactSignature: impactSignature(impact),
     });
     return { transaction, plan, path, uid };
   }
@@ -116,12 +130,20 @@ export class DefinitionRetirementService {
   async apply(transactionId: string): Promise<void> {
     const pending = this.requirePending(transactionId);
     if (!pending.plan.changed) throw new Error(`${pending.path} is already retired.`);
+    const latestImpact = await this.impactFor(pending.path);
+    if (impactSignature(latestImpact) !== pending.impactSignature) {
+      throw new Error("Dependent usage changed after Review. Reopen retirement review before Apply.");
+    }
     if (!(await this.store.exists(pending.path))) throw new Error(`${pending.path} no longer exists.`);
     const current = await this.store.read(pending.path);
     if (current !== pending.before) throw new Error(`${pending.path} changed after Review.`);
 
     await this.transactions.apply(transactionId, {
       apply: async () => {
+        const latestImpact = await this.impactFor(pending.path);
+        if (impactSignature(latestImpact) !== pending.impactSignature) {
+          throw new Error("Dependent usage changed after Review.");
+        }
         if (!(await this.store.exists(pending.path))) throw new Error(`${pending.path} no longer exists.`);
         const latest = await this.store.read(pending.path);
         if (latest !== pending.before) throw new Error(`${pending.path} changed after Review.`);
