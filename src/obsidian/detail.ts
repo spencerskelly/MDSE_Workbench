@@ -49,6 +49,9 @@ export interface DetailHost {
   stageDefinitionSupersession(replacedPath: string, replacedUid: string, replacedType: string, replacementPath: string): Promise<StagedDefinitionSupersession>;
   applyDefinitionSupersession(transactionId: string): Promise<void>;
   cancelDefinitionSupersession(transactionId: string): void;
+  stageDefinitionOccurrenceMigration(ownerPath: string, localId: string, replacedPath: string, replacementPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
+  applyDefinitionOccurrenceMigration(transactionId: string): Promise<void>;
+  cancelDefinitionOccurrenceMigration(transactionId: string): void;
   stageOccurrenceDefinitionBinding(ownerPath: string, localId: string, definitionPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
   applyOccurrenceDefinitionBinding(transactionId: string): Promise<void>;
   cancelOccurrenceDefinitionBinding(transactionId: string): void;
@@ -190,6 +193,9 @@ export class NoteDetailPanel extends Component {
               (replacementPath) => this.host.stageDefinitionSupersession(file.path, uid, definitionType, replacementPath),
               (transactionId) => this.host.applyDefinitionSupersession(transactionId),
               (transactionId) => this.host.cancelDefinitionSupersession(transactionId),
+              (ownerPath, localId, replacedPath, replacementPath) => this.host.stageDefinitionOccurrenceMigration(ownerPath, localId, replacedPath, replacementPath),
+              (transactionId) => this.host.applyDefinitionOccurrenceMigration(transactionId),
+              (transactionId) => this.host.cancelDefinitionOccurrenceMigration(transactionId),
               () => { void this.show(file, false); },
             ).open();
           };
