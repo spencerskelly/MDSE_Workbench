@@ -1,7 +1,7 @@
 {
   "id": "mdse-workbench",
   "name": "MDSE Workbench",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "minAppVersion": "1.5.0",
   "description": "Create, explore and review an MDSE model vault. Phase 0 spike.",
   "author": "Spencer Skelly",
