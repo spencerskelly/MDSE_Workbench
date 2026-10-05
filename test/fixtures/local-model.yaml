@@ -1,16 +1,17 @@
-schemaVersion: "0.2"
+schemaVersion: "0.3"
 purpose: "Machine-readable contract for governed Local Model Markdown records. This is a tooling/format schema, not a new first-class MDSE element schema."
 
 compatibility:
-  readableVersions: ["0.1", "0.2"]
-  writableVersion: "0.2"
+  readableVersions: ["0.1", "0.2", "0.3"]
+  writableVersion: "0.3"
   version01Normalization: "A 0.1 part or endpoint is standard usage in memory. Reading 0.1 never mutates the file."
+  version02Compatibility: "Schema 0.2 remains readable with its original rule that every endpoint requires a reusable Port definition. Reading or editing 0.2 never silently reinterprets it as 0.3."
   unknownVersion: "Markdown remains readable, but structured Local Model interaction is disabled."
 
 region:
   heading: "Local Model"
   headingLevel: 2
-  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->"
+  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.3 -->"
   endMarker: "<!-- MDSE:LOCAL-MODEL END -->"
   maxPerNote: 1
   markerErrorsBlockStructuredEditing: true
@@ -83,8 +84,8 @@ records:
 
   endpoint:
     headingLevel: 4
-    required: [definition]
-    optional: [usage, identifier, part, parent, exposes, equals, multiplicity, kind]
+    required: []
+    optional: [definition, usage, identifier, part, parent, exposes, equals, multiplicity, kind]
     fields:
       definition: {value: "noteLink", targetSemanticKind: "Port"}
       usage: {value: "enum", allowed: [standard, variant, option]}
@@ -98,8 +99,11 @@ records:
     rules:
       - "part and parent are mutually exclusive."
       - "absence of both part and parent means an endpoint on the owning assembly boundary."
-      - "omitted usage means standard; canonical writing omits usage: standard."
-      - "a standard occurrence cannot point at abstract: true."
+      - "definition, when present, points to the reusable Port/interface definition."
+      - "definition may be omitted when the endpoint is contextual and no reusable Port definition is deterministically supported."
+      - "usage requires definition; a definitionless endpoint has no variation semantics."
+      - "when definition is present, omitted usage means standard; canonical writing omits usage: standard."
+      - "a standard occurrence with a definition cannot point at abstract: true."
       - "variant/option candidates are derived transitively from subtypeOf and are not stored here."
       - "nested inherited members are materialized only when local context needs independent addressability."
       - "exposes means the boundary endpoint makes the inner endpoint available at the next assembly level."
@@ -153,10 +157,12 @@ validation:
   - "Every 30-character identity token is globally unique across note UIDs and all Local Model records."
   - "Every block ID equals the record local ID."
   - "Every local reference resolves to an existing local record of the permitted kind."
-  - "Every definition link resolves to a compatible first-class note."
+  - "Every definition link that is present resolves to a compatible first-class note."
+  - "Part and flow definitions are required; endpoint definition is optional only in schema 0.3."
   - "usage is absent or standard/variant/option on part/endpoint only."
-  - "standard definition is concrete."
-  - "variant has at least one concrete candidate."
+  - "An endpoint without definition must not persist usage."
+  - "standard definition is concrete when a definition is present."
+  - "variant has at least one concrete candidate and therefore requires a definition."
   - "option candidate family is valid even when no configuration currently includes it."
   - "A connection has exactly two valid endpoint references."
   - "A flow is nested under one connection and has valid endpoint roles."
