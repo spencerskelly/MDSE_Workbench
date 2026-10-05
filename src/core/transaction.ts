@@ -110,7 +110,7 @@ export class TransactionManager {
   }
 
   review(transactionId: string): EditTransaction {
-    const tx = this.requireDraft(transactionId);
+    const tx = this.requireOpen(transactionId);
     tx.issues = this.validate(tx);
     tx.status = "reviewed";
     return this.snapshot(tx);
