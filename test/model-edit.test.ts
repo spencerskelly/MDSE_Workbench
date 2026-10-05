@@ -909,3 +909,83 @@ test("cancelled flow deletion leaves source and history untouched", async () => 
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged endpoint part reassignment stays unwritten until Apply and supports undo/redo", async () => {
+  const endpointId = "ep-20261003133512743skellyspencer";
+  const targetPartId = "part-20261003133512744skellyspencer";
+  const original = note();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { part: "[[#^" + targetPartId + "|K2]]" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- part: [[#^" + targetPartId + "|K2]]"));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.ok(store.text.includes("- part: [[#^" + targetPartId + "|K2]]"));
+});
+
+test("staged endpoint part reassignment blocks missing target at Apply", async () => {
+  const endpointId = "ep-20261003133512743skellyspencer";
+  const original = note();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { part: "[[#^part-20261005004100099skellyspencer|Missing]]" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("stale staged endpoint part reassignment is blocked and remains cancellable", async () => {
+  const endpointId = "ep-20261003133512743skellyspencer";
+  const targetPartId = "part-20261003133512744skellyspencer";
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { part: "[[#^" + targetPartId + "|K2]]" },
+  });
+  store.text += "\nexternal change";
+
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /changed while/);
+  assert.equal(transactions.history().length, 0);
+  assert.equal(service.reviewLocalPatch(staged.transaction.id).transaction.status, "draft");
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled endpoint part reassignment leaves source and history untouched", async () => {
+  const endpointId = "ep-20261003133512743skellyspencer";
+  const targetPartId = "part-20261003133512744skellyspencer";
+  const original = note();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { part: "[[#^" + targetPartId + "|K2]]" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
