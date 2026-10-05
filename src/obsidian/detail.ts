@@ -98,6 +98,7 @@ export class NoteDetailPanel extends Component {
     }
     if (switching) {
       this.editing = false;
+      if (this.definitionReturn && file.path !== this.definitionReturn.definitionPath) this.definitionReturn = null;
       if (remember && this.current) this.history.push(this.current.path);
     }
     this.current = file;
@@ -994,6 +995,7 @@ export class NoteDetailPanel extends Component {
     this.generation++;
     this.current = null;
     this.currentLocal = null;
+    this.definitionReturn = null;
     this.history = [];
     this.editing = false;
     this.bodyArea = null;
