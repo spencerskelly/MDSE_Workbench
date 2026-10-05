@@ -1218,3 +1218,63 @@ export class LocalEndpointEqualsEditModal extends Modal {
     })();
   }
 }
+
+
+export class LocalConnectionEndpointRewireModal extends Modal {
+  private staged: StagedLocalPatch | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly connection: LocalRecord,
+    private readonly end: "endpointA" | "endpointB",
+    private readonly options: LocalRecord[],
+    private readonly stage: (target: LocalRecord) => Promise<StagedLocalPatch>,
+    private readonly apply: (id: string) => Promise<void>,
+    private readonly cancel: (id: string) => void,
+    private readonly onApplied: () => void,
+  ) { super(app); }
+
+  onOpen(): void {
+    this.titleEl.setText(`Rewire connection ${this.end}`);
+    this.contentEl.empty();
+    const other = this.end === "endpointA" ? this.connection.endpointB : this.connection.endpointA;
+    this.contentEl.createEl("p", { text: `Change only ${this.end} on ${this.connection.identifier}. The opposite endpoint and all child flows remain unchanged.` });
+
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "New endpoint" });
+    const pick = row.createEl("select", { cls: "mdse-detail-input" });
+    pick.createEl("option", { text: "Choose endpoint...", value: "" });
+    for (const option of this.options) pick.createEl("option", { text: `${option.identifier} - ^${option.localId}`, value: option.localId });
+
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Connection: ${this.connection.identifier} (#^${this.connection.localId})` });
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Other end: ${other?.text ?? "-"}` });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void this.stageReview(pick.value, review);
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try { this.cancel(staged.transaction.id); } catch {}
+  }
+
+  private async stageReview(localId: string, review: HTMLButtonElement): Promise<void> {
+    review.disabled = true;
+    try {
+      const target = this.options.find((option) => option.localId === localId);
+      if (!target) throw new Error("Choose a replacement endpoint.");
+      const staged = await this.stage(target);
+      this.staged = staged;
+      this.renderReview(staged, target);
+    } catch (e) {
+      new Notice(`Cannot stage connection rewire: ${(e as Error).message}`, 12000);
+      review.disabled = false;
+    }
+  }
+}
