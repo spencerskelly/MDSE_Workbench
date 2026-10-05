@@ -16753,6 +16753,24 @@ var FindingModal = class extends import_obsidian5.Modal {
 
 // src/obsidian/writer.ts
 var import_obsidian6 = require("obsidian");
+
+// src/core/identity.ts
+function sourceUidFromMarkdown(source) {
+  const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(source);
+  if (!frontmatterMatch) return null;
+  const raw = /^uid:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/m.exec(frontmatterMatch[1])?.[1]?.trim() ?? "";
+  return raw || null;
+}
+function assertIndexedNoteUidMatchesSource(path, source, indexedUid, operation = "edit") {
+  const sourceUid = sourceUidFromMarkdown(source);
+  if (!sourceUid || sourceUid !== indexedUid) {
+    throw new Error(
+      `Cannot ${operation} ${path}: indexed uid ${indexedUid} does not match source uid ${sourceUid ?? "none"}.`
+    );
+  }
+}
+
+// src/obsidian/writer.ts
 function linkTextFor(app, target, sourcePath) {
   try {
     const md = app.fileManager.generateMarkdownLink(target, sourcePath);
@@ -16804,6 +16822,7 @@ var RelationshipWriter = class {
     const tx = { label: `${owner.basename} ${def.field} ${target.basename}`, files: [] };
     const edit = async (file, field, linkTo) => {
       const before = await this.app.vault.read(file);
+      this.assertCurrentIdentity(file.path, before, "add relationship to");
       let changed = false;
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         changed = addLink(fm, field, linkTextFor(this.app, linkTo, file.path), pointsAt(this.app, linkTo, file.path));
@@ -16824,6 +16843,7 @@ var RelationshipWriter = class {
     const tx = { label: `remove ${owner.basename} ${def.field} ${target.basename}`, files: [] };
     const edit = async (file, field, linkTo) => {
       const before = await this.app.vault.read(file);
+      this.assertCurrentIdentity(file.path, before, "remove relationship from");
       let changed = false;
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         changed = removeLink(fm, field, linkTextFor(this.app, linkTo, file.path), pointsAt(this.app, linkTo, file.path));
@@ -16916,6 +16936,11 @@ var RelationshipWriter = class {
     } catch (e) {
       return "Not redone: " + e.message;
     }
+  }
+  assertCurrentIdentity(path, source, operation) {
+    const uid = this.getIndex().notes.get(path)?.uid;
+    if (!uid) throw new Error(`Cannot ${operation} ${path}: the note is not indexed with a durable uid.`);
+    assertIndexedNoteUidMatchesSource(path, source, uid, operation);
   }
   refs(...paths) {
     const out = [];
