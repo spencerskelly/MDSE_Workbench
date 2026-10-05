@@ -57,6 +57,22 @@ test("findings: missing inverse, orphan inverse, off-rule, provisional", () => {
   assert.equal(f.provisional.length, 1);
 });
 
+test("lifecycle impact sees forward and inverse-authored governed uses", () => {
+  const idx = indexOf(schema, [
+    note("Parent.md", "Object", { hasPart: ["Child.md"] }),
+    note("Child.md", "Object", { partOf: ["Container.md"] }),
+    note("Container.md", "Object"),
+  ]);
+  assert.deepEqual(
+    idx.authoredUsesOf("Child.md").map((e) => [e.from, e.field]),
+    [["Parent.md", "hasPart"]],
+  );
+  assert.deepEqual(
+    idx.authoredUsesOf("Container.md").map((e) => [e.from, e.field]),
+    [["Child.md", "partOf"]],
+  );
+});
+
 test("incremental update and removal keep incoming edges right", () => {
   const idx = indexOf(schema, [note("A.md", "Object", { hasPart: ["B.md"] }), note("B.md", "Object")]);
   assert.equal(idx.in("B.md").length, 1);
