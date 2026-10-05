@@ -9,6 +9,7 @@ import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { StagedDefinitionDelete } from "../core/definition-delete";
 import type { StagedDefinitionRetirement } from "../core/definition-retire";
 import type { StagedDefinitionSupersession } from "../core/definition-supersede-service";
+import type { DefinitionMigrationCandidate } from "../core/definition-supersede";
 import type { StagedDefinitionNoteMigration } from "../core/definition-note-migrate-service";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
@@ -2468,6 +2469,7 @@ export class DefinitionSupersedeModal extends Modal {
     private readonly stageNoteMigration: (ownerPath: string, field: string, replacedPath: string, replacementPath: string) => Promise<StagedDefinitionNoteMigration>,
     private readonly applyNoteMigration: (transactionId: string) => Promise<void>,
     private readonly cancelNoteMigration: (transactionId: string) => void,
+    private readonly refreshMigrationCandidates: (replacedPath: string) => Promise<DefinitionMigrationCandidate[]>,
     private readonly onApplied: () => void,
   ) {
     super(app);
@@ -2600,6 +2602,15 @@ export class DefinitionSupersedeModal extends Modal {
     };
   }
 
+  private async refreshMigration(staged: StagedDefinitionSupersession): Promise<void> {
+    const migrationCandidates = await this.refreshMigrationCandidates(staged.plan.replacedPath);
+    const refreshed: StagedDefinitionSupersession = {
+      ...staged,
+      plan: { ...staged.plan, migrationCandidates },
+    };
+    this.renderMigration(refreshed);
+  }
+
   private renderMigration(staged: StagedDefinitionSupersession): void {
     this.titleEl.setText("Migrate one dependent");
     this.contentEl.empty();
@@ -2640,6 +2651,7 @@ export class DefinitionSupersedeModal extends Modal {
           try {
             const candidate = occurrenceCandidates[Number(pick.value)];
             if (!candidate?.localId) throw new Error("Choose an occurrence.");
+            this.migrationApplied = false;
             const migration = await this.stageMigration(
               candidate.ownerPath,
               candidate.localId,
@@ -2674,6 +2686,7 @@ export class DefinitionSupersedeModal extends Modal {
           try {
             const candidate = noteCandidates[Number(pick.value)];
             if (!candidate) throw new Error("Choose a model relationship.");
+            this.noteMigrationApplied = false;
             const migration = await this.stageNoteMigration(
               candidate.ownerPath,
               candidate.field,
@@ -2742,7 +2755,7 @@ export class DefinitionSupersedeModal extends Modal {
           this.noteMigrationApplied = true;
           this.stagedNoteMigration = null;
           new Notice(`Migrated ${candidate.ownerPath} ${candidate.field} to the replacement definition.`, 6000);
-          this.close();
+          await this.refreshMigration(supersession);
         } catch (e) {
           new Notice(`Relationship migration was not applied: ${(e as Error).message}`, 15000);
           apply.disabled = false;
@@ -2798,7 +2811,7 @@ export class DefinitionSupersedeModal extends Modal {
           this.migrationApplied = true;
           this.stagedMigration = null;
           new Notice(`Migrated occurrence ^${candidate.localId} to the replacement definition.`, 6000);
-          this.close();
+          await this.refreshMigration(supersession);
         } catch (e) {
           new Notice(`Occurrence migration was not applied: ${(e as Error).message}`, 15000);
           apply.disabled = blocking;
