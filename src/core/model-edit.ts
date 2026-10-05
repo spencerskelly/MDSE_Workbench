@@ -316,6 +316,7 @@ export class ModelEditService {
     const plan = planLocalRecordDelete(before, localId);
     const uid = this.ownerUid(path);
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    assertIndexedOwnerUidMatchesSource(path, before, uid);
 
     const txId = `local-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `delete ${plan.kind} ${plan.identifier}`;
