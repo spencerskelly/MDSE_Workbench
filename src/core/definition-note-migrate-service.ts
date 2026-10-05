@@ -57,6 +57,33 @@ function list(value: unknown): unknown[] {
   return [value];
 }
 
+function fieldPairRange(
+  doc: ReturnType<typeof parseDocument>,
+  yaml: string,
+  field: string,
+): [number, number] | null {
+  const contents = doc.contents as {
+    items?: Array<{
+      key?: { range?: [number, number, number?]; toJSON?: () => unknown };
+      value?: { range?: [number, number, number?] } | null;
+    }>;
+  } | null;
+  const pair = contents?.items?.find((item) => {
+    const key = item.key;
+    if (!key) return false;
+    const value = typeof key.toJSON === "function" ? key.toJSON() : undefined;
+    return String(value ?? "") === field;
+  });
+  const keyRange = pair?.key?.range;
+  if (!keyRange) return null;
+  const valueRange = pair?.value?.range;
+  const start = yaml.lastIndexOf("\n", Math.max(0, keyRange[0] - 1)) + 1;
+  const valueEnd = valueRange?.[1] ?? keyRange[1];
+  const newline = yaml.indexOf("\n", valueEnd);
+  const end = newline < 0 ? yaml.length : newline + 1;
+  return [start, end];
+}
+
 function mutateRelationship(
   text: string,
   sourcePath: string,
@@ -84,19 +111,25 @@ function mutateRelationship(
   }
 
   const sorted = kept.sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" }));
-  const encoded = sorted.length
-    ? "\n" + sorted.map((value) => `  - ${JSON.stringify(String(value))}`).join("\n")
-    : " []";
-
   const node = doc.get(field, true);
   let nextYaml: string;
-  if (node === undefined || node === null) {
-    const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}${field}:${encoded}`;
-    nextYaml = yaml + addition;
+
+  if (sorted.length === 0) {
+    if (node === undefined || node === null) return text;
+    const pairRange = fieldPairRange(doc, yaml, field);
+    if (!pairRange) throw new Error(`Cannot safely remove empty ${field}; YAML property source range is unavailable.`);
+    nextYaml = yaml.slice(0, pairRange[0]) + yaml.slice(pairRange[1]);
+    if (nextYaml.endsWith("\n")) nextYaml = nextYaml.slice(0, -1);
   } else {
-    const range = (node as { range?: [number, number, number?] }).range;
-    if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
-    nextYaml = yaml.slice(0, range[0]) + encoded.trimStart() + yaml.slice(range[1]);
+    const encoded = "\n" + sorted.map((value) => `  - ${JSON.stringify(String(value))}`).join("\n");
+    if (node === undefined || node === null) {
+      const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}${field}:${encoded}`;
+      nextYaml = yaml + addition;
+    } else {
+      const range = (node as { range?: [number, number, number?] }).range;
+      if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
+      nextYaml = yaml.slice(0, range[0]) + encoded.trimStart() + yaml.slice(range[1]);
+    }
   }
   return `---\n${nextYaml}\n---\n${body}`;
 }
