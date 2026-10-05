@@ -1,4 +1,4 @@
-import { parseDocument, stringify } from "yaml";
+import { isSeq, parseDocument } from "yaml";
 import { noteRef } from "./localmodel";
 import type { DefinitionDeletionImpact } from "./definition-lifecycle";
 import { planDefinitionSupersession, type DefinitionSupersessionPlan } from "./definition-supersede";
@@ -36,26 +36,43 @@ interface PendingDefinitionSupersession {
   label: string;
 }
 
-function frontmatter(text: string): { doc: ReturnType<typeof parseDocument>; body: string } {
+function frontmatter(text: string): { yaml: string; body: string; prefixLength: number } {
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (!match) throw new Error("Definition note must begin with YAML frontmatter.");
-  return { doc: parseDocument(match[1]), body: text.slice(match[0].length) };
+  return { yaml: match[1], body: text.slice(match[0].length), prefixLength: match[0].length };
 }
 
+/**
+ * Add one relationship without serializing unrelated frontmatter. Supersession is a two-field
+ * structural edit; comments, property order, scalar quoting, blank lines and the note body must
+ * remain byte-for-byte unchanged outside the relationship value being changed.
+ */
 function withRelationship(text: string, field: string, targetPath: string): string {
-  const { doc, body } = frontmatter(text);
-  const existing = doc.get(field);
+  const parsed = frontmatter(text);
+  const doc = parseDocument(parsed.yaml);
+  if (doc.errors.length) throw new Error(`Definition frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
+
   const link = `[[${targetPath.replace(/\.md$/i, "")}]]`;
-  const values = Array.isArray(existing)
-    ? existing.map((value) => String(value))
-    : existing === undefined || existing === null || existing === ""
-      ? []
-      : [String(existing)];
-  if (!values.some((value) => value === link)) values.push(link);
+  const node = doc.get(field, true);
+  if (node === undefined || node === null) {
+    const addition = `${parsed.yaml.endsWith("\n") || parsed.yaml.length === 0 ? "" : "\n"}${field}:\n  - "${link}"`;
+    return `---\n${parsed.yaml}${addition}\n---\n${parsed.body}`;
+  }
+
+  const values = isSeq(node)
+    ? node.items.map((item) => String(item?.toJSON?.() ?? ""))
+    : [String((node as { toJSON?: () => unknown }).toJSON?.() ?? node)];
+  if (values.includes(link)) return text;
+  values.push(link);
   values.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  doc.set(field, values);
-  const yaml = stringify(doc.toJS()).trimEnd();
-  return `---\n${yaml}\n---\n${body}`;
+
+  const range = (node as { range?: [number, number, number?] }).range;
+  if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
+  const replacement = values.length === 1
+    ? `"${values[0]}"`
+    : `\n${values.map((value) => `  - "${value}"`).join("\n")}`;
+  const yaml = parsed.yaml.slice(0, range[0]) + replacement + parsed.yaml.slice(range[1]);
+  return `---\n${yaml}\n---\n${parsed.body}`;
 }
 
 function impactSignature(impact: DefinitionDeletionImpact): string {
