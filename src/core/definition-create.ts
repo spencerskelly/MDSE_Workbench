@@ -195,6 +195,10 @@ export class DefinitionCreationService {
     this.pending.delete(transactionId);
   }
 
+  async rollbackApplied(transactionId: string): Promise<void> {
+    await this.transactions.undoIfLatest(transactionId);
+  }
+
   cancel(transactionId: string): EditTransaction {
     this.requirePending(transactionId);
     const cancelled = this.transactions.cancel(transactionId);
