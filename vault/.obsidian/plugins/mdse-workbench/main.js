@@ -14804,62 +14804,60 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       returnToOccurrence.onclick = () => {
         void this.returnToOccurrence();
       };
-      const uid = typeof fm?.uid === "string" ? fm.uid : "";
-      if (uid) {
-        const retire = head.createEl("button", { text: "Retire definition\u2026", cls: "mdse-detail-btn" });
-        retire.setAttr("title", "Review all current uses, then set only canonical lifecycle status to retired.");
-        retire.onclick = () => {
-          new DefinitionRetireModal(
-            this.app,
-            file.basename,
-            () => this.host.stageDefinitionRetirement(file.path, uid),
-            (transactionId) => this.host.applyDefinitionRetirement(transactionId),
-            (transactionId) => this.host.cancelDefinitionRetirement(transactionId),
-            () => {
-              void this.show(file, false);
-            }
-          ).open();
-        };
-        const definitionType = typeof fm?.type === "string" ? fm.type : "";
-        if (definitionType) {
-          const supersede = head.createEl("button", { text: "Supersede definition\u2026", cls: "mdse-detail-btn" });
-          supersede.setAttr("title", "Choose a same-class replacement and review the complete guided migration inventory.");
-          supersede.onclick = () => {
-            const candidates = this.host.elements(file.path).filter((candidate) => candidate.type === definitionType).sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
-            new DefinitionSupersedeModal(
-              this.app,
-              file.basename,
-              candidates,
-              (replacementPath) => this.host.stageDefinitionSupersession(file.path, uid, definitionType, replacementPath),
-              (transactionId) => this.host.applyDefinitionSupersession(transactionId),
-              (transactionId) => this.host.cancelDefinitionSupersession(transactionId),
-              (ownerPath, localId, replacedPath, replacementPath) => this.host.stageDefinitionOccurrenceMigration(ownerPath, localId, replacedPath, replacementPath),
-              (transactionId) => this.host.applyDefinitionOccurrenceMigration(transactionId),
-              (transactionId) => this.host.cancelDefinitionOccurrenceMigration(transactionId),
-              (ownerPath, field, replacedPath, replacementPath) => this.host.stageDefinitionNoteMigration(ownerPath, field, replacedPath, replacementPath),
-              (transactionId) => this.host.applyDefinitionNoteMigration(transactionId),
-              (transactionId) => this.host.cancelDefinitionNoteMigration(transactionId),
-              () => {
-                void this.show(file, false);
-              }
-            ).open();
-          };
-        }
-        const remove = head.createEl("button", { text: "Delete definition\u2026", cls: "mdse-detail-btn" });
-        remove.setAttr("title", "Review all active references before destructive definition deletion.");
-        remove.onclick = () => {
-          new DefinitionDeleteModal(
-            this.app,
-            file.basename,
-            () => this.host.stageDefinitionDeletion(file.path, uid),
-            (transactionId) => this.host.applyDefinitionDeletion(transactionId),
-            (transactionId) => this.host.cancelDefinitionDeletion(transactionId),
-            () => {
-              void this.returnToOccurrence();
-            }
-          ).open();
-        };
-      }
+    }
+    const uid = typeof fm?.uid === "string" ? fm.uid : "";
+    if (modelType && uid) {
+      const retire = head.createEl("button", { text: "Retire definition\u2026", cls: "mdse-detail-btn" });
+      retire.setAttr("title", "Review all current uses, then set only canonical lifecycle status to retired.");
+      retire.onclick = () => {
+        new DefinitionRetireModal(
+          this.app,
+          file.basename,
+          () => this.host.stageDefinitionRetirement(file.path, uid),
+          (transactionId) => this.host.applyDefinitionRetirement(transactionId),
+          (transactionId) => this.host.cancelDefinitionRetirement(transactionId),
+          () => {
+            void this.show(file, false);
+          }
+        ).open();
+      };
+      const supersede = head.createEl("button", { text: "Supersede definition\u2026", cls: "mdse-detail-btn" });
+      supersede.setAttr("title", "Choose a same-class replacement and review the complete guided migration inventory.");
+      supersede.onclick = () => {
+        const candidates = this.host.elements(file.path).filter((candidate) => candidate.type === modelType).sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+        new DefinitionSupersedeModal(
+          this.app,
+          file.basename,
+          candidates,
+          (replacementPath) => this.host.stageDefinitionSupersession(file.path, uid, modelType, replacementPath),
+          (transactionId) => this.host.applyDefinitionSupersession(transactionId),
+          (transactionId) => this.host.cancelDefinitionSupersession(transactionId),
+          (ownerPath, localId, replacedPath, replacementPath) => this.host.stageDefinitionOccurrenceMigration(ownerPath, localId, replacedPath, replacementPath),
+          (transactionId) => this.host.applyDefinitionOccurrenceMigration(transactionId),
+          (transactionId) => this.host.cancelDefinitionOccurrenceMigration(transactionId),
+          (ownerPath, field, replacedPath, replacementPath) => this.host.stageDefinitionNoteMigration(ownerPath, field, replacedPath, replacementPath),
+          (transactionId) => this.host.applyDefinitionNoteMigration(transactionId),
+          (transactionId) => this.host.cancelDefinitionNoteMigration(transactionId),
+          () => {
+            void this.show(file, false);
+          }
+        ).open();
+      };
+      const remove = head.createEl("button", { text: "Delete definition\u2026", cls: "mdse-detail-btn" });
+      remove.setAttr("title", "Review all active references before destructive definition deletion.");
+      remove.onclick = () => {
+        new DefinitionDeleteModal(
+          this.app,
+          file.basename,
+          () => this.host.stageDefinitionDeletion(file.path, uid),
+          (transactionId) => this.host.applyDefinitionDeletion(transactionId),
+          (transactionId) => this.host.cancelDefinitionDeletion(transactionId),
+          () => {
+            if (this.definitionReturn?.definitionPath === file.path) void this.returnToOccurrence();
+            else this.close();
+          }
+        ).open();
+      };
     }
     const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit definition", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
     if (!this.definitionReturn || this.definitionReturn.definitionPath !== file.path) {
@@ -16770,7 +16768,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI also supports one stale-guarded note-level relationship migration at a time. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI also supports one stale-guarded note-level relationship migration at a time. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
