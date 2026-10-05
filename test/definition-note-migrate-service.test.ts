@@ -361,3 +361,38 @@ test("one-way note migration refuses Apply and Redo when replacement definition 
   await assert.rejects(tx.redo(),/no longer exists/);
   assert.equal(await store.read(oneWayOwner),oneWayOwnerText);
 });
+
+
+test("note migration refuses staging when indexed source UIDs no longer match canonical notes",async()=>{
+  const store=new MemoryStore();
+  store.files.set(owner,ownerText);
+  store.files.set(oldPath,oldText);
+  store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
+
+  const base={
+    ownerPath:owner,
+    ownerUid:"20261005061500000skellyspencer",
+    field:"hasPart",
+    replacedPath:oldPath,
+    replacedUid:"20261005061500001skellyspencer",
+    replacementPath:newPath,
+    replacementUid:"20261005061500002skellyspencer",
+    relationship:rel,
+  };
+
+  await assert.rejects(
+    service.stageAndReview({...base,ownerUid:"20261005061500009skellyspencer"}),
+    /expected .* uid .* found/,
+  );
+  await assert.rejects(
+    service.stageAndReview({...base,replacedUid:"20261005061500009skellyspencer"}),
+    /expected .* uid .* found/,
+  );
+  await assert.rejects(
+    service.stageAndReview({...base,replacementUid:"20261005061500009skellyspencer"}),
+    /expected .* uid .* found/,
+  );
+  assert.equal(tx.history().length,0);
+});
