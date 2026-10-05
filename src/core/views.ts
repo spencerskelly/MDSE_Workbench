@@ -116,8 +116,8 @@ export const REQUIREMENTS_PROFILE: ViewProfile = {
     { field: "refines", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "refines", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "references", direction: "out", from: ["Requirement"], to: ["Requirement", "Document"] },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Behavior", "Condition"] },
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "appliesTo", direction: "out", from: ["Requirement"] },
@@ -140,11 +140,10 @@ export const WHERE_USED_PROFILE: ViewProfile = {
     { field: "includes", direction: "in" },
     { field: "hasChild", direction: "in" },
     { field: "hasState", direction: "in" },
-    { field: "hasPort", direction: "in" },
-    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
-    { field: "hasDesign", direction: "in", from: ["Design"] },
-    { field: "realizedBy", direction: "in", from: ["Function", "Design"], to: ["Use Case"] },
-    { field: "participants", direction: "in", from: ["Object", "Actor", "Function", "Port", "Document"], to: ["Use Case"] },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] },
+    { field: "hasDesign", direction: "in", from: ["Condition"] },
+    { field: "realizedBy", direction: "in", from: ["Behavior", "Condition"], to: ["Use Case"] },
+    { field: "participants", direction: "in", from: ["Object", "Actor", "Behavior", "Document"], to: ["Use Case"] },
     { field: "dependsOn", direction: "in" },
   ],
   depth: 3,
@@ -153,26 +152,12 @@ export const WHERE_USED_PROFILE: ViewProfile = {
   needsLocalOccurrences: true,
 };
 
-/** Interfaces (WB-102): ports, what they connect to, outer and inner ports, and the item flows. */
+/** Interfaces (WB-128): contextual Interfaces, Connections, exposures and Item Flows come from Local Model. */
 export const INTERFACES_PROFILE: ViewProfile = {
   name: "Interfaces",
-  description: "Ports, what each connects to and who owns the other end, exposed ports, item flows.",
-  startTypes: ["Object", "Port", "Item Flow"],
-  steps: [
-    { field: "hasPort", direction: "out", from: ["Object"], to: ["Port"], undefinedOk: true },
-    { field: "hasPort", direction: "in", from: ["Port"], to: ["Object"] },
-    { field: "interfaces", direction: "out", from: ["Port"], to: ["Port"], noArrow: true, undefinedOk: true },
-    { field: "exposes", direction: "out", from: ["Port"], to: ["Port"], undefinedOk: true },
-    { field: "exposes", direction: "in", from: ["Port"], to: ["Port"] },
-    { field: "transmits", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "receives", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "exchanges", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "hasFlow", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "transmits", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "receives", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "exchanges", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "hasFlow", direction: "in", from: ["Item Flow"], to: ["Port"] },
-  ],
+  description: "Local Interface occurrences, their Connections, exposed boundary Interfaces and carried Item Flows.",
+  startTypes: ["Object", "Item Flow"],
+  steps: [],
   depth: 3,
   nodeCap: 80,
   perParent: 12,
@@ -183,11 +168,11 @@ export const INTERFACES_PROFILE: ViewProfile = {
 export const VERIFICATION_PROFILE: ViewProfile = {
   name: "Verification",
   description: "What verifies a requirement, what else a verification covers, and what satisfies those requirements.",
-  startTypes: ["Requirement", "Verification", "Function", "Design", "State"],
+  startTypes: ["Requirement", "Verification", "Behavior", "Condition"],
   steps: [
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], undefinedOk: true },
-    { field: "appliesTo", direction: "in", from: ["State"], to: ["Requirement"], atStartOnly: true },
+    { field: "appliesTo", direction: "in", from: ["Condition"], to: ["Requirement"], atStartOnly: true },
     { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
   ],
@@ -200,13 +185,13 @@ export const VERIFICATION_PROFILE: ViewProfile = {
 export const DESIGN_PROFILE: ViewProfile = {
   name: "Design",
   description: "The designs of an Object or Document, sub-designs, and the requirements each satisfies.",
-  startTypes: ["Object", "Document", "Design"],
+  startTypes: ["Object", "Document", "Condition"],
   steps: [
-    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Design"], undefinedOk: true },
-    { field: "hasDesign", direction: "in", from: ["Design"], to: ["Object", "Document"], atStartOnly: true },
-    { field: "hasChild", direction: "in", from: ["Design"], to: ["Design"], atStartOnly: true },
-    { field: "hasChild", direction: "out", from: ["Design"], to: ["Design"] },
-    { field: "satisfies", direction: "out", from: ["Design"], to: ["Requirement"], undefinedOk: true },
+    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Condition"], undefinedOk: true },
+    { field: "hasDesign", direction: "in", from: ["Condition"], to: ["Object", "Document"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Condition"], to: ["Condition"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Condition"], to: ["Condition"] },
+    { field: "satisfies", direction: "out", from: ["Condition"], to: ["Requirement"], undefinedOk: true },
   ],
   depth: 2,
   nodeCap: 80,
@@ -219,15 +204,15 @@ export const SCENARIO_PROFILE: ViewProfile = {
   description: "A use case: participants, the functions and designs that realize it, included and optional use cases, the order of its steps.",
   startTypes: ["Use Case"],
   steps: [
-    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Function", "Port", "Document"], undefinedOk: true },
-    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Function", "Design"], undefinedOk: true },
+    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Behavior", "Document"], undefinedOk: true },
+    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Behavior", "Condition"], undefinedOk: true },
     { field: "hasChild", direction: "out", from: ["Use Case"], to: ["Use Case"] },
     { field: "hasChild", direction: "in", from: ["Use Case"], to: ["Use Case"], atStartOnly: true },
     { field: "optionOf", direction: "out", from: ["Use Case"], to: ["Use Case"], undefinedOk: true },
     { field: "optionOf", direction: "in", from: ["Use Case"], to: ["Use Case"] },
     { field: "drives", direction: "out", from: ["Use Case"], to: ["Requirement"] },
-    { field: "precedes", direction: "in", from: ["Function"], to: ["Function"] },
-    { field: "precedes", direction: "out", from: ["Function"], to: ["Function"] },
+    { field: "precedes", direction: "in", from: ["Behavior"], to: ["Behavior"] },
+    { field: "precedes", direction: "out", from: ["Behavior"], to: ["Behavior"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -615,7 +600,7 @@ export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, r
       const a = localKeyFor(index, local, ownerPath, r);
       if (!a || !m.depthOf.has(a)) continue;
       const groups: Array<[string, LinkRef[]]> = [
-        ["exposes", r.exposes],
+        ...(r.sourceSchemaVersion==="0.4" ? [] : [["exposes", r.exposes] as [string, LinkRef[]]]),
         ["equals", r.equals],
         ["parent", r.parent ? [r.parent] : []],
       ];
@@ -645,12 +630,27 @@ export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, r
         if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
         else m.tree.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
       }
+      if(r.sourceSchemaVersion==="0.4"){
+        for(const link of r.exposes){
+          const t=linkedLocal(index,local,resolve,ownerPath,link);
+          if(!t) continue;
+          const alreadyPlaced=m.depthOf.has(t.key);
+          addLocalNode(index,local,m,t.path,t.record,ownerDepth+1,profile);
+          if(!m.depthOf.has(t.key)) continue;
+          if(alreadyPlaced) m.localEdges.push({parent:a,child:t.key,field:"exposes",direction:"out",count:1});
+          else m.tree.push({parent:a,child:t.key,field:"exposes",direction:"out",count:1});
+        }
+      }
     }
   }
 
-  for (const definitionPath of starts.filter((p) => ["Port", "Item Flow"].includes(index.notes.get(p)?.type ?? ""))) {
+  for (const definitionPath of starts.filter((p) => {
+    const note=index.notes.get(p);
+    return note?.type==="Item Flow" || note?.type==="Port" || (note?.type==="Object"&&note.subtype==="interface");
+  })) {
     const d = m.depthOf.get(definitionPath) ?? 0;
-    const expected = index.notes.get(definitionPath)?.type === "Port" ? "endpoint" : "flow";
+    const note=index.notes.get(definitionPath);
+    const expected = note?.type==="Item Flow" ? "flow" : "endpoint";
     const occurrences = local.occurrencesOf(definitionPath, resolve)
       .filter(({ record }) => record.kind === expected)
       .sort((a, b) => a.path.localeCompare(b.path) || a.record.identifier.localeCompare(b.record.identifier));
