@@ -861,6 +861,8 @@ export class LocalEndpointPartReassignModal extends Modal {
       ["Owner",this.ownerName],
       ["Endpoint",this.endpoint.identifier],
       ["New part",target.identifier],
+      ["Current parent",this.endpoint.parent?.text ?? "none"],
+      ["Parent after Apply",this.endpoint.parent ? "cleared" : "none"],
       ["Transaction",staged.transaction.label],
       ["Scope",staged.transaction.scope],
     ];
@@ -868,7 +870,7 @@ export class LocalEndpointPartReassignModal extends Modal {
 
     const blocking=staged.plan.findings.filter((f)=>f.severity==="error");
     if(!staged.plan.findings.length){
-      this.contentEl.createEl("p",{cls:"mdse-muted",text:"Validation passed. Apply will change only the endpoint part assignment."});
+      this.contentEl.createEl("p",{cls:"mdse-muted",text:this.endpoint.parent ? "Validation passed. Apply will assign the new part and clear the endpoint parent in one structural transaction." : "Validation passed. Apply will change only the endpoint part assignment."});
     } else {
       for(const f of staged.plan.findings){
         this.contentEl.createEl("p",{text:`${f.severity.toUpperCase()}: ${f.message}`,cls:f.severity==="error"?"mdse-warn":undefined});
