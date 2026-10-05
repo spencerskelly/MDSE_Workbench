@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   allocateLocalId,
   allocateUid,
+  assertIndexedNoteUidMatchesSource,
   localTimestamp,
   normalizeAuthorCode,
+  sourceUidFromMarkdown,
   tokenFromLocalId,
 } from "../src/core/identity";
 
@@ -35,4 +37,20 @@ test("local identity uses the same global token with representation prefix",()=>
   const a=allocateLocalId("endpoint",d,"skellyspencer",new Set());
   assert.equal(a.localId,"ep-20261003133512742skellyspencer");
   assert.equal(tokenFromLocalId(a.localId),a.uid);
+});
+
+
+test("source uid guard fails closed on stale or missing source identity",()=> {
+  const uid="20261003133512742skellyspencer";
+  const source=["---","type: Object","uid: "+uid,"---","","# A"].join("\n");
+  assert.equal(sourceUidFromMarkdown(source),uid);
+  assert.doesNotThrow(()=>assertIndexedNoteUidMatchesSource("A.md",source,uid,"edit relationship in"));
+  assert.throws(
+    ()=>assertIndexedNoteUidMatchesSource("A.md",source,"20261003133512743skellyspencer","edit relationship in"),
+    /indexed uid .* does not match source uid/,
+  );
+  assert.throws(
+    ()=>assertIndexedNoteUidMatchesSource("A.md","# no frontmatter",uid,"edit relationship in"),
+    /source uid none/,
+  );
 });
