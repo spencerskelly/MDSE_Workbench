@@ -38,6 +38,8 @@ export class NoteDetailPanel extends Component {
   private history: string[] = [];
   private current: TFile | null = null;
   private currentLocal: LocalRecord | null = null;
+  /** Exact occurrence to return to while definition editing is active. */
+  private definitionReturn: { ownerPath: string; localId: string; definitionPath: string } | null = null;
   private generation = 0;
   /** Edit mode is explicit and temporary (WB-039, WB-040): off for every note the popup opens. */
   private editing = false;
@@ -123,7 +125,15 @@ export class NoteDetailPanel extends Component {
       if (f instanceof TFile) void this.show(f, false);
     };
     head.createDiv({ cls: "mdse-detail-title", text: file.basename }).setAttr("title", file.path);
-    const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
+    if (this.definitionReturn?.definitionPath === file.path) {
+      const returnToOccurrence = head.createEl("button", { text: "Back to occurrence", cls: "mdse-detail-btn" });
+      returnToOccurrence.setAttr("title", "Return to the contextual Local Model occurrence without changing its storage.");
+      returnToOccurrence.onclick = () => { void this.returnToOccurrence(); };
+    }
+    const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit definition", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
+    if (!this.definitionReturn || this.definitionReturn.definitionPath !== file.path) {
+      edit.setText(this.editing ? "Done" : "Edit");
+    }
     if (blocked && !this.editing) {
       edit.disabled = true;
       edit.setAttr("title", blocked);
@@ -164,7 +174,12 @@ export class NoteDetailPanel extends Component {
       const v = fm?.[k];
       if (v !== undefined && v !== null && String(v) !== "") chips.createSpan({ cls: "mdse-detail-chip", text: k === "type" || k === "subtype" ? String(v) : `${k} ${String(v)}` });
     }
-    if (this.editing) chips.createSpan({ cls: "mdse-detail-chip mdse-detail-chip-edit", text: "editing" });
+    if (this.editing) {
+      chips.createSpan({
+        cls: "mdse-detail-chip mdse-detail-chip-edit",
+        text: this.definitionReturn?.definitionPath === file.path ? "editing definition" : "editing",
+      });
+    }
 
     const schema = this.host.schema();
     const fields = new Set(schema ? [...schema.byField.keys(), ...schema.byInverse.keys()] : []);
@@ -407,8 +422,11 @@ export class NoteDetailPanel extends Component {
 
     const head = content.createDiv({ cls: "mdse-detail-head" });
     head.createDiv({ cls: "mdse-detail-title", text: definitionFile.basename }).setAttr("title", definitionFile.path);
-    const open = head.createEl("button", { text: "Open definition", cls: "mdse-detail-btn" });
-    open.setAttr("title", "Definition edits belong to the canonical reusable note.");
+    const editDefinition = head.createEl("button", { text: "Edit definition", cls: "mdse-detail-btn mod-cta" });
+    editDefinition.setAttr("title", "Edit the canonical reusable note in a separate definition surface.");
+    editDefinition.onclick = () => { void this.editDefinitionFromOccurrence(ownerFile, this.currentLocal, definitionFile); };
+    const open = head.createEl("button", { text: "Open note", cls: "mdse-detail-btn" });
+    open.setAttr("title", "Open the canonical reusable definition note in a tab.");
     open.onclick = () => void this.app.workspace.getLeaf(true).openFile(definitionFile);
 
     const chips = content.createDiv({ cls: "mdse-detail-chips" });
@@ -442,6 +460,50 @@ export class NoteDetailPanel extends Component {
     const body = content.createDiv({ cls: "mdse-detail-body markdown-rendered" });
     if (md.trim()) await MarkdownRenderer.render(this.app, md, body, definitionFile.path, this);
     else body.createEl("p", { cls: "mdse-detail-empty", text: "This definition has no text." });
+  }
+
+  private async editDefinitionFromOccurrence(ownerFile: TFile, record: LocalRecord | null, definitionFile: TFile): Promise<void> {
+    if (!record) return;
+    this.definitionReturn = {
+      ownerPath: ownerFile.path,
+      localId: record.localId,
+      definitionPath: definitionFile.path,
+    };
+    await this.show(definitionFile, false);
+    if (this.current?.path !== definitionFile.path) return;
+    this.editing = true;
+    await this.show(definitionFile, false);
+  }
+
+  private async returnToOccurrence(): Promise<void> {
+    const back = this.definitionReturn;
+    if (!back) return;
+    if (this.isDirty()) {
+      new ConfirmModal(this.app, "Discard the unsaved definition text changes?", "Discard", () => {
+        this.bodyArea = null;
+        void this.returnToOccurrence();
+      }).open();
+      return;
+    }
+
+    const owner = this.app.vault.getAbstractFileByPath(back.ownerPath);
+    if (!(owner instanceof TFile)) {
+      new Notice("The occurrence owner note no longer exists.", 8000);
+      this.definitionReturn = null;
+      return;
+    }
+    const text = await this.app.vault.cachedRead(owner);
+    const region = parseLocalModel(text);
+    const record = region?.records.find((candidate) => candidate.localId === back.localId);
+    if (!record) {
+      new Notice("The original occurrence no longer exists.", 8000);
+      this.definitionReturn = null;
+      return;
+    }
+
+    this.definitionReturn = null;
+    this.editing = false;
+    this.showLocal(owner, record, false);
   }
 
   private renderDefinitionRow(table: HTMLElement, row: PropertyRow, sourceFile: TFile): void {
