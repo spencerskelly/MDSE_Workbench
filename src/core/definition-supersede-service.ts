@@ -77,10 +77,17 @@ function withRelationship(
   const values = isSeq(node)
     ? node.items.map((item) => String(nodeValue(item) ?? ""))
     : [String(nodeValue(node) ?? "")];
-  if (values.some((value) => {
+  for (const value of values) {
     const target = linkTarget(value);
-    return !!target && resolve(target, sourcePath) === targetPath;
-  })) return text;
+    if (!target) continue;
+    const resolved = resolve(target, sourcePath);
+    if (!resolved) {
+      throw new Error(
+        `Cannot safely update ${field}; existing relationship target "${target}" cannot be resolved from ${sourcePath}.`,
+      );
+    }
+    if (resolved === targetPath) return text;
+  }
   values.push(link);
   values.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 
