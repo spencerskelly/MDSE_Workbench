@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalEndpointCreateModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalEndpointCreateModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -231,6 +231,8 @@ export class NoteDetailPanel extends Component {
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
     }
     if (this.editing && record.kind === "endpoint") {
+      const reassignPart = head.createEl("button", { text: "Change part…", cls: "mdse-detail-btn" });
+      reassignPart.onclick = () => { void this.reassignEndpointPart(file, record); };
       const connect = head.createEl("button", { text: "Connect to endpoint…", cls: "mdse-detail-btn" });
       connect.onclick = () => { void this.createConnectionOccurrence(file, record); };
     }
@@ -336,6 +338,33 @@ export class NoteDetailPanel extends Component {
         : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data.",
     });
     root.scrollTop = 0;
+  }
+
+  private async reassignEndpointPart(file: TFile, endpoint: LocalRecord): Promise<void> {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const currentPartId = endpoint.part?.blockId ?? "";
+      const parts = region.records.filter((record) => record.kind === "part" && record.localId !== currentPartId);
+      if (!parts.length) throw new Error("This note has no alternate part occurrence.");
+      new LocalEndpointPartReassignModal(
+        this.app,
+        file.basename,
+        endpoint,
+        parts,
+        (part) => editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+          fields: { part: `[[#^${part.localId}|${part.identifier}]]` },
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, endpoint.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot reassign endpoint part: ${(e as Error).message}`, 12000);
+    }
   }
 
   private createFlowOccurrence(file: TFile, connection: LocalRecord): void {
