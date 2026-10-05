@@ -125,6 +125,13 @@ export class ModelEditService {
 
     const uid = this.ownerUid(path);
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(before);
+    const sourceUid = frontmatterMatch
+      ? /^uid:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/m.exec(frontmatterMatch[1])?.[1]?.trim() ?? ""
+      : "";
+    if (!sourceUid || sourceUid !== uid) {
+      throw new Error(`Cannot stage structural Local Model edit for ${path}: indexed uid ${uid} does not match source uid ${sourceUid || "none"}.`);
+    }
 
     const txId = `local-patch-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `reassign ${plan.kind} ${localId}`;
