@@ -6,6 +6,7 @@ import type { RelationshipDef } from "../src/core/schema";
 
 class MemoryStore implements DefinitionNoteMigrationStore {
   files=new Map<string,string>();
+  async exists(path:string){ return this.files.has(path); }
   async read(path:string){ const v=this.files.get(path); if(v===undefined) throw new Error(path+" missing"); return v; }
   async write(path:string,text:string){ if(!this.files.has(path)) throw new Error(path+" missing"); this.files.set(path,text); }
 }
