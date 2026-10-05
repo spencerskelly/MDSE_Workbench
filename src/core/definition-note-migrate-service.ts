@@ -1,6 +1,6 @@
 import { parseDocument, stringify } from "yaml";
 import { linkTarget } from "./frontmatter";
-import { localRef, noteRef, type ModelRef } from "./localmodel";
+import { noteRef, type ModelRef } from "./localmodel";
 import { planDefinitionNoteMigration, type DefinitionNoteMigrationPlan } from "./definition-note-migrate";
 import type { RelationshipDef } from "./schema";
 import { TransactionManager, type EditTransaction } from "./transaction";
