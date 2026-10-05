@@ -1213,7 +1213,6 @@ export default class MdseWorkbench extends Plugin {
           const file = localFile(normalizePath(targetPath));
           return this.app.metadataCache.fileToLinktext(file, normalizePath(fromPath), true);
         },
-        (ownerPath, field) => this.indexer?.index.notes.get(normalizePath(ownerPath))?.fields.get(field)?.slice() ?? [],
         this.transactions,
       );
       this.assurance = new AssuranceManager({
