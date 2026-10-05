@@ -2,18 +2,21 @@
  * Local Model reader (WB-106, WB-111). Pure TypeScript, no Obsidian imports.
  *
  * The model stays Markdown in the vault: this reads the governed `## Local Model` region of a note
- * (schema 0.1 and 0.2), gives every record a stable `ModelRef`, and reports findings. It never writes.
+ * (schema 0.1 through 0.4), gives every record a stable `ModelRef`, and reports findings. It never writes.
  * Paths and headings are navigation and display; identity is the note `uid` plus the local block ID.
  */
 import type { ModelIndex } from "./model";
 
 export type LocalKind = "part" | "endpoint" | "connection" | "flow";
 
-export const READABLE_VERSIONS = ["0.1", "0.2"] as const;
-export const WRITABLE_VERSION = "0.2";
+export const READABLE_VERSIONS = ["0.1", "0.2", "0.3", "0.4"] as const;
+export const WRITABLE_VERSION = "0.4";
 
 const PREFIX: Record<LocalKind, string> = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
-const SECTION: Record<string, LocalKind> = { "part occurrences": "part", "local interfaces": "endpoint", connections: "connection" };
+const SECTION_LEGACY: Record<string, LocalKind> = { "part occurrences": "part", "local interfaces": "endpoint", connections: "connection" };
+const SECTION_04: Record<string, LocalKind> = { parts: "part", interfaces: "endpoint", connections: "connection" };
+const sectionFor = (version: string, title: string): LocalKind | null =>
+  ((version === "0.4" ? SECTION_04 : SECTION_LEGACY)[title.toLowerCase()] ?? null);
 const FLOW_ROLES = ["transmit", "receive", "exchange", "unspecified"];
 const USAGES = ["standard", "variant", "option"];
 /** A 30-character global identity token: 17 digits then 13 letters or hyphens (schema 0.2). */
@@ -149,12 +152,20 @@ function finish(r: LocalRecord): void {
   r.endpointKind = (f.get("kind") ?? "").trim() || null;
 }
 
-const ALLOWED_FIELDS: Record<LocalKind, string[]> = {
+const ALLOWED_FIELDS_LEGACY: Record<LocalKind, string[]> = {
   part: ["definition", "usage", "identifier", "multiplicity"],
   endpoint: ["definition", "usage", "identifier", "part", "parent", "exposes", "equals", "multiplicity", "kind"],
   connection: ["endpointA", "endpointB", "definition", "identifier"],
   flow: ["definition", "identifier", "endpointA", "endpointB"],
 };
+const ALLOWED_FIELDS_04: Record<LocalKind, string[]> = {
+  part: ["definition", "usage", "identifier", "multiplicity"],
+  endpoint: ["definition", "usage", "identifier", "part", "parent", "equals", "multiplicity", "kind"],
+  connection: ["endpointA", "endpointB", "definition", "identifier", "exposes"],
+  flow: ["definition", "identifier", "endpointA", "endpointB"],
+};
+const allowedFields = (version: string, kind: LocalKind): readonly string[] =>
+  (version === "0.4" ? ALLOWED_FIELDS_04 : ALLOWED_FIELDS_LEGACY)[kind];
 
 /** Stable FNV-1a fingerprint of the text that can affect Local Model parsing/validation. */
 export function localModelSourceFingerprint(text: string): string | null {
@@ -236,7 +247,7 @@ export function parseLocalModel(text: string): LocalRegion | null {
       done(current);
       current = null;
       if (level === 3) {
-        section = SECTION[title.toLowerCase()] ?? null;
+        section = sectionFor(version, title);
         if (!section) region.findings.push({ code: "record.unknown-section", severity: "warning", message: `Unknown Local Model section "${title}".`, line: i + 1 });
         continue;
       }
@@ -311,17 +322,22 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       const k = kindOfId(r.localId);
       if (!k) add("record.block-id-malformed", `${label}: block ID ${r.localId} does not start with a record prefix (part-, ep-, conn-, flow-).`, r);
       else if (k !== r.kind) add("record.block-id-malformed", `${label}: block ID ${r.localId} is for a ${k}.`, r);
-      else if (version === "0.2" && !TOKEN_30.test(r.localId.slice(PREFIX[k].length))) add("record.block-id-malformed", `${label}: block ID ${r.localId} does not end in a 30-character identity token.`, r);
+      else if (version !== "0.1" && !TOKEN_30.test(r.localId.slice(PREFIX[k].length))) add("record.block-id-malformed", `${label}: block ID ${r.localId} does not end in a 30-character identity token.`, r);
     }
     for (const key of r.fields.keys()) {
       if (key === "usage" && version === "0.1") add("record.unknown-field", `${label}: usage is not part of schema 0.1.`, r, "warning");
-      else if (!ALLOWED_FIELDS[r.kind].includes(key) && key !== "usage") add("record.unknown-field", `${label}: unknown field ${key}.`, r, "warning");
+      else if (!allowedFields(version, r.kind).includes(key) && key !== "usage") add("record.unknown-field", `${label}: unknown field ${key}.`, r, "warning");
     }
     if (r.fields.has("usage")) {
       if (r.kind === "connection" || r.kind === "flow") add("record.usage-invalid", `${label}: usage is not valid on a ${r.kind}.`, r);
-      else if (version === "0.2" && !USAGES.includes(r.usage)) add("record.usage-invalid", `${label}: usage "${r.usage}" is not standard, variant or option.`, r);
+      else if (version !== "0.1" && !USAGES.includes(r.usage)) add("record.usage-invalid", `${label}: usage "${r.usage}" is not standard, variant or option.`, r);
     }
-    if ((r.kind === "part" || r.kind === "endpoint" || r.kind === "flow") && !r.definition) add("record.missing-definition", `${label} has no definition link.`, r);
+    if ((r.kind === "part" || r.kind === "flow" || (r.kind === "endpoint" && (version === "0.1" || version === "0.2"))) && !r.definition) {
+      add("record.missing-definition", `${label} has no definition link.`, r);
+    }
+    if (r.kind === "endpoint" && version === "0.4" && r.exposes.length) {
+      add("exposure.owner-invalid", `${label}: exposes belongs to a Connection in schema 0.4.`, r);
+    }
     if (r.definition && r.definition.blockId) add("definition.incompatible", `${label}: the definition must link to a note, not a block.`, r);
   }
   for (const [id, list] of byId) if (list.length > 1) add("record.duplicate-id", `Block ID ${id} is used by ${list.length} records.`, list[1]);
@@ -349,6 +365,19 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       if (!r.endpointA || !r.endpointB) add("ref.endpoint-count", `connection "${r.identifier}" needs exactly two endpoints (endpointA and endpointB).`, r);
       needLocal(r, r.endpointA, "endpointA", "endpoint");
       needLocal(r, r.endpointB, "endpointB", "endpoint");
+      if (version === "0.4") {
+        for (const l of r.exposes) {
+          if (l.target) {
+            add("exposure.cross-context", `connection "${r.identifier}": exposes must target a boundary Interface in this Local Model context.`, r);
+            continue;
+          }
+          needLocal(r, l, "exposes", "endpoint");
+          const target = sameNote(l);
+          if (target?.kind === "endpoint" && (target.part || target.parent)) {
+            add("exposure.not-boundary", `connection "${r.identifier}": exposes target "${target.identifier}" is not a boundary Interface.`, r);
+          }
+        }
+      }
     }
     if (r.kind === "flow") {
       for (const [f, v] of [["endpointA", r.roleA], ["endpointB", r.roleB]] as const) {
@@ -497,7 +526,14 @@ export function specializationCandidates(index: ModelIndex, root: string): Candi
   return { candidates: [...byKey.values()], cycle };
 }
 
-const COMPATIBLE: Record<LocalKind, string | null> = { part: "Object", endpoint: "Port", flow: "Item Flow", connection: null };
+const COMPATIBLE: Record<LocalKind, string | null> = { part: "Object", endpoint: null, flow: "Item Flow", connection: null };
+function compatibleDefinition(record: LocalRecord, def: { type?: string; subtype?: string }): string | null {
+  if (record.kind !== "endpoint") return COMPATIBLE[record.kind];
+  if (record.sourceSchemaVersion === "0.4") {
+    return def.type === "Object" && def.subtype === "interface" ? null : "Object / interface";
+  }
+  return def.type === "Port" ? null : "Port";
+}
 
 export interface VaultCheckInput {
   index: ModelIndex;
@@ -528,7 +564,7 @@ export function validateLocalModels(input: VaultCheckInput): LocalFinding[] {
   };
   for (const n of index.notes.values()) if (n.uid && TOKEN_30.test(n.uid)) claim(n.uid, `note ${n.path}`);
   for (const [path, region] of local.regions) {
-    if (region.schemaVersion !== "0.2") continue;
+    if (region.schemaVersion === "0.1") continue;
     for (const r of region.records) {
       const k = kindOfId(r.localId);
       if (!k) continue;
@@ -572,8 +608,8 @@ export function validateLocalModels(input: VaultCheckInput): LocalFinding[] {
         add(path, "definition.unresolved", `${label}: definition "${r.definition.target}" does not resolve to a note.`, r);
         continue;
       }
-      const want = COMPATIBLE[r.kind];
-      if (want && def.type !== want) add(path, "definition.incompatible", `${label}: definition ${def.name} is ${def.type ? `a ${def.type}` : "not a model note"}, expected a ${want}.`, r);
+      const want = compatibleDefinition(r, def);
+      if (want) add(path, "definition.incompatible", `${label}: definition ${def.name} is ${def.type ? `a ${def.type}${def.subtype ? " / " + def.subtype : ""}` : "not a model note"}, expected ${want}.`, r);
       if ((r.kind === "part" || r.kind === "endpoint") && USAGES.includes(r.usage)) {
         if (r.usage === "standard" && def.abstract === true) add(path, "definition.abstract-standard", `${label}: a standard occurrence points at abstract definition ${def.name}.`, r);
         if (r.usage === "variant" || r.usage === "option") {
