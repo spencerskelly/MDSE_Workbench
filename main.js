@@ -8802,6 +8802,21 @@ var ModelIndex = class {
   in(path) {
     return this.inEdges.get(path) ?? [];
   }
+  /**
+   * Every authored governed relationship that points at the target path, regardless of whether
+   * the field is the schema's forward or inverse spelling. Lifecycle impact must use this instead
+   * of in(), because inverse-authored relationships are intentionally not materialized as graph edges.
+   */
+  authoredUsesOf(path) {
+    const uses = [];
+    for (const rec of this.notes.values()) {
+      for (const [field, targets] of rec.fields) {
+        if (!this.schema.byField.has(field) && !this.schema.byInverse.has(field)) continue;
+        if (targets.includes(path)) uses.push({ from: rec.path, to: path, field });
+      }
+    }
+    return uses.sort((a, b) => a.from.localeCompare(b.from) || a.field.localeCompare(b.field));
+  }
   edgeCount() {
     let n = 0;
     for (const list2 of this.outEdges.values()) n += list2.length;
@@ -16909,7 +16924,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays; lifecycle impact queries scan both forward- and inverse-authored governed relationships rather than only forward graph edges. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
@@ -17332,7 +17347,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     await indexer.whenSourceSettled();
     await indexer.whenLocalSettled(true);
     const normalized = (0, import_obsidian8.normalizePath)(path);
-    const noteUses = indexer.index.in(normalized).map((use) => ({
+    const noteUses = indexer.index.authoredUsesOf(normalized).map((use) => ({
       fromPath: use.from,
       field: use.field
     }));
@@ -17352,7 +17367,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (!indexer || !this.isReady()) throw new Error("Workbench is still starting.");
     await indexer.whenSourceSettled();
     await indexer.whenLocalSettled(true);
-    const noteUses = indexer.index.in(path).slice().sort(
+    const noteUses = indexer.index.authoredUsesOf(path).slice().sort(
       (a, b) => a.from.localeCompare(b.from) || a.field.localeCompare(b.field)
     );
     const occurrences = indexer.local.occurrencesOf(
