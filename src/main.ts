@@ -489,9 +489,21 @@ export default class MdseWorkbench extends Plugin {
       replacementPath: normalizePath(replacementPath),
     });
 
-    return editor.stageAndReviewLocalRecordPatch(normalizedOwner, localId, {
-      fields: { definition: plan.definitionLink },
-    });
+    const normalizedReplacement = normalizePath(replacementPath);
+    const replacementFile = this.app.vault.getAbstractFileByPath(normalizedReplacement);
+    if (!(replacementFile instanceof TFile)) throw new Error(`${normalizedReplacement} no longer exists.`);
+
+    return editor.stageAndReviewLocalRecordPatch(
+      normalizedOwner,
+      localId,
+      { fields: { definition: plan.definitionLink } },
+      async () => {
+        const currentReplacement = this.app.vault.getAbstractFileByPath(normalizedReplacement);
+        if (!(currentReplacement instanceof TFile)) {
+          throw new Error(`${normalizedReplacement} no longer exists; reopen supersession migration review.`);
+        }
+      },
+    );
   }
 
   private async definitionSupersessionMigrationCandidates(replacedPath: string): Promise<DefinitionMigrationCandidate[]> {
