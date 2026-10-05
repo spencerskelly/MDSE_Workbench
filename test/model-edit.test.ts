@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ModelEditService, type TextDocumentStore } from "../src/core/model-edit";
+import { parseLocalModel } from "../src/core/localmodel";
 import { TransactionManager } from "../src/core/transaction";
 
 const ownerUid = "20261003130000000skellyspencer";
