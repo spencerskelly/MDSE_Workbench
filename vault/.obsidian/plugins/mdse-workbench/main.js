@@ -7953,28 +7953,6 @@ function parseDocument(source, options = {}) {
   }
   return doc;
 }
-function stringify3(value, replacer, options) {
-  let _replacer = null;
-  if (typeof replacer === "function" || Array.isArray(replacer)) {
-    _replacer = replacer;
-  } else if (options === void 0 && replacer) {
-    options = replacer;
-  }
-  if (typeof options === "string")
-    options = options.length;
-  if (typeof options === "number") {
-    const indent = Math.round(options);
-    options = indent < 1 ? void 0 : indent > 8 ? { indent: 8 } : { indent };
-  }
-  if (value === void 0) {
-    const { keepUndefined } = options ?? replacer ?? {};
-    if (!keepUndefined)
-      return void 0;
-  }
-  if (isDocument(value) && !_replacer)
-    return value.toString(options);
-  return new Document(value, _replacer, options).toString(options);
-}
 
 // src/core/definition-retire.ts
 function retireDefinitionText(text) {
@@ -8421,7 +8399,10 @@ function planDefinitionNoteMigration(request) {
 function frontmatter2(text) {
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (!match) throw new Error("Model note must begin with YAML frontmatter.");
-  return { doc: parseDocument(match[1]), body: text.slice(match[0].length) };
+  const yaml = match[1];
+  const doc = parseDocument(yaml);
+  if (doc.errors.length) throw new Error(`Model note frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
+  return { doc, yaml, body: text.slice(match[0].length) };
 }
 function list(value) {
   if (value === void 0 || value === null || value === "") return [];
@@ -8433,7 +8414,7 @@ function list(value) {
   return [value];
 }
 function mutateRelationship(text, sourcePath, field, removePath, addPath, resolve, linkText) {
-  const { doc, body } = frontmatter2(text);
+  const { doc, yaml, body } = frontmatter2(text);
   const values = list(doc.get(field));
   const kept = removePath ? values.filter((value) => {
     const target = linkTarget(value);
@@ -8447,10 +8428,19 @@ function mutateRelationship(text, sourcePath, field, removePath, addPath, resolv
     if (!already) kept.push(`[[${linkText(addPath, sourcePath)}]]`);
   }
   const sorted = kept.sort((a, b) => String(a).localeCompare(String(b), void 0, { sensitivity: "base" }));
-  doc.set(field, sorted);
-  const yaml = stringify3(doc.toJS()).trimEnd();
+  const encoded = sorted.length ? "\n" + sorted.map((value) => `  - ${JSON.stringify(String(value))}`).join("\n") : " []";
+  const node = doc.get(field, true);
+  let nextYaml;
+  if (node === void 0 || node === null) {
+    const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}${field}:${encoded}`;
+    nextYaml = yaml + addition;
+  } else {
+    const range = node.range;
+    if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
+    nextYaml = yaml.slice(0, range[0]) + encoded.trimStart() + yaml.slice(range[1]);
+  }
   return `---
-${yaml}
+${nextYaml}
 ---
 ${body}`;
 }
