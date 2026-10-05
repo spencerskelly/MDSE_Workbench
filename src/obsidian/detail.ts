@@ -362,7 +362,9 @@ export class NoteDetailPanel extends Component {
         endpoint,
         endpoints,
         (parent) => editor.stageLocalRecordPatch(file.path, endpoint.localId, {
-          fields: { parent: parent ? `[[#^${parent.localId}|${parent.identifier}]]` : null },
+          fields: parent
+            ? { parent: `[[#^${parent.localId}|${parent.identifier}]]`, part: null }
+            : { parent: null },
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
         (transactionId) => { editor.cancelLocalPatch(transactionId); },
