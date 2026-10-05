@@ -28,6 +28,7 @@ interface PendingLocalPatch {
   path: string;
   plan: PlannedLocalEdit;
   label: string;
+  semanticGuard?: () => Promise<void>;
 }
 
 interface PendingLocalCreate {
@@ -112,7 +113,12 @@ export class ModelEditService {
     return { changed: true, plan };
   }
 
-  async stageLocalRecordPatch(path: string, localId: string, patch: LocalRecordPatch): Promise<StagedLocalPatch> {
+  async stageLocalRecordPatch(
+    path: string,
+    localId: string,
+    patch: LocalRecordPatch,
+    semanticGuard?: () => Promise<void>,
+  ): Promise<StagedLocalPatch> {
     const before = await this.store.read(path);
     const plan = planLocalRecordPatch(before, localId, patch, { allowInvalidTarget: true });
     if (!plan.changed) throw new Error("This structural edit would not change the Local Model.");
@@ -133,12 +139,17 @@ export class ModelEditService {
         metadata: { path, localId, localKind: plan.kind },
       }],
     });
-    this.pendingPatches.set(txId, { path, plan, label });
+    this.pendingPatches.set(txId, { path, plan, label, semanticGuard });
     return { transaction, plan, path };
   }
 
-  async stageAndReviewLocalRecordPatch(path: string, localId: string, patch: LocalRecordPatch): Promise<StagedLocalPatch> {
-    const staged = await this.stageLocalRecordPatch(path, localId, patch);
+  async stageAndReviewLocalRecordPatch(
+    path: string,
+    localId: string,
+    patch: LocalRecordPatch,
+    semanticGuard?: () => Promise<void>,
+  ): Promise<StagedLocalPatch> {
+    const staged = await this.stageLocalRecordPatch(path, localId, patch, semanticGuard);
     return this.reviewLocalPatch(staged.transaction.id);
   }
 
@@ -187,7 +198,13 @@ export class ModelEditService {
       );
     }
     await this.transactions.apply(transactionId, {
-      apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label),
+      apply: async () => this.applyGuarded(
+        pending.path,
+        pending.plan.before,
+        pending.plan.after,
+        pending.label,
+        pending.semanticGuard,
+      ),
     });
     this.pendingPatches.delete(transactionId);
   }
@@ -356,7 +373,14 @@ export class ModelEditService {
     return pending;
   }
 
-  private async applyGuarded(path: string, before: string, after: string, label: string): Promise<AppliedEdit> {
+  private async applyGuarded(
+    path: string,
+    before: string,
+    after: string,
+    label: string,
+    semanticGuard?: () => Promise<void>,
+  ): Promise<AppliedEdit> {
+    if (semanticGuard) await semanticGuard();
     const current = await this.store.read(path);
     if (current !== before) {
       throw new Error(`${path} changed while "${label}" was being prepared. Reopen the context and try again.`);
@@ -370,6 +394,7 @@ export class ModelEditService {
         await this.store.write(path, before);
       },
       redo: async () => {
+        if (semanticGuard) await semanticGuard();
         const latest = await this.store.read(path);
         if (latest !== before) throw new Error(`${path} changed after undoing "${label}".`);
         await this.store.write(path, after);
