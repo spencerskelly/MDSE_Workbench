@@ -673,6 +673,7 @@ export class Indexer {
       path: file.path,
       name: file.basename,
       type: str(fm.type),
+      subtype: str(fm.subtype),
       id: str(fm.id),
       uid: str(fm.uid),
       authoredLinks,
