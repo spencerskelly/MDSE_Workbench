@@ -911,10 +911,43 @@ test("cancelled flow deletion leaves source and history untouched", async () => 
 });
 
 
+
+function noteWithReassignableEndpoint(): string {
+  const partA = "part-20261005004000000skellyspencer";
+  const partB = "part-20261005004000001skellyspencer";
+  const endpoint = "ep-20261005004000002skellyspencer";
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Main Contactor]]",
+    "^" + partA,
+    "",
+    "#### K2",
+    "- definition: [[Main Contactor]]",
+    "^" + partB,
+    "",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partA + "|K1]]",
+    "^" + endpoint,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
 test("staged endpoint part reassignment stays unwritten until Apply and supports undo/redo", async () => {
-  const endpointId = "ep-20261003133512743skellyspencer";
-  const targetPartId = "part-20261003133512744skellyspencer";
-  const original = note();
+  const endpointId = "ep-20261005004000002skellyspencer";
+  const targetPartId = "part-20261005004000001skellyspencer";
+  const original = noteWithReassignableEndpoint();
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
@@ -938,8 +971,8 @@ test("staged endpoint part reassignment stays unwritten until Apply and supports
 });
 
 test("staged endpoint part reassignment blocks missing target at Apply", async () => {
-  const endpointId = "ep-20261003133512743skellyspencer";
-  const original = note();
+  const endpointId = "ep-20261005004000002skellyspencer";
+  const original = noteWithReassignableEndpoint();
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
@@ -956,9 +989,9 @@ test("staged endpoint part reassignment blocks missing target at Apply", async (
 });
 
 test("stale staged endpoint part reassignment is blocked and remains cancellable", async () => {
-  const endpointId = "ep-20261003133512743skellyspencer";
-  const targetPartId = "part-20261003133512744skellyspencer";
-  const store = new MemoryStore(note());
+  const endpointId = "ep-20261005004000002skellyspencer";
+  const targetPartId = "part-20261005004000001skellyspencer";
+  const store = new MemoryStore(noteWithReassignableEndpoint());
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
@@ -974,9 +1007,9 @@ test("stale staged endpoint part reassignment is blocked and remains cancellable
 });
 
 test("cancelled endpoint part reassignment leaves source and history untouched", async () => {
-  const endpointId = "ep-20261003133512743skellyspencer";
-  const targetPartId = "part-20261003133512744skellyspencer";
-  const original = note();
+  const endpointId = "ep-20261005004000002skellyspencer";
+  const targetPartId = "part-20261005004000001skellyspencer";
+  const original = noteWithReassignableEndpoint();
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
