@@ -2385,3 +2385,24 @@ test("atomic Local Model patch refuses stale indexed owner UID", async () => {
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("atomic Local Model patch refuses stale indexed owner UID before writing", async () => {
+  const original = note();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(
+    store,
+    () => "20261005004000999skellyspencer",
+    transactions,
+  );
+
+  await assert.rejects(
+    service.patchLocalRecord("Assembly.md", localId, {
+      fields: { definition: "[[Replacement Contactor]]" },
+    }),
+    /indexed uid .* does not match source uid/,
+  );
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
