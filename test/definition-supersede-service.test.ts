@@ -319,3 +319,39 @@ test("supersession refuses staging when either source UID does not match the can
   );
   assert.equal(tx.history().length,0);
 });
+
+
+test("supersession class compatibility is decided from fresh source types, not stale caller types", async()=>{
+  const store=new MemorySupersessionStore();
+  store.files.set(oldPath,oldText);
+  store.files.set(newPath,newText.replace("type: Object","type: Function"));
+  const service=new DefinitionSupersessionService(
+    store,async()=>clearImpact(),resolve,linkText,new TransactionManager(),
+  );
+
+  await assert.rejects(
+    service.stageAndReview({
+      replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+      replacementPath:newPath,replacementUid:newUid,replacementType:"Object",
+      replacementStatus:"active",
+    }),
+    /Supersession requires the same model class; Function cannot supersede Object/,
+  );
+});
+
+test("supersession replacement status warning is decided from fresh source status, not stale caller status", async()=>{
+  const store=new MemorySupersessionStore();
+  store.files.set(oldPath,oldText);
+  store.files.set(newPath,newText.replace("status: active","status: retired"));
+  const service=new DefinitionSupersessionService(
+    store,async()=>clearImpact(),resolve,linkText,new TransactionManager(),
+  );
+
+  const staged=await service.stageAndReview({
+    replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+    replacementPath:newPath,replacementUid:newUid,replacementType:"Object",
+    replacementStatus:"active",
+  });
+  assert.ok(staged.plan.warnings.includes("The selected replacement definition is already retired."));
+  service.cancel(staged.transaction.id);
+});
