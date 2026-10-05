@@ -1022,3 +1022,123 @@ test("cancelled endpoint part reassignment leaves source and history untouched",
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithParentableEndpoints(): string {
+  const partId = "part-20261005006000000skellyspencer";
+  const endpointA = "ep-20261005006000001skellyspencer";
+  const endpointB = "ep-20261005006000002skellyspencer";
+  const endpointC = "ep-20261005006000003skellyspencer";
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Main Contactor]]",
+    "^" + partId,
+    "",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partId + "|K1]]",
+    "- parent: [[#^" + endpointB + "|J2]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partId + "|K1]]",
+    "^" + endpointB,
+    "",
+    "#### J3",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partId + "|K1]]",
+    "^" + endpointC,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("staged endpoint parent reassignment stays unwritten until Apply and supports undo/redo", async () => {
+  const endpointId = "ep-20261005006000001skellyspencer";
+  const newParentId = "ep-20261005006000003skellyspencer";
+  const original = noteWithParentableEndpoints();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { parent: "[[#^" + newParentId + "|J3]]" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- parent: [[#^" + newParentId + "|J3]]"));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.ok(store.text.includes("- parent: [[#^" + newParentId + "|J3]]"));
+});
+
+test("staged endpoint parent clear removes only the parent field", async () => {
+  const endpointId = "ep-20261005006000001skellyspencer";
+  const original = noteWithParentableEndpoints();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { parent: null },
+  });
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.doesNotMatch(store.text, /- parent:/);
+  assert.match(store.text, /- part:/);
+  await transactions.undo();
+  assert.equal(store.text, original);
+});
+
+test("staged endpoint parent reassignment blocks missing target at Apply", async () => {
+  const endpointId = "ep-20261005006000001skellyspencer";
+  const original = noteWithParentableEndpoints();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { parent: "[[#^ep-20261005006100099skellyspencer|Missing]]" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled endpoint parent reassignment leaves source and history untouched", async () => {
+  const endpointId = "ep-20261005006000001skellyspencer";
+  const newParentId = "ep-20261005006000003skellyspencer";
+  const original = noteWithParentableEndpoints();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { parent: "[[#^" + newParentId + "|J3]]" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
