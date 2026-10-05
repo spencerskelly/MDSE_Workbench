@@ -2,6 +2,40 @@ import type { LocalKind } from "./localmodel";
 
 const UID = /^\d{17}[A-Za-z]{13}$/;
 
+const AUTHOR_SUFFIX = /^[A-Za-z]{13}$/;
+
+export function normalizeAuthorSuffix(value: string): string {
+  const normalized = value.replace(/[^A-Za-z]/g, "").toLowerCase();
+  if (!AUTHOR_SUFFIX.test(normalized)) {
+    throw new Error("Creator identity must be exactly 13 ASCII letters after normalization.");
+  }
+  return normalized;
+}
+
+export function nextDefinitionUid(authorSuffix: string, now = new Date()): string {
+  const suffix = normalizeAuthorSuffix(authorSuffix);
+  const yyyy = now.getUTCFullYear().toString().padStart(4, "0");
+  const MM = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  const ss = String(now.getUTCSeconds()).padStart(2, "0");
+  const mmm = String(now.getUTCMilliseconds()).padStart(3, "0");
+  return `${yyyy}${MM}${dd}${hh}${mm}${ss}${mmm}${suffix}`;
+}
+
+export function nextAvailableDefinitionUid(
+  authorSuffix: string,
+  inUse: (uid: string) => boolean,
+  now = new Date(),
+): string {
+  for (let offset = 0; offset < 1000; offset++) {
+    const uid = nextDefinitionUid(authorSuffix, new Date(now.getTime() + offset));
+    if (!inUse(uid)) return uid;
+  }
+  throw new Error("Could not allocate a unique definition uid within the next 1000 milliseconds.");
+}
+
 export interface DefinitionCreationRequest {
   localKind: LocalKind;
   name: string;
