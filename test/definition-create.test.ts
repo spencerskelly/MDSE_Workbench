@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { definitionTypeForLocalKind, planDefinitionCreation } from "../src/core/definition-create";
+import { definitionTypeForLocalKind, nextAvailableDefinitionUid, nextDefinitionUid, normalizeAuthorSuffix, planDefinitionCreation } from "../src/core/definition-create";
 
 const uid = "20261005052400000skellyspencer";
 
@@ -197,4 +197,27 @@ test("definition creation undo/redo is guarded against later file changes", asyn
   store.files.set(staged.plan.path, (await store.read(staged.plan.path)) + "\nexternal");
   await assert.rejects(tx.undo(), /changed after/);
   assert.equal(await store.exists(staged.plan.path), true);
+});
+
+
+test("creator identity normalizes to the governed 13-letter suffix", () => {
+  assert.equal(normalizeAuthorSuffix("Skelly-Spencer"), "skellyspencer");
+  assert.throws(() => normalizeAuthorSuffix("Spencer"), /13 ASCII letters/);
+});
+
+test("definition UIDs use UTC timestamp plus creator identity", () => {
+  assert.equal(
+    nextDefinitionUid("skellyspencer", new Date("2026-10-05T05:30:45.123Z")),
+    "20261005053045123skellyspencer",
+  );
+});
+
+test("definition UID allocation retries collisions by +1 ms", () => {
+  const now = new Date("2026-10-05T05:30:45.123Z");
+  const first = nextDefinitionUid("skellyspencer", now);
+  const second = nextDefinitionUid("skellyspencer", new Date(now.getTime() + 1));
+  assert.equal(
+    nextAvailableDefinitionUid("skellyspencer", (candidate) => candidate === first, now),
+    second,
+  );
 });
