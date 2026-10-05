@@ -7955,6 +7955,13 @@ function parseDocument(source, options = {}) {
 }
 
 // src/core/definition-retire.ts
+function impactSignature(impact) {
+  const note = impact.noteUses.map((use) => `${use.fromPath}|${use.field}`).sort().join("\n");
+  const occurrence = impact.occurrenceUses.map((use) => `${use.ownerPath}|${use.kind}|${use.identifier}|${use.localId}`).sort().join("\n");
+  return `${note}
+--
+${occurrence}`;
+}
 function retireDefinitionText(text) {
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (!match) throw new Error("Definition note must begin with YAML frontmatter.");
@@ -8018,7 +8025,8 @@ var DefinitionRetirementService = class {
       before,
       after: transformed.text,
       label,
-      plan
+      plan,
+      impactSignature: impactSignature(impact)
     });
     return { transaction, plan, path, uid };
   }
@@ -8038,11 +8046,19 @@ var DefinitionRetirementService = class {
   async apply(transactionId) {
     const pending = this.requirePending(transactionId);
     if (!pending.plan.changed) throw new Error(`${pending.path} is already retired.`);
+    const latestImpact = await this.impactFor(pending.path);
+    if (impactSignature(latestImpact) !== pending.impactSignature) {
+      throw new Error("Dependent usage changed after Review. Reopen retirement review before Apply.");
+    }
     if (!await this.store.exists(pending.path)) throw new Error(`${pending.path} no longer exists.`);
     const current = await this.store.read(pending.path);
     if (current !== pending.before) throw new Error(`${pending.path} changed after Review.`);
     await this.transactions.apply(transactionId, {
       apply: async () => {
+        const latestImpact2 = await this.impactFor(pending.path);
+        if (impactSignature(latestImpact2) !== pending.impactSignature) {
+          throw new Error("Dependent usage changed after Review.");
+        }
         if (!await this.store.exists(pending.path)) throw new Error(`${pending.path} no longer exists.`);
         const latest = await this.store.read(pending.path);
         if (latest !== pending.before) throw new Error(`${pending.path} changed after Review.`);
@@ -8231,7 +8247,7 @@ ${yaml}
 ---
 ${parsed.body}`;
 }
-function impactSignature(impact) {
+function impactSignature2(impact) {
   const note = impact.noteUses.map((use) => `${use.fromPath}|${use.field}`).sort().join("\n");
   const occurrence = impact.occurrenceUses.map((use) => `${use.ownerPath}|${use.kind}|${use.identifier}|${use.localId}`).sort().join("\n");
   return `${note}
@@ -8304,7 +8320,7 @@ var DefinitionSupersessionService = class {
       replacementBefore,
       replacedAfter,
       replacementAfter,
-      impactSignature: impactSignature(impact),
+      impactSignature: impactSignature2(impact),
       label
     });
     return { transaction, plan };
@@ -8320,7 +8336,7 @@ var DefinitionSupersessionService = class {
   async apply(transactionId) {
     const pending = this.requirePending(transactionId);
     const latestImpact = await this.impactFor(pending.request.replacedPath);
-    if (impactSignature(latestImpact) !== pending.impactSignature) {
+    if (impactSignature2(latestImpact) !== pending.impactSignature) {
       throw new Error("Dependent usage changed after Review. Reopen supersession review before Apply.");
     }
     if (!await this.store.exists(pending.request.replacedPath) || !await this.store.exists(pending.request.replacementPath)) {
@@ -8335,7 +8351,7 @@ var DefinitionSupersessionService = class {
     await this.transactions.apply(transactionId, {
       apply: async () => {
         const latest = await this.impactFor(pending.request.replacedPath);
-        if (impactSignature(latest) !== pending.impactSignature) {
+        if (impactSignature2(latest) !== pending.impactSignature) {
           throw new Error("Dependent usage changed after Review.");
         }
         await this.store.write(pending.request.replacementPath, pending.replacementAfter);
@@ -16960,7 +16976,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays; lifecycle impact queries scan both forward- and inverse-authored governed relationships rather than only forward graph edges; supersession relationship writes also fail closed when any existing relationship target cannot be semantically resolved; shared governed relationship removal keeps frontmatter sparse by deleting a relationship property when its final target is removed; when supersession migration reaches zero remaining engineering dependents, the UI marks migration complete and may hand off to a separate governed retirement review without auto-retiring the replaced definition; lifecycle provenance relationships (supersedes/supersededBy) remain impact evidence but are excluded from migration candidates. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays; lifecycle impact queries scan both forward- and inverse-authored governed relationships rather than only forward graph edges; supersession relationship writes also fail closed when any existing relationship target cannot be semantically resolved; shared governed relationship removal keeps frontmatter sparse by deleting a relationship property when its final target is removed; when supersession migration reaches zero remaining engineering dependents, the UI marks migration complete and may hand off to a separate governed retirement review without auto-retiring the replaced definition; lifecycle provenance relationships (supersedes/supersededBy) remain impact evidence but are excluded from migration candidates; retirement Apply revalidates the complete reviewed impact inventory and refuses stale evidence. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
