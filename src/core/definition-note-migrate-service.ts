@@ -141,6 +141,29 @@ export class DefinitionNoteMigrationService {
     const need = plan.inverseMutations.map((mutation) => mutation.path);
     for (const path of [...new Set(need)]) beforeByPath.set(path, await this.store.read(path));
 
+    // Migration is not a repair operation. Every planned removal must still exist on fresh
+    // source, and every planned addition must still be absent, otherwise stop and surface the
+    // pre-existing relationship inconsistency instead of silently normalizing it.
+    for (const mutation of plan.inverseMutations) {
+      const text = beforeByPath.get(mutation.path) as string;
+      const parsed = frontmatter(text);
+      const targets = list(parsed.doc.get(mutation.field))
+        .map((value) => linkTarget(value))
+        .filter((target): target is string => !!target)
+        .map((target) => this.resolve(target, mutation.path))
+        .filter((target): target is string => !!target);
+      if (mutation.removeTarget && !targets.includes(mutation.removeTarget)) {
+        throw new Error(
+          `Relationship integrity mismatch: ${mutation.path}.${mutation.field} does not point back to ${mutation.removeTarget}; migration will not repair it silently.`,
+        );
+      }
+      if (mutation.addTarget && targets.includes(mutation.addTarget)) {
+        throw new Error(
+          `Relationship integrity mismatch: ${mutation.path}.${mutation.field} already points to ${mutation.addTarget}; migration will not create a duplicate.`,
+        );
+      }
+    }
+
     const afterByPath = new Map(beforeByPath);
     afterByPath.set(request.ownerPath, mutateRelationship(
       beforeByPath.get(request.ownerPath) as string,
