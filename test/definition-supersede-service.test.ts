@@ -19,6 +19,17 @@ const oldText=`---\ntype: Object\nuid: ${oldUid}\nstatus: retired\n---\n\n# Old 
 const newText=`---\ntype: Object\nuid: ${newUid}\nstatus: active\n---\n\n# New Contactor\n`;
 
 const clearImpact=():DefinitionDeletionImpact=>({definitionPath:oldPath,noteUses:[],occurrenceUses:[]});
+const resolve=(target:string,fromPath:string)=>{
+  void fromPath;
+  if(target==="Old Contactor" || target==="30_Objects/Old Contactor") return oldPath;
+  if(target==="New Contactor" || target==="30_Objects/New Contactor") return newPath;
+  if(target==="Another Contactor" || target==="30_Objects/Another Contactor") return "30_Objects/Another Contactor.md";
+  return target.endsWith(".md")?target:target+".md";
+};
+const linkText=(targetPath:string,fromPath:string)=>{
+  void fromPath;
+  return targetPath.replace(/^.*\//,"").replace(/\.md$/,"");
+};
 
 test("supersession stages and reviews paired relationship without writing dependents",async()=>{
   const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
@@ -28,7 +39,7 @@ test("supersession stages and reviews paired relationship without writing depend
     noteUses:[{fromPath:"System.md",field:"hasPart"}],
     occurrenceUses:[{ownerPath:"Assembly.md",localId:"part-x",kind:"part",identifier:"K1"}],
   };
-  const service=new DefinitionSupersessionService(store,async()=>impact,tx);
+  const service=new DefinitionSupersessionService(store,async()=>impact,resolve,linkText,tx);
   const staged=await service.stageAndReview({
     replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
     replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
@@ -45,7 +56,7 @@ test("supersession stages and reviews paired relationship without writing depend
 test("supersession Apply writes both sides and participates in undo redo",async()=>{
   const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
   const tx=new TransactionManager();
-  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),tx);
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),resolve,linkText,tx);
   const staged=await service.stageAndReview({
     replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
     replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
@@ -69,7 +80,7 @@ test("supersession refuses changed migration inventory after Review",async()=>{
   const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
   const tx=new TransactionManager();
   let impact=clearImpact();
-  const service=new DefinitionSupersessionService(store,async()=>impact,tx);
+  const service=new DefinitionSupersessionService(store,async()=>impact,resolve,linkText,tx);
   const staged=await service.stageAndReview({
     replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
     replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
@@ -84,7 +95,7 @@ test("supersession refuses changed migration inventory after Review",async()=>{
 test("supersession refuses definition content changes after Review",async()=>{
   const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
   const tx=new TransactionManager();
-  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),tx);
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),resolve,linkText,tx);
   const staged=await service.stageAndReview({
     replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
     replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
@@ -121,7 +132,7 @@ custom:
 # New Contactor
 `;
   const store=new MemorySupersessionStore(); store.files.set(oldPath,formattedOld); store.files.set(newPath,formattedNew);
-  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),new TransactionManager());
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),resolve,linkText,new TransactionManager());
   const staged=await service.stageAndReview({
     replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
     replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
@@ -148,7 +159,7 @@ custom: 'unchanged'
 # New Contactor
 `;
   const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,replacementWithExisting);
-  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),new TransactionManager());
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),resolve,linkText,new TransactionManager());
   const staged=await service.stageAndReview({
     replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
     replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
@@ -160,4 +171,40 @@ custom: 'unchanged'
   assert.ok(after.includes("[[30_Objects/Another Contactor]]"));
   assert.ok(after.includes("[[30_Objects/Old Contactor]]"));
   assert.ok(after.endsWith("\n# New Contactor\n"));
+});
+
+
+test("supersession does not duplicate an alternate link text that resolves to the same definition",async()=>{
+  const replacementAlreadyLinked=`---
+type: Object
+uid: ${newUid}
+status: active
+supersedes:
+  - "[[Old Contactor]]"
+---
+
+# New Contactor
+`;
+  const replacedAlreadyLinked=`---
+type: Object
+uid: ${oldUid}
+status: retired
+supersededBy:
+  - "[[New Contactor]]"
+---
+
+# Old Contactor
+`;
+  const store=new MemorySupersessionStore();
+  store.files.set(oldPath,replacedAlreadyLinked);
+  store.files.set(newPath,replacementAlreadyLinked);
+  const tx=new TransactionManager();
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),resolve,linkText,tx);
+  const staged=await service.stageAndReview({
+    replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+    replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
+  });
+  await service.apply(staged.transaction.id);
+  assert.equal(await store.read(newPath),replacementAlreadyLinked);
+  assert.equal(await store.read(oldPath),replacedAlreadyLinked);
 });
