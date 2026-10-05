@@ -6,6 +6,7 @@ import type { RelationshipDef } from "./schema";
 import { TransactionManager, type EditTransaction } from "./transaction";
 
 export interface DefinitionNoteMigrationStore {
+  exists(path: string): Promise<boolean>;
   read(path: string): Promise<string>;
   write(path: string, text: string): Promise<void>;
 }
@@ -162,6 +163,9 @@ export class DefinitionNoteMigrationService {
   ) {}
 
   async stage(request: DefinitionNoteMigrationServiceRequest): Promise<StagedDefinitionNoteMigration> {
+    if (!(await this.store.exists(request.replacementPath))) {
+      throw new Error(`${request.replacementPath} no longer exists.`);
+    }
     const ownerBefore = await this.store.read(request.ownerPath);
     const parsedOwner = frontmatter(ownerBefore);
     const currentTargets = list(parsedOwner.doc.get(request.field))
@@ -259,6 +263,9 @@ export class DefinitionNoteMigrationService {
     const pending=this.requirePending(transactionId);
     await this.transactions.apply(transactionId,{
       apply:async()=>{
+        if (!(await this.store.exists(pending.plan.replacementPath))) {
+          throw new Error(`${pending.plan.replacementPath} no longer exists; reopen supersession migration review.`);
+        }
         for(const file of pending.files){
           const current=await this.store.read(file.path);
           if(current!==file.before) throw new Error(`${file.path} changed after Review.`);
@@ -290,6 +297,9 @@ export class DefinitionNoteMigrationService {
             }
           },
           redo:async()=>{
+            if (!(await this.store.exists(pending.plan.replacementPath))) {
+              throw new Error(`${pending.plan.replacementPath} no longer exists; reopen supersession migration review.`);
+            }
             for(const file of pending.files){
               if(await this.store.read(file.path)!==file.before) throw new Error(`${file.path} changed after undoing ${pending.label}.`);
             }
