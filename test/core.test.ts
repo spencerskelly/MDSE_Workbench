@@ -242,6 +242,9 @@ test("frontmatter: add, dedupe, sort and order properties", () => {
   orderProperties(withAbstract, canonicalOrder(schema));
   assert.deepEqual(Object.keys(withAbstract), ["type", "id", "tags", "abstract", "satisfies"], "abstract ordering");
   assert.ok(removeLink(fm, "satisfies", "Zeta"));
+  assert.deepEqual(fm.satisfies, ["[[Alpha]]"]);
+  assert.ok(removeLink(fm, "satisfies", "Alpha"));
+  assert.ok(!("satisfies" in fm), "empty relationship fields stay sparse");
   assert.equal(linkTarget("[[A b|alias]]"), "A b");
 });
 
