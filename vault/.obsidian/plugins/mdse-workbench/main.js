@@ -1587,142 +1587,6 @@ var DefinitionCreationService = class {
   }
 };
 
-// src/core/definition-lifecycle.ts
-function assessDefinitionDeletion(impact) {
-  const noteUses = [...impact.noteUses].sort(
-    (a, b) => a.fromPath.localeCompare(b.fromPath) || a.field.localeCompare(b.field)
-  );
-  const occurrenceUses = [...impact.occurrenceUses].sort(
-    (a, b) => a.ownerPath.localeCompare(b.ownerPath) || a.kind.localeCompare(b.kind) || a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId)
-  );
-  const blockers = [
-    ...noteUses.map((use) => `MODEL: ${use.fromPath} references this definition through ${use.field}.`),
-    ...occurrenceUses.map(
-      (use) => `LOCAL: ${use.ownerPath} contains ${use.kind} "${use.identifier}" (^${use.localId}) using this definition.`
-    )
-  ];
-  return {
-    allowed: blockers.length === 0,
-    blockers,
-    noteUseCount: noteUses.length,
-    occurrenceUseCount: occurrenceUses.length
-  };
-}
-function planDefinitionRetirement(definitionPath, currentStatus, impact) {
-  const status = typeof currentStatus === "string" && currentStatus.trim() ? currentStatus.trim().toLowerCase() : null;
-  const assessment = assessDefinitionDeletion(impact);
-  return {
-    definitionPath,
-    fromStatus: status,
-    toStatus: "retired",
-    changed: status !== "retired",
-    noteUseCount: assessment.noteUseCount,
-    occurrenceUseCount: assessment.occurrenceUseCount,
-    impactRows: assessment.blockers,
-    preservesReferences: true
-  };
-}
-
-// src/core/definition-delete.ts
-var DefinitionDeletionService = class {
-  constructor(store, impactFor, transactions, uidInUse) {
-    this.store = store;
-    this.impactFor = impactFor;
-    this.transactions = transactions;
-    this.uidInUse = uidInUse;
-    this.sequence = 0;
-    this.pending = /* @__PURE__ */ new Map();
-  }
-  async stage(path, uid) {
-    if (!await this.store.exists(path)) throw new Error(`${path} does not exist.`);
-    const before = await this.store.read(path);
-    const impact = assessDefinitionDeletion(await this.impactFor(path));
-    const id = `definition-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
-    const label = `delete definition ${path}`;
-    this.transactions.begin(id, label, "structural");
-    const transaction = this.transactions.add(id, {
-      id: id + "-delete",
-      label,
-      changes: [{
-        kind: "definition.delete",
-        summary: label,
-        refs: [noteRef(uid)],
-        metadata: {
-          path,
-          noteUseCount: impact.noteUseCount,
-          occurrenceUseCount: impact.occurrenceUseCount
-        }
-      }]
-    });
-    this.pending.set(id, { path, uid, before, label, impact });
-    return { transaction, path, uid, impact };
-  }
-  async stageAndReview(path, uid) {
-    const staged = await this.stage(path, uid);
-    return this.review(staged.transaction.id);
-  }
-  review(transactionId) {
-    const pending = this.requirePending(transactionId);
-    return {
-      transaction: this.transactions.review(transactionId),
-      path: pending.path,
-      uid: pending.uid,
-      impact: pending.impact
-    };
-  }
-  async apply(transactionId) {
-    const pending = this.requirePending(transactionId);
-    const latestImpact = assessDefinitionDeletion(await this.impactFor(pending.path));
-    if (!latestImpact.allowed) {
-      throw new Error(
-        `Cannot apply ${pending.label}: ${latestImpact.noteUseCount + latestImpact.occurrenceUseCount} active reference${latestImpact.noteUseCount + latestImpact.occurrenceUseCount === 1 ? "" : "s"} remain.`
-      );
-    }
-    if (!await this.store.exists(pending.path)) throw new Error(`Cannot apply ${pending.label}: definition no longer exists.`);
-    const current = await this.store.read(pending.path);
-    if (current !== pending.before) throw new Error(`Cannot apply ${pending.label}: definition changed after Review.`);
-    await this.transactions.apply(transactionId, {
-      apply: async () => {
-        const impact = assessDefinitionDeletion(await this.impactFor(pending.path));
-        if (!impact.allowed) throw new Error(`Cannot apply ${pending.label}: active references appeared after Review.`);
-        if (!await this.store.exists(pending.path)) throw new Error(`${pending.path} no longer exists.`);
-        const latest = await this.store.read(pending.path);
-        if (latest !== pending.before) throw new Error(`${pending.path} changed after Review.`);
-        await this.store.remove(pending.path);
-        return {
-          undo: async () => {
-            if (await this.store.exists(pending.path)) throw new Error(`${pending.path} already exists; cannot restore deleted definition.`);
-            if (this.uidInUse?.(pending.uid)) {
-              throw new Error(`Cannot undo ${pending.label}: uid ${pending.uid} is now in use.`);
-            }
-            await this.store.create(pending.path, pending.before);
-          },
-          redo: async () => {
-            const impactNow = assessDefinitionDeletion(await this.impactFor(pending.path));
-            if (!impactNow.allowed) throw new Error(`Cannot redo ${pending.label}: active references exist.`);
-            if (!await this.store.exists(pending.path)) throw new Error(`${pending.path} no longer exists before redo.`);
-            const restored = await this.store.read(pending.path);
-            if (restored !== pending.before) throw new Error(`${pending.path} changed after undoing ${pending.label}.`);
-            await this.store.remove(pending.path);
-          }
-        };
-      }
-    });
-    this.pending.delete(transactionId);
-  }
-  cancel(transactionId) {
-    this.requirePending(transactionId);
-    const cancelled = this.transactions.cancel(transactionId);
-    this.pending.delete(transactionId);
-    return cancelled;
-  }
-  requirePending(transactionId) {
-    const pending = this.pending.get(transactionId);
-    if (!pending) throw new Error(`Definition deletion transaction ${transactionId} does not exist.`);
-    return pending;
-  }
-};
-
 // node_modules/yaml/browser/dist/nodes/identity.js
 var ALIAS = Symbol.for("yaml.alias");
 var DOC = Symbol.for("yaml.document");
@@ -7973,6 +7837,150 @@ function parseDocument(source, options = {}) {
   }
   return doc;
 }
+
+// src/core/definition-lifecycle.ts
+function assessDefinitionDeletion(impact) {
+  const noteUses = [...impact.noteUses].sort(
+    (a, b) => a.fromPath.localeCompare(b.fromPath) || a.field.localeCompare(b.field)
+  );
+  const occurrenceUses = [...impact.occurrenceUses].sort(
+    (a, b) => a.ownerPath.localeCompare(b.ownerPath) || a.kind.localeCompare(b.kind) || a.identifier.localeCompare(b.identifier) || a.localId.localeCompare(b.localId)
+  );
+  const blockers = [
+    ...noteUses.map((use) => `MODEL: ${use.fromPath} references this definition through ${use.field}.`),
+    ...occurrenceUses.map(
+      (use) => `LOCAL: ${use.ownerPath} contains ${use.kind} "${use.identifier}" (^${use.localId}) using this definition.`
+    )
+  ];
+  return {
+    allowed: blockers.length === 0,
+    blockers,
+    noteUseCount: noteUses.length,
+    occurrenceUseCount: occurrenceUses.length
+  };
+}
+function planDefinitionRetirement(definitionPath, currentStatus, impact) {
+  const status = typeof currentStatus === "string" && currentStatus.trim() ? currentStatus.trim().toLowerCase() : null;
+  const assessment = assessDefinitionDeletion(impact);
+  return {
+    definitionPath,
+    fromStatus: status,
+    toStatus: "retired",
+    changed: status !== "retired",
+    noteUseCount: assessment.noteUseCount,
+    occurrenceUseCount: assessment.occurrenceUseCount,
+    impactRows: assessment.blockers,
+    preservesReferences: true
+  };
+}
+
+// src/core/definition-delete.ts
+var DefinitionDeletionService = class {
+  constructor(store, impactFor, transactions, uidInUse) {
+    this.store = store;
+    this.impactFor = impactFor;
+    this.transactions = transactions;
+    this.uidInUse = uidInUse;
+    this.sequence = 0;
+    this.pending = /* @__PURE__ */ new Map();
+  }
+  async stage(path, uid) {
+    if (!await this.store.exists(path)) throw new Error(`${path} does not exist.`);
+    const before = await this.store.read(path);
+    const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(before);
+    if (!frontmatterMatch) throw new Error(`${path} must begin with YAML frontmatter.`);
+    const doc = parseDocument(frontmatterMatch[1]);
+    if (doc.errors.length) throw new Error(`${path} frontmatter is invalid YAML.`);
+    const storedUid = String(doc.get("uid") ?? "").trim();
+    if (!storedUid || storedUid !== uid) {
+      throw new Error(`Cannot stage deletion of ${path}: expected uid ${uid}, found ${storedUid || "none"}.`);
+    }
+    const impact = assessDefinitionDeletion(await this.impactFor(path));
+    const id = `definition-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `delete definition ${path}`;
+    this.transactions.begin(id, label, "structural");
+    const transaction = this.transactions.add(id, {
+      id: id + "-delete",
+      label,
+      changes: [{
+        kind: "definition.delete",
+        summary: label,
+        refs: [noteRef(uid)],
+        metadata: {
+          path,
+          noteUseCount: impact.noteUseCount,
+          occurrenceUseCount: impact.occurrenceUseCount
+        }
+      }]
+    });
+    this.pending.set(id, { path, uid, before, label, impact });
+    return { transaction, path, uid, impact };
+  }
+  async stageAndReview(path, uid) {
+    const staged = await this.stage(path, uid);
+    return this.review(staged.transaction.id);
+  }
+  review(transactionId) {
+    const pending = this.requirePending(transactionId);
+    return {
+      transaction: this.transactions.review(transactionId),
+      path: pending.path,
+      uid: pending.uid,
+      impact: pending.impact
+    };
+  }
+  async apply(transactionId) {
+    const pending = this.requirePending(transactionId);
+    const latestImpact = assessDefinitionDeletion(await this.impactFor(pending.path));
+    if (!latestImpact.allowed) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${latestImpact.noteUseCount + latestImpact.occurrenceUseCount} active reference${latestImpact.noteUseCount + latestImpact.occurrenceUseCount === 1 ? "" : "s"} remain.`
+      );
+    }
+    if (!await this.store.exists(pending.path)) throw new Error(`Cannot apply ${pending.label}: definition no longer exists.`);
+    const current = await this.store.read(pending.path);
+    if (current !== pending.before) throw new Error(`Cannot apply ${pending.label}: definition changed after Review.`);
+    await this.transactions.apply(transactionId, {
+      apply: async () => {
+        const impact = assessDefinitionDeletion(await this.impactFor(pending.path));
+        if (!impact.allowed) throw new Error(`Cannot apply ${pending.label}: active references appeared after Review.`);
+        if (!await this.store.exists(pending.path)) throw new Error(`${pending.path} no longer exists.`);
+        const latest = await this.store.read(pending.path);
+        if (latest !== pending.before) throw new Error(`${pending.path} changed after Review.`);
+        await this.store.remove(pending.path);
+        return {
+          undo: async () => {
+            if (await this.store.exists(pending.path)) throw new Error(`${pending.path} already exists; cannot restore deleted definition.`);
+            if (this.uidInUse?.(pending.uid)) {
+              throw new Error(`Cannot undo ${pending.label}: uid ${pending.uid} is now in use.`);
+            }
+            await this.store.create(pending.path, pending.before);
+          },
+          redo: async () => {
+            const impactNow = assessDefinitionDeletion(await this.impactFor(pending.path));
+            if (!impactNow.allowed) throw new Error(`Cannot redo ${pending.label}: active references exist.`);
+            if (!await this.store.exists(pending.path)) throw new Error(`${pending.path} no longer exists before redo.`);
+            const restored = await this.store.read(pending.path);
+            if (restored !== pending.before) throw new Error(`${pending.path} changed after undoing ${pending.label}.`);
+            await this.store.remove(pending.path);
+          }
+        };
+      }
+    });
+    this.pending.delete(transactionId);
+  }
+  cancel(transactionId) {
+    this.requirePending(transactionId);
+    const cancelled = this.transactions.cancel(transactionId);
+    this.pending.delete(transactionId);
+    return cancelled;
+  }
+  requirePending(transactionId) {
+    const pending = this.pending.get(transactionId);
+    if (!pending) throw new Error(`Definition deletion transaction ${transactionId} does not exist.`);
+    return pending;
+  }
+};
 
 // src/core/definition-retire.ts
 function impactSignature(impact) {
@@ -17031,7 +17039,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays; lifecycle impact queries scan both forward- and inverse-authored governed relationships rather than only forward graph edges; supersession relationship writes also fail closed when any existing relationship target cannot be semantically resolved; shared governed relationship removal keeps frontmatter sparse by deleting a relationship property when its final target is removed; when supersession migration reaches zero remaining engineering dependents, the UI marks migration complete and may hand off to a separate governed retirement review without auto-retiring the replaced definition; lifecycle provenance relationships (supersedes/supersededBy) remain impact evidence but are excluded from migration candidates; retirement Apply revalidates the complete reviewed impact inventory and refuses stale evidence; destructive deletion keeps lifecycle provenance authoritative, so a superseded definition remains blocked from deletion while any supersedes/supersededBy reference still points to it; retirement redo also revalidates the reviewed dependency inventory so semantic history cannot reapply retirement after new dependents appear; supersession redo likewise revalidates the reviewed dependency inventory before restoring the paired lifecycle relationships; deletion redo also treats newly appeared lifecycle provenance as an active reference and refuses destructive replay; supersession undo relies on the unified chronological semantic-history stack, so newer migration edits must be undone before the supersession relationship pair can be removed; note-level paired relationship migration undo is atomic across all affected files and rolls back partial reverts on write failure; redo is likewise atomic and restores earlier files to the pre-redo state if a later paired-file write fails; guided occurrence migration carries a target-validity semantic guard so Apply and Redo refuse a missing replacement definition even when the owner note is otherwise unchanged; note-level migration also verifies replacement existence at Stage, Apply, and Redo, including one-way relationships where the replacement note is not otherwise part of the affected write set; governed definition creation undo revalidates complete lifecycle impact and refuses removal once active note or occurrence references exist; creation redo revalidates both destination-path availability and global UID uniqueness after undo, preventing semantic identity collision before recreating the canonical note; definition deletion undo likewise revalidates global UID uniqueness before restoring a deleted canonical definition, so external post-delete identity reuse cannot create duplicate durable identities. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays; lifecycle impact queries scan both forward- and inverse-authored governed relationships rather than only forward graph edges; supersession relationship writes also fail closed when any existing relationship target cannot be semantically resolved; shared governed relationship removal keeps frontmatter sparse by deleting a relationship property when its final target is removed; when supersession migration reaches zero remaining engineering dependents, the UI marks migration complete and may hand off to a separate governed retirement review without auto-retiring the replaced definition; lifecycle provenance relationships (supersedes/supersededBy) remain impact evidence but are excluded from migration candidates; retirement Apply revalidates the complete reviewed impact inventory and refuses stale evidence; destructive deletion keeps lifecycle provenance authoritative, so a superseded definition remains blocked from deletion while any supersedes/supersededBy reference still points to it; retirement redo also revalidates the reviewed dependency inventory so semantic history cannot reapply retirement after new dependents appear; supersession redo likewise revalidates the reviewed dependency inventory before restoring the paired lifecycle relationships; deletion redo also treats newly appeared lifecycle provenance as an active reference and refuses destructive replay; supersession undo relies on the unified chronological semantic-history stack, so newer migration edits must be undone before the supersession relationship pair can be removed; note-level paired relationship migration undo is atomic across all affected files and rolls back partial reverts on write failure; redo is likewise atomic and restores earlier files to the pre-redo state if a later paired-file write fails; guided occurrence migration carries a target-validity semantic guard so Apply and Redo refuse a missing replacement definition even when the owner note is otherwise unchanged; note-level migration also verifies replacement existence at Stage, Apply, and Redo, including one-way relationships where the replacement note is not otherwise part of the affected write set; governed definition creation undo revalidates complete lifecycle impact and refuses removal once active note or occurrence references exist; creation redo revalidates both destination-path availability and global UID uniqueness after undo, preventing semantic identity collision before recreating the canonical note; definition deletion undo likewise revalidates global UID uniqueness before restoring a deleted canonical definition, so external post-delete identity reuse cannot create duplicate durable identities; deletion Stage also validates the caller UID against the source note frontmatter before Review, preventing stale UI/index identity from opening a transaction for the wrong canonical definition. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
