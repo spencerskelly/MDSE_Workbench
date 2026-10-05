@@ -911,6 +911,16 @@ function nextLocalId(kind, ownerUid, now = /* @__PURE__ */ new Date()) {
   const prefix = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
   return prefix[kind] + stamp + suffix;
 }
+function nextAvailableLocalId(kind, ownerUid, existingLocalIds, now = /* @__PURE__ */ new Date()) {
+  const occupied = existingLocalIds instanceof Set ? existingLocalIds : new Set(existingLocalIds);
+  let candidateTime = new Date(now.getTime());
+  for (let attempts = 0; attempts < 1e4; attempts++) {
+    const candidate = nextLocalId(kind, ownerUid, candidateTime);
+    if (!occupied.has(candidate)) return candidate;
+    candidateTime = new Date(candidateTime.getTime() + 1);
+  }
+  throw new Error("Cannot allocate a unique Local Model identity after 10000 millisecond retries.");
+}
 function planLocalRecordDelete(text, localId) {
   const editable = editableLocalRegion(text);
   const record = editable.region.records.find((candidate) => candidate.localId === localId);
@@ -6666,13 +6676,17 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     }
     if (this.editing) {
       const addPart = head.createEl("button", { text: "Add part occurrence\u2026", cls: "mdse-detail-btn" });
-      addPart.onclick = () => this.createPartOccurrence(file);
+      addPart.onclick = () => {
+        void this.createPartOccurrence(file);
+      };
     }
     if (this.editing && record.kind === "part") {
       const definition = head.createEl("button", { text: "Change definition\u2026", cls: "mdse-detail-btn" });
       definition.onclick = () => this.editPartDefinition(file, record);
       const addEndpoint = head.createEl("button", { text: "Add endpoint\u2026", cls: "mdse-detail-btn" });
-      addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
+      addEndpoint.onclick = () => {
+        void this.createEndpointOccurrence(file, record);
+      };
     }
     if (this.editing && record.kind === "endpoint") {
       const definition = head.createEl("button", { text: "Change definition\u2026", cls: "mdse-detail-btn" });
@@ -6712,7 +6726,9 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         void this.rewireConnectionEndpoint(file, record, "endpointB");
       };
       const addFlow = head.createEl("button", { text: "Add flow\u2026", cls: "mdse-detail-btn" });
-      addFlow.onclick = () => this.createFlowOccurrence(file, record);
+      addFlow.onclick = () => {
+        void this.createFlowOccurrence(file, record);
+      };
     }
     if (this.editing && record.kind === "flow") {
       const definition = head.createEl("button", { text: "Change definition\u2026", cls: "mdse-detail-btn" });
@@ -7067,13 +7083,16 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       new import_obsidian4.Notice(`Cannot rewire connection endpoint: ${e.message}`, 12e3);
     }
   }
-  createFlowOccurrence(file, connection) {
+  async createFlowOccurrence(file, connection) {
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("flow", ownerUid);
+      const localId = nextAvailableLocalId("flow", ownerUid, region.records.map((record) => record.localId));
       new LocalFlowCreateModal(
         this.app,
         file.basename,
@@ -7103,7 +7122,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       if (!options.length) throw new Error("This note has no second endpoint occurrence to connect.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("connection", ownerUid);
+      const localId = nextAvailableLocalId("connection", ownerUid, region.records.map((record) => record.localId));
       new LocalConnectionCreateModal(
         this.app,
         file.basename,
@@ -7123,13 +7142,16 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       new import_obsidian4.Notice(`Cannot create connection: ${e.message}`, 12e3);
     }
   }
-  createEndpointOccurrence(file, part) {
+  async createEndpointOccurrence(file, part) {
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("endpoint", ownerUid);
+      const localId = nextAvailableLocalId("endpoint", ownerUid, region.records.map((record) => record.localId));
       new LocalEndpointCreateModal(
         this.app,
         file.basename,
@@ -7172,13 +7194,16 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       new import_obsidian4.Notice(`Cannot delete occurrence: ${e.message}`, 12e3);
     }
   }
-  createPartOccurrence(file) {
+  async createPartOccurrence(file) {
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("part", ownerUid);
+      const localId = nextAvailableLocalId("part", ownerUid, region.records.map((record) => record.localId));
       new LocalPartCreateModal(
         this.app,
         file.basename,
