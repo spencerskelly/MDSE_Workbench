@@ -6,6 +6,7 @@
  */
 import {
   WRITABLE_VERSION,
+  WRITABLE_VERSIONS,
   parseLocalModel,
   parseLinks,
   type LocalFinding,
@@ -47,8 +48,8 @@ export function editableLocalRegion(text: string): EditableLocalRegion {
   const region = parseLocalModel(text);
   if (!region) throw new Error("This note has no governed Local Model region.");
   if (!region.structured) throw new Error("The Local Model region has structural/schema errors and cannot be edited.");
-  if (region.schemaVersion !== WRITABLE_VERSION) {
-    throw new Error("Local Model schema " + (region.schemaVersion ?? "unknown") + " is read-only. Structured writes require schema " + WRITABLE_VERSION + ".");
+  if (!region.schemaVersion || !(WRITABLE_VERSIONS as readonly string[]).includes(region.schemaVersion)) {
+    throw new Error("Local Model schema " + (region.schemaVersion ?? "unknown") + " is read-only. Structured writes require schema " + WRITABLE_VERSIONS.join(" or ") + ".");
   }
   return {
     region,
