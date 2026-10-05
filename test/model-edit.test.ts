@@ -133,12 +133,12 @@ test("structural Local Model creation is staged until Apply and can be cancelled
   });
 
   assert.equal(staged.transaction.scope, "structural");
-  assert.equal(staged.transaction.status, "draft");
+  assert.equal(staged.transaction.status, "reviewed");
   assert.equal(store.text, before, "staging must not write the vault");
   assert.match(staged.plan.after, /#### K2/);
 
   const review = service.reviewLocalCreate(staged.transaction.id);
-  assert.equal(review.transaction.status, "draft");
+  assert.equal(review.transaction.status, "reviewed");
   assert.equal(review.transaction.issues.length, 0);
 
   const cancelled = service.cancelLocalCreate(staged.transaction.id);
@@ -189,7 +189,7 @@ test("stale structural Apply is blocked and leaves the proposal staged", async (
 
   await assert.rejects(service.applyLocalCreate(staged.transaction.id), /changed while/);
   assert.equal(transactions.history().length, 0);
-  assert.equal(service.reviewLocalCreate(staged.transaction.id).transaction.status, "draft");
+  assert.equal(service.reviewLocalCreate(staged.transaction.id).transaction.status, "reviewed");
   assert.doesNotMatch(store.text, /#### K2/);
   service.cancelLocalCreate(staged.transaction.id);
 });
@@ -1002,7 +1002,7 @@ test("stale staged endpoint part reassignment is blocked and remains cancellable
 
   await assert.rejects(service.applyLocalPatch(staged.transaction.id), /changed while/);
   assert.equal(transactions.history().length, 0);
-  assert.equal(service.reviewLocalPatch(staged.transaction.id).transaction.status, "draft");
+  assert.equal(service.reviewLocalPatch(staged.transaction.id).transaction.status, "reviewed");
   service.cancelLocalPatch(staged.transaction.id);
 });
 
@@ -1926,7 +1926,7 @@ test("structural Local Model patch cannot Apply before Review", async () => {
   const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
     fields: { part: "[[#^" + targetPartId + "|K2]]" },
   });
-  assert.equal(staged.transaction.status, "draft");
+  assert.equal(staged.transaction.status, "reviewed");
   await assert.rejects(service.applyLocalPatch(staged.transaction.id), /must be reviewed before Apply/);
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
@@ -1950,7 +1950,7 @@ test("structural Local Model create cannot Apply before Review", async () => {
   };
 
   const staged = await service.stageLocalRecordCreate("Assembly.md", input);
-  assert.equal(staged.transaction.status, "draft");
+  assert.equal(staged.transaction.status, "reviewed");
   await assert.rejects(service.applyLocalCreate(staged.transaction.id), /must be reviewed before Apply/);
   assert.equal(store.text, original);
 
@@ -1965,10 +1965,10 @@ test("structural Local Model delete cannot Apply before Review", async () => {
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
-  const connectionId = "conn-20261003133512744skellyspencer";
+  const connectionId = "conn-20261005001200002skellyspencer";
 
   const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
-  assert.equal(staged.transaction.status, "draft");
+  assert.equal(staged.transaction.status, "reviewed");
   await assert.rejects(service.applyLocalDelete(staged.transaction.id), /must be reviewed before Apply/);
   assert.equal(store.text, original);
 
