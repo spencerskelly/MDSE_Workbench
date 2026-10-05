@@ -133,6 +133,7 @@ export class RelationshipWriter {
     const file = this.file(path);
     const tx: Transaction = { label: `remove ${file.basename} ${field} ${linkText}`, files: [] };
     const before = await this.app.vault.read(file);
+    this.assertCurrentIdentity(file.path, before, "remove missing relationship from");
     let changed = false;
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       changed = removeLink(fm, field, linkText);
