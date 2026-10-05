@@ -99,6 +99,7 @@ export function planDefinitionCreation(request: DefinitionCreationRequest): Plan
 
 
 import { noteRef } from "./localmodel";
+import type { DefinitionDeletionImpact } from "./definition-lifecycle";
 import { TransactionManager, type EditTransaction } from "./transaction";
 
 export interface DefinitionDocumentStore {
@@ -133,6 +134,7 @@ export class DefinitionCreationService {
     private readonly store: DefinitionDocumentStore,
     private readonly uidInUse: (uid: string) => boolean,
     private readonly transactions: TransactionManager,
+    private readonly impactFor?: (path: string) => Promise<DefinitionDeletionImpact>,
   ) {}
 
   stage(request: DefinitionCreationRequest): StagedDefinitionCreation {
@@ -179,6 +181,13 @@ export class DefinitionCreationService {
         await this.store.create(plan.path, plan.text);
         return {
           undo: async () => {
+            if (this.impactFor) {
+              const impact = await this.impactFor(plan.path);
+              const activeReferences = impact.noteUses.length + impact.occurrenceUses.length;
+              if (activeReferences) {
+                throw new Error(`Cannot undo ${label}: ${activeReferences} active reference${activeReferences === 1 ? "" : "s"} now use the created definition.`);
+              }
+            }
             if (!(await this.store.exists(plan.path))) throw new Error(`${plan.path} no longer exists after "${label}".`);
             const current = await this.store.read(plan.path);
             if (current !== plan.text) throw new Error(`${plan.path} changed after "${label}".`);
