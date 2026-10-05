@@ -10,6 +10,8 @@ import type { NoteRecord } from "../src/core/model";
 
 const T = (n: number) => `20260911143227${String(n).padStart(3, "0")}skellyspencer`; // 17 digits + 13 letters = 30 characters
 const START2 = "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->";
+const START3 = "<!-- MDSE:LOCAL-MODEL START schema=0.3 -->";
+const START4 = "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->";
 const END = "<!-- MDSE:LOCAL-MODEL END -->";
 const P1 = `part-${T(1)}`, P2 = `part-${T(2)}`, E1 = `ep-${T(3)}`, E2 = `ep-${T(4)}`, E3 = `ep-${T(5)}`, C1 = `conn-${T(6)}`, F1 = `flow-${T(7)}`, F2 = `flow-${T(8)}`;
 
@@ -93,7 +95,7 @@ test("marker errors: missing end, missing start, duplicate, nested, wrong order,
 });
 
 test("unsupported future schema: readable as Markdown, structured use off, no records guessed", () => {
-  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.3"))!;
+  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.5"))!;
   assert.ok(r.findings.some((f) => f.code === "schema.unsupported"));
   assert.equal(r.structured, false);
   assert.deepEqual(r.records, []);
@@ -279,7 +281,7 @@ test("addLink matches by the note a link resolves to, not by its text; removeLin
 
 test("the 0.2 schema fixture agrees with the parser's constants", () => {
   const yaml = readFileSync(new URL("./fixtures/local-model.yaml", import.meta.url), "utf8");
-  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->"/);
+  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->"/);
   for (const k of ["part-", "ep-", "conn-", "flow-"]) assert.ok(yaml.includes(`prefix: "${k}"`));
 });
 
