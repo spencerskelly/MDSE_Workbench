@@ -15,6 +15,7 @@ import { DefinitionCreationService, nextAvailableDefinitionUid, normalizeAuthorS
 import { DefinitionDeletionService } from "./core/definition-delete";
 import { DefinitionRetirementService } from "./core/definition-retire";
 import { DefinitionSupersessionService } from "./core/definition-supersede-service";
+import { DefinitionNoteMigrationService } from "./core/definition-note-migrate-service";
 import { planDefinitionOccurrenceMigration } from "./core/definition-migrate";
 import type { DefinitionDeletionImpact } from "./core/definition-lifecycle";
 import { canPublishCoreReady } from "./core/core-readiness";
@@ -104,7 +105,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner, and a governed note-migration service now applies the source-target swap plus all paired/symmetric inverse moves as one stale-guarded structural transaction with shared undo/redo. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed service, and that note-migration service is now bound to real vault mutation, Obsidian link resolution/link-text generation, indexed fresh relationship targets, schema relationship semantics, and shared semantic history. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
@@ -114,6 +115,8 @@ export default class MdseWorkbench extends Plugin {
   definitionRetirer: DefinitionRetirementService | null = null;
   /** Supersession records replacement intent while leaving dependent migration explicit. */
   definitionSuperseder: DefinitionSupersessionService | null = null;
+  /** Guided note-level supersession migration preserves relationship pairing in one transaction. */
+  definitionNoteMigrator: DefinitionNoteMigrationService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
   detail: NoteDetailPanel | null = null;
@@ -1198,6 +1201,19 @@ export default class MdseWorkbench extends Plugin {
           write: async (path, text) => this.app.vault.modify(localFile(normalizePath(path)), text),
         },
         (path) => this.definitionDeletionImpact(path),
+        this.transactions,
+      );
+      this.definitionNoteMigrator = new DefinitionNoteMigrationService(
+        {
+          read: async (path) => this.app.vault.read(localFile(normalizePath(path))),
+          write: async (path, text) => this.app.vault.modify(localFile(normalizePath(path)), text),
+        },
+        (target, fromPath) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), normalizePath(fromPath))?.path ?? null,
+        (targetPath, fromPath) => {
+          const file = localFile(normalizePath(targetPath));
+          return this.app.metadataCache.fileToLinktext(file, normalizePath(fromPath), true);
+        },
+        (ownerPath, field) => this.indexer?.index.notes.get(normalizePath(ownerPath))?.fields.get(field)?.slice() ?? [],
         this.transactions,
       );
       this.assurance = new AssuranceManager({
