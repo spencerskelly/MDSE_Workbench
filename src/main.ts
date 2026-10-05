@@ -105,7 +105,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed service, and that note-migration service is now bound to real vault mutation, Obsidian link resolution/link-text generation, indexed fresh relationship targets, schema relationship semantics, and shared semantic history. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI now also lets an engineer select, review, and apply one note-level relationship migration as a separate stale-guarded structural transaction that preserves paired/symmetric inverses. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
@@ -194,6 +194,9 @@ export default class MdseWorkbench extends Plugin {
       stageDefinitionOccurrenceMigration: (ownerPath, localId, replacedPath, replacementPath) => this.stageDefinitionOccurrenceMigration(ownerPath, localId, replacedPath, replacementPath),
       applyDefinitionOccurrenceMigration: (transactionId) => this.applyOccurrenceDefinitionBinding(transactionId),
       cancelDefinitionOccurrenceMigration: (transactionId) => this.cancelOccurrenceDefinitionBinding(transactionId),
+      stageDefinitionNoteMigration: (ownerPath, field, replacedPath, replacementPath) => this.stageDefinitionNoteMigration(ownerPath, field, replacedPath, replacementPath),
+      applyDefinitionNoteMigration: (transactionId) => this.applyDefinitionNoteMigration(transactionId),
+      cancelDefinitionNoteMigration: (transactionId) => this.cancelDefinitionNoteMigration(transactionId),
       stageOccurrenceDefinitionBinding: (ownerPath, localId, definitionPath) => this.stageOccurrenceDefinitionBinding(ownerPath, localId, definitionPath),
       applyOccurrenceDefinitionBinding: (transactionId) => this.applyOccurrenceDefinitionBinding(transactionId),
       cancelOccurrenceDefinitionBinding: (transactionId) => this.cancelOccurrenceDefinitionBinding(transactionId),
@@ -487,6 +490,57 @@ export default class MdseWorkbench extends Plugin {
     return editor.stageAndReviewLocalRecordPatch(normalizedOwner, localId, {
       fields: { definition: plan.definitionLink },
     });
+  }
+
+  private async stageDefinitionNoteMigration(
+    ownerPath: string,
+    field: string,
+    replacedPath: string,
+    replacementPath: string,
+  ) {
+    const migrator = this.definitionNoteMigrator;
+    const schema = this.schema;
+    const indexer = this.indexer;
+    if (!migrator || !schema || !indexer || !this.isReady()) {
+      throw new Error("Definition relationship migration is unavailable while Workbench is starting.");
+    }
+
+    const relationship = schema.byField.get(field);
+    if (!relationship) throw new Error(`${field} is not an authored governed relationship field.`);
+
+    const normalizedOwner = normalizePath(ownerPath);
+    const normalizedReplaced = normalizePath(replacedPath);
+    const normalizedReplacement = normalizePath(replacementPath);
+    const owner = indexer.index.notes.get(normalizedOwner);
+    const replaced = indexer.index.notes.get(normalizedReplaced);
+    const replacement = indexer.index.notes.get(normalizedReplacement);
+
+    if (!owner) throw new Error(`${normalizedOwner} is not an indexed model note.`);
+    if (!replaced) throw new Error(`${normalizedReplaced} is not an indexed model definition.`);
+    if (!replacement) throw new Error(`${normalizedReplacement} is not an indexed model definition.`);
+
+    return migrator.stageAndReview({
+      ownerPath: normalizedOwner,
+      ownerUid: owner.uid,
+      field,
+      replacedPath: normalizedReplaced,
+      replacedUid: replaced.uid,
+      replacementPath: normalizedReplacement,
+      replacementUid: replacement.uid,
+      relationship,
+    });
+  }
+
+  private async applyDefinitionNoteMigration(transactionId: string): Promise<void> {
+    const migrator = this.definitionNoteMigrator;
+    if (!migrator) throw new Error("Definition relationship migration is unavailable.");
+    await migrator.apply(transactionId);
+  }
+
+  private cancelDefinitionNoteMigration(transactionId: string): void {
+    const migrator = this.definitionNoteMigrator;
+    if (!migrator) throw new Error("Definition relationship migration is unavailable.");
+    migrator.cancel(transactionId);
   }
 
   private async stageOccurrenceDefinitionBinding(
