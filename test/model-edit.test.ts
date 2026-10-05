@@ -2042,3 +2042,36 @@ test("first part creation remains cancellable before the owner note is changed",
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged endpoint part assignment clears existing parent and supports undo/redo", async () => {
+  const partId = "part-20261005006000000skellyspencer";
+  const endpointId = "ep-20261005006000001skellyspencer";
+  const original = noteWithParentableEndpoints();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
+    fields: {
+      part: "[[#^" + partId + "|K1]]",
+      parent: null,
+    },
+  });
+
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  const applied = parseLocalModel(store.text)?.records.find((record) => record.localId === endpointId);
+  assert.equal(applied?.part?.blockId, partId);
+  assert.equal(applied?.parent, null);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  const redone = parseLocalModel(store.text)?.records.find((record) => record.localId === endpointId);
+  assert.equal(redone?.part?.blockId, partId);
+  assert.equal(redone?.parent, null);
+});
