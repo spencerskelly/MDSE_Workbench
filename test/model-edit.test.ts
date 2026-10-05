@@ -846,3 +846,30 @@ test("cancelled flow creation leaves source and history untouched", async () => 
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("clean flow deletion stages, applies, and joins shared undo/redo history", async () => {
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const flowId = "flow-20261005001200003skellyspencer";
+  const original = noteWithCleanConnection(true);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", flowId);
+  assert.equal(staged.plan.kind, "flow");
+  assert.equal(staged.plan.impacts.length, 0);
+  assert.equal(staged.externalImpacts.length, 0);
+  assert.equal(store.text, original);
+
+  await service.applyLocalDelete(staged.transaction.id);
+  assert.doesNotMatch(store.text, /##### Commands/);
+  assert.match(store.text, /#### Harness/);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.delete");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.doesNotMatch(store.text, /##### Commands/);
+  assert.ok(store.text.includes("^" + connectionId));
+});
