@@ -10,6 +10,7 @@ import type { NoteRecord } from "../src/core/model";
 
 const T = (n: number) => `20260911143227${String(n).padStart(3, "0")}skellyspencer`; // 17 digits + 13 letters = 30 characters
 const START2 = "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->";
+const START3 = "<!-- MDSE:LOCAL-MODEL START schema=0.3 -->";
 const END = "<!-- MDSE:LOCAL-MODEL END -->";
 const P1 = `part-${T(1)}`, P2 = `part-${T(2)}`, E1 = `ep-${T(3)}`, E2 = `ep-${T(4)}`, E3 = `ep-${T(5)}`, C1 = `conn-${T(6)}`, F1 = `flow-${T(7)}`, F2 = `flow-${T(8)}`;
 
@@ -92,8 +93,22 @@ test("marker errors: missing end, missing start, duplicate, nested, wrong order,
   assert.equal(parseLocalModel("# plain note\n\nno region here"), null);
 });
 
+test("0.3 endpoints may omit reusable definitions while 0.2 endpoints still require them", () => {
+  const withoutBoundaryDefinition = canonical().replace("#### Boundary\n- definition: [[CAN Interface]]\n", "#### Boundary\n");
+  const old = parseLocalModel(withoutBoundaryDefinition)!;
+  assert.ok(old.findings.some((f) => f.code === "record.missing-definition" && f.localId === E3));
+
+  const current = parseLocalModel(withoutBoundaryDefinition.replace(START2, START3))!;
+  assert.equal(current.structured, true);
+  assert.ok(!current.findings.some((f) => f.code === "record.missing-definition" && f.localId === E3));
+  assert.equal(current.records.find((r) => r.localId === E3)?.definition, null);
+
+  const invalidUsage = withoutBoundaryDefinition.replace(START2, START3).replace("#### Boundary\n", "#### Boundary\n- usage: option\n");
+  assert.ok(codes(invalidUsage).includes("record.usage-without-definition"));
+});
+
 test("unsupported future schema: readable as Markdown, structured use off, no records guessed", () => {
-  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.3"))!;
+  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.4"))!;
   assert.ok(r.findings.some((f) => f.code === "schema.unsupported"));
   assert.equal(r.structured, false);
   assert.deepEqual(r.records, []);
