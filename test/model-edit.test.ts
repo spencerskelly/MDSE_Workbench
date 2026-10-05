@@ -894,3 +894,18 @@ test("indexed external reference blocks flow deletion and is rechecked at Apply"
   assert.match(store.text, /##### Commands/);
   service.cancelLocalDelete(staged.transaction.id);
 });
+
+
+test("cancelled flow deletion leaves source and history untouched", async () => {
+  const flowId = "flow-20261005001200003skellyspencer";
+  const original = noteWithCleanConnection(true);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", flowId);
+  service.cancelLocalDelete(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
