@@ -144,6 +144,44 @@ test("creates a first governed region using importer-compatible section formatti
   assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === id)?.kind, "part");
 });
 
+test("creates a definitionless endpoint in new 0.3 content but not in an existing 0.2 region", () => {
+  const blank = ["---", "type: Object", "---", "", "# Empty assembly"].join("\n");
+  const endpointId = "ep-" + tokenE;
+  const created = planLocalRecordCreate(blank, {
+    kind: "endpoint",
+    localId: endpointId,
+    heading: "Context-only port",
+    fields: { kind: "proxy" },
+  });
+  assert.match(created.after, /schema=0\.3/);
+  const record = parseLocalModel(created.after)?.records.find((r) => r.localId === endpointId);
+  assert.equal(record?.definition, null);
+  assert.ok(!(parseLocalModel(created.after)?.findings ?? []).some((x) => x.localId === endpointId && x.code === "record.missing-definition"));
+
+  assert.throws(
+    () => planLocalRecordCreate(note("0.2"), {
+      kind: "endpoint",
+      localId: endpointId,
+      heading: "Context-only port",
+      fields: { kind: "proxy" },
+    }),
+    /requires a definition in Local Model schema 0\.2/,
+  );
+});
+
+test("rejects usage on a definitionless 0.3 endpoint", () => {
+  const blank = ["---", "type: Object", "---", "", "# Empty assembly"].join("\n");
+  assert.throws(
+    () => planLocalRecordCreate(blank, {
+      kind: "endpoint",
+      localId: "ep-" + tokenE,
+      heading: "Variant port",
+      fields: { usage: "option" },
+    }),
+    /definitionless endpoint cannot carry usage/,
+  );
+});
+
 test("creates a missing section in canonical order", () => {
   const id = "endpoint-" + tokenE;
   const endpointId = "ep-" + tokenE;
