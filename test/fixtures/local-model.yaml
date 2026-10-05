@@ -1,16 +1,18 @@
-schemaVersion: "0.2"
+schemaVersion: "0.4"
 purpose: "Machine-readable contract for governed Local Model Markdown records. This is a tooling/format schema, not a new first-class MDSE element schema."
 
 compatibility:
-  readableVersions: ["0.1", "0.2"]
-  writableVersion: "0.2"
+  readableVersions: ["0.1", "0.2", "0.3", "0.4"]
+  writableVersion: "0.4"
   version01Normalization: "A 0.1 part or endpoint is standard usage in memory. Reading 0.1 never mutates the file."
+  version02Compatibility: "Schema 0.2 remains readable with its original rule that every endpoint requires a reusable Port definition. Reading or editing 0.2 never silently reinterprets it as 0.3 or 0.4."
+  version03Compatibility: "Schema 0.3 remains readable with Part Occurrences / Local Interfaces headings and optional endpoint definitions. Reading 0.3 never rewrites headings or changes endpoint semantics unless explicitly upgraded to 0.4."
   unknownVersion: "Markdown remains readable, but structured Local Model interaction is disabled."
 
 region:
   heading: "Local Model"
   headingLevel: 2
-  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->"
+  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->"
   endMarker: "<!-- MDSE:LOCAL-MODEL END -->"
   maxPerNote: 1
   markerErrorsBlockStructuredEditing: true
@@ -59,8 +61,8 @@ usage:
     option: "Occurrence may be absent; when present it resolves to the concrete root or one concrete candidate in the specialization family."
 
 sections:
-  part: "Part Occurrences"
-  endpoint: "Local Interfaces"
+  part: "Parts"
+  endpoint: "Interfaces"
   connection: "Connections"
 
 records:
@@ -83,40 +85,44 @@ records:
 
   endpoint:
     headingLevel: 4
-    required: [definition]
-    optional: [usage, identifier, part, parent, exposes, equals, multiplicity, kind]
+    required: []
+    optional: [definition, usage, identifier, part, parent, equals, multiplicity, kind]
     fields:
-      definition: {value: "noteLink", targetSemanticKind: "Port"}
+      definition: {value: "noteLink", targetSemanticKind: "Object", targetSubtype: "interface"}
       usage: {value: "enum", allowed: [standard, variant, option]}
       identifier: {value: "text"}
       part: {value: "localBlockLink", targetLocalKind: "part"}
       parent: {value: "localBlockLink", targetLocalKind: "endpoint"}
-      exposes: {value: "localBlockLinkOrList", targetLocalKind: "endpoint", direction: "outer-to-inner"}
       equals: {value: "localBlockLinkOrList", targetLocalKind: "endpoint", temporary: true, symmetricMeaning: true}
       multiplicity: {value: "positiveIntegerOrSourceMultiplicity"}
       kind: {value: "text"}
     rules:
       - "part and parent are mutually exclusive."
       - "absence of both part and parent means an endpoint on the owning assembly boundary."
-      - "omitted usage means standard; canonical writing omits usage: standard."
-      - "a standard occurrence cannot point at abstract: true."
+      - "definition, when present, points to the reusable Object / interface definition."
+      - "definition may be omitted when the endpoint is contextual and no reusable interface definition is deterministically supported."
+      - "usage requires definition; a definitionless endpoint has no variation semantics."
+      - "when definition is present, omitted usage means standard; canonical writing omits usage: standard."
+      - "a standard occurrence with a definition cannot point at abstract: true."
       - "variant/option candidates are derived transitively from subtypeOf and are not stored here."
       - "nested inherited members are materialized only when local context needs independent addressability."
-      - "exposes means the boundary endpoint makes the inner endpoint available at the next assembly level."
       - "temporary equals preserves unresolved EA BindingConnector meaning; it is not automatically exposure."
 
   connection:
     headingLevel: 4
     required: [endpointA, endpointB]
-    optional: [definition, identifier]
+    optional: [definition, identifier, exposes]
     fields:
       endpointA: {value: "localBlockLink", targetLocalKind: "endpoint"}
       endpointB: {value: "localBlockLink", targetLocalKind: "endpoint"}
       definition: {value: "noteLink"}
       identifier: {value: "text"}
+      exposes: {value: "localBlockLinkOrList", targetLocalKind: "endpoint", targetRole: "assemblyBoundaryInterface"}
     rules:
       - "the owning note is the assembly/context that forms the connection."
       - "a parent assembly connects to a child's boundary endpoint, not directly to an internal endpoint."
+      - "exposes points from this internal/context-owned connection to the assembly-boundary Interface occurrence through which the connection is made available externally."
+      - "an exposed Interface is an endpoint occurrence, not a second connection; one connection may expose through more than one boundary Interface when the source model explicitly supports that topology."
       - "usage is not valid on a connection."
 
   flow:
@@ -153,12 +159,15 @@ validation:
   - "Every 30-character identity token is globally unique across note UIDs and all Local Model records."
   - "Every block ID equals the record local ID."
   - "Every local reference resolves to an existing local record of the permitted kind."
-  - "Every definition link resolves to a compatible first-class note."
+  - "Every definition link that is present resolves to a compatible first-class note."
+  - "Part and flow definitions are required; endpoint definition is optional only in schema 0.3."
   - "usage is absent or standard/variant/option on part/endpoint only."
-  - "standard definition is concrete."
-  - "variant has at least one concrete candidate."
+  - "An endpoint without definition must not persist usage."
+  - "standard definition is concrete when a definition is present."
+  - "variant has at least one concrete candidate and therefore requires a definition."
   - "option candidate family is valid even when no configuration currently includes it."
   - "A connection has exactly two valid endpoint references."
+  - "Every connection exposes reference resolves to an assembly-boundary endpoint occurrence owned by the same Local Model context."
   - "A flow is nested under one connection and has valid endpoint roles."
   - "Temporary equals is a review finding."
   - "Source provenance is not embedded in engineering records."
