@@ -641,3 +641,121 @@ test("cancelled connection creation leaves source and history untouched", async 
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithCleanConnection(includeFlow = false): string {
+  const endpointA = "ep-20261005001200000skellyspencer";
+  const endpointB = "ep-20261005001200001skellyspencer";
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const flowId = "flow-20261005001200003skellyspencer";
+  const lines = [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "^" + connectionId,
+  ];
+  if (includeFlow) lines.push(
+    "##### Commands",
+    "- definition: [[CAN Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowId,
+  );
+  lines.push("<!-- MDSE:LOCAL-MODEL END -->");
+  return lines.join("\n");
+}
+
+test("clean connection deletion stages, applies, and joins shared undo/redo history", async () => {
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const original = noteWithCleanConnection(false);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  assert.equal(staged.plan.kind, "connection");
+  assert.equal(staged.plan.impacts.length, 0);
+  assert.equal(staged.externalImpacts.length, 0);
+  assert.equal(store.text, original);
+
+  await service.applyLocalDelete(staged.transaction.id);
+  assert.doesNotMatch(store.text, /#### Harness/);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.delete");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.doesNotMatch(store.text, /#### Harness/);
+});
+
+test("child flow blocks connection deletion", async () => {
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const flowId = "flow-20261005001200003skellyspencer";
+  const store = new MemoryStore(noteWithCleanConnection(true));
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  assert.ok(staged.plan.impacts.some((impact) =>
+    impact.sourceKind === "flow" &&
+    impact.sourceLocalId === flowId &&
+    impact.field === "connection"
+  ));
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  assert.match(store.text, /#### Harness/);
+  assert.match(store.text, /##### Commands/);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalDelete(staged.transaction.id);
+});
+
+test("indexed external reference blocks connection deletion and is rechecked at Apply", async () => {
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const store = new MemoryStore(noteWithCleanConnection(false));
+  const transactions = new TransactionManager();
+  let external: Array<{ path: string; field: string }> = [];
+  const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  assert.equal(staged.externalImpacts.length, 0);
+  external = [{ path: "Requirements/REQ-CONNECTION.md", field: "appliesTo" }];
+
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  assert.deepEqual(
+    service.reviewLocalDelete(staged.transaction.id).externalImpacts,
+    [{ path: "Requirements/REQ-CONNECTION.md", field: "appliesTo" }],
+  );
+  assert.match(store.text, /#### Harness/);
+  service.cancelLocalDelete(staged.transaction.id);
+});
+
+test("cancelled connection deletion leaves source and history untouched", async () => {
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const original = noteWithCleanConnection(false);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  service.cancelLocalDelete(staged.transaction.id);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
