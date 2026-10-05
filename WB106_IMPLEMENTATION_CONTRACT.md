@@ -250,6 +250,22 @@ Definition edits use schema-driven impact rules. A change type may require a Whe
 - Ambiguous cases are never automatically resolved.
 
 
+## High-priority schema transition — WB-128 / Local Model 0.4
+
+Before Workbench can accept or structured-edit importer output written under MDSE W-384, it must add explicit Local Model 0.4 support while preserving 0.1/0.2/0.3 behavior.
+
+For 0.4:
+- sections are `Parts`, `Interfaces`, and `Connections`;
+- reusable Interface definitions resolve to `Object` notes with subtype `interface`;
+- local Interface occurrences remain endpoint ModelRefs;
+- `exposes` is owned by a Connection and targets an assembly-boundary Interface occurrence in the same Local Model context;
+- Internal/Interfaces views render exposure from the internal/context Connection to the boundary Interface;
+- new structured writes use 0.4 only after parser/validator/writer tests are complete;
+- older 0.3 endpoint-owned exposure remains 0.3 semantics and is never silently rewritten.
+
+Required validation includes: invalid exposure target kind, exposure to a non-boundary Interface, cross-context exposure without an approved representation, duplicate/ambiguous exposure evidence, and any attempt to write legacy Port-note semantics into a 0.4 region.
+
+
 ## Deferred
 
 Do not fold these into WB-106:
