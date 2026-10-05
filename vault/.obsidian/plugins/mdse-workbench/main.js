@@ -8053,7 +8053,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model part create/delete/definition editing, endpoint create/delete and part/parent/exposes/equals editing, connection create/delete/definition editing/endpoint rewiring, and flow create/delete use explicit Review / Apply / Cancel. */
+    /** Context edits apply atomically; structural Local Model part create/delete/definition editing, endpoint create/delete/definition and part/parent/exposes/equals editing, connection create/delete/definition editing/endpoint rewiring, and flow create/delete use explicit Review / Apply / Cancel. */
     this.modelEditor = null;
     /** One semantic history stack for every Workbench model writer (WB-114). */
     this.transactions = new TransactionManager();
