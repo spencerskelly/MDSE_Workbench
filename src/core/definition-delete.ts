@@ -32,6 +32,7 @@ export class DefinitionDeletionService {
     private readonly store: DefinitionDeleteStore,
     private readonly impactFor: (path: string) => Promise<DefinitionDeletionImpact>,
     private readonly transactions: TransactionManager,
+    private readonly uidInUse?: (uid: string) => boolean,
   ) {}
 
   async stage(path: string, uid: string): Promise<StagedDefinitionDelete> {
@@ -100,6 +101,9 @@ export class DefinitionDeletionService {
         return {
           undo: async () => {
             if (await this.store.exists(pending.path)) throw new Error(`${pending.path} already exists; cannot restore deleted definition.`);
+            if (this.uidInUse?.(pending.uid)) {
+              throw new Error(`Cannot undo ${pending.label}: uid ${pending.uid} is now in use.`);
+            }
             await this.store.create(pending.path, pending.before);
           },
           redo: async () => {
