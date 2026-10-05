@@ -2342,3 +2342,25 @@ test("staged Local Model flow move refuses stale indexed owner UID", async () =>
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged Local Model delete refuses stale indexed owner UID", async () => {
+  const original = noteWithCleanConnection(false);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(
+    store,
+    () => "20261005004000999skellyspencer",
+    transactions,
+  );
+
+  await assert.rejects(
+    service.stageAndReviewLocalRecordDelete(
+      "Assembly.md",
+      "conn-20261005001200002skellyspencer",
+    ),
+    /indexed uid .* does not match source uid/,
+  );
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
