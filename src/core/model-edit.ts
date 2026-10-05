@@ -95,6 +95,7 @@ export class ModelEditService {
 
     const uid = this.ownerUid(path);
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    assertIndexedOwnerUidMatchesSource(path, before, uid);
     const ref = localRef(uid, plan.kind, localId);
     const label = `edit ${plan.kind} ${localId}`;
     const txId = `local-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
