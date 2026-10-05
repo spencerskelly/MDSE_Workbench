@@ -9,7 +9,7 @@ const tokenC = "20261003133512744skellyspencer";
 const tokenD = "20261003133512745skellyspencer";
 const tokenE = "20261003133512746skellyspencer";
 
-function note(version = "0.2"): string {
+function note(version = "0.4"): string {
   return [
     "---",
     "type: Object",
@@ -127,7 +127,7 @@ test("creates a first governed region using importer-compatible section formatti
     heading: "K1",
     fields: { definition: "[[Main Contactor]]", identifier: "K1", usage: "standard" },
   });
-  assert.match(result.after, /## Local Model\n<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->/);
+  assert.match(result.after, /## Local Model\n<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->/);
   assert.match(result.after, /### Parts\n\n#### K1\n- definition: \[\[Main Contactor\]\]\n- identifier: K1\n\^part-/);
   assert.doesNotMatch(result.after, /- usage: standard/);
   assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === id)?.kind, "part");
