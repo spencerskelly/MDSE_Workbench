@@ -553,6 +553,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         part,
+        this.host.elements(file.path),
         (definition) => editor.stageAndReviewLocalRecordPatch(file.path, part.localId, {
           fields: { definition },
         }),
@@ -729,10 +730,13 @@ export class NoteDetailPanel extends Component {
       if (fm?.type !== "Object") throw new Error("Part occurrences can only be created in an Object owner.");
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
       const localId = nextAvailableLocalId("part", ownerUid, region?.records.map((record) => record.localId) ?? []);
+      const definitions = this.host.elements(file.path);
+      if (!definitions.length) throw new Error("No reusable model definitions are available.");
       new LocalPartCreateModal(
         this.app,
         file.basename,
         localId,
+        definitions,
         (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => { editor.cancelLocalCreate(transactionId); },
