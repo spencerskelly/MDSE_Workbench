@@ -94,3 +94,70 @@ test("supersession refuses definition content changes after Review",async()=>{
   assert.equal(tx.history().length,0);
   service.cancel(staged.transaction.id);
 });
+
+
+test("supersession preserves unrelated frontmatter formatting and comments byte-for-byte",async()=>{
+  const formattedOld=`---
+# lifecycle comment
+type: Object
+uid: ${oldUid}
+status: retired # keep inline comment
+custom: 'keep single quotes'
+
+---
+
+# Old Contactor
+`;
+  const formattedNew=`---
+type: Object
+# identity comment
+uid: ${newUid}
+status: "active"
+custom:
+  nested: value
+
+---
+
+# New Contactor
+`;
+  const store=new MemorySupersessionStore(); store.files.set(oldPath,formattedOld); store.files.set(newPath,formattedNew);
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),new TransactionManager());
+  const staged=await service.stageAndReview({
+    replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+    replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
+  });
+  await service.apply(staged.transaction.id);
+  const oldAfter=await store.read(oldPath);
+  const newAfter=await store.read(newPath);
+  assert.ok(oldAfter.includes("# lifecycle comment\ntype: Object\nuid: "+oldUid+"\nstatus: retired # keep inline comment\ncustom: 'keep single quotes'\n"));
+  assert.ok(newAfter.includes("type: Object\n# identity comment\nuid: "+newUid+"\nstatus: \"active\"\ncustom:\n  nested: value\n"));
+  assert.ok(oldAfter.endsWith("\n# Old Contactor\n"));
+  assert.ok(newAfter.endsWith("\n# New Contactor\n"));
+});
+
+test("supersession changes only an existing relationship value",async()=>{
+  const replacementWithExisting=`---
+type: Object
+uid: ${newUid}
+status: active
+supersedes:
+  - "[[30_Objects/Another Contactor]]" # existing relationship comment
+custom: 'unchanged'
+---
+
+# New Contactor
+`;
+  const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,replacementWithExisting);
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),new TransactionManager());
+  const staged=await service.stageAndReview({
+    replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+    replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
+  });
+  await service.apply(staged.transaction.id);
+  const after=await store.read(newPath);
+  assert.ok(after.includes("type: Object\nuid: "+newUid+"\nstatus: active\n"));
+  assert.ok(after.includes("custom: 'unchanged'"));
+  assert.ok(after.includes("[[30_Objects/Another Contactor]]"));
+  assert.ok(after.includes("[[30_Objects/Old Contactor]]"));
+  assert.ok(after.endsWith("\n# New Contactor\n"));
+});
