@@ -192,3 +192,32 @@ uid: 20261005061500012skellyspencer
   assert.match(await store.read(newSystem),/hasPart:/);
   assert.match(await store.read(newSystem),/Contactor/);
 });
+
+
+test("note migration refuses missing old inverse instead of repairing it silently",async()=>{
+  const brokenOld=oldText.replace(/partOf:\n  - "\[\[10_Systems\/Charger\]\]"\n/,"");
+  const store=new MemoryStore();
+  store.files.set(owner,ownerText); store.files.set(oldPath,brokenOld); store.files.set(newPath,newText);
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,new TransactionManager());
+  await assert.rejects(
+    service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel}),
+    /does not point back.*will not repair it silently/,
+  );
+  assert.equal(await store.read(owner),ownerText);
+  assert.equal(await store.read(oldPath),brokenOld);
+  assert.equal(await store.read(newPath),newText);
+});
+
+test("note migration refuses an already-present replacement inverse instead of duplicating it",async()=>{
+  const alreadyLinkedNew="---\ntype: Object\nuid: 20261005061500002skellyspencer\npartOf:\n  - \"[[10_Systems/Charger]]\"\n---\n\n# New\n";
+  const store=new MemoryStore();
+  store.files.set(owner,ownerText); store.files.set(oldPath,oldText); store.files.set(newPath,alreadyLinkedNew);
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,new TransactionManager());
+  await assert.rejects(
+    service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel}),
+    /already points to.*will not create a duplicate/,
+  );
+  assert.equal(await store.read(owner),ownerText);
+  assert.equal(await store.read(oldPath),oldText);
+  assert.equal(await store.read(newPath),alreadyLinkedNew);
+});
