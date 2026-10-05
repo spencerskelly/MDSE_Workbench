@@ -42,6 +42,8 @@ export class NoteDetailPanel extends Component {
   private currentLocal: LocalRecord | null = null;
   /** Exact occurrence to return to while definition editing is active. */
   private definitionReturn: { ownerPath: string; localId: string; definitionPath: string } | null = null;
+  /** Definition path whose current Where Used/occurrence impact has been explicitly reviewed this session. */
+  private definitionImpactReviewedPath: string | null = null;
   private generation = 0;
   /** Edit mode is explicit and temporary (WB-039, WB-040): off for every note the popup opens. */
   private editing = false;
@@ -100,7 +102,10 @@ export class NoteDetailPanel extends Component {
     }
     if (switching) {
       this.editing = false;
-      if (this.definitionReturn && file.path !== this.definitionReturn.definitionPath) this.definitionReturn = null;
+      if (this.definitionReturn && file.path !== this.definitionReturn.definitionPath) {
+        this.definitionReturn = null;
+        this.definitionImpactReviewedPath = null;
+      }
       if (remember && this.current) this.history.push(this.current.path);
     }
     this.current = file;
@@ -150,6 +155,10 @@ export class NoteDetailPanel extends Component {
           this.editing = false;
           void this.show(file, false);
         }).open();
+        return;
+      }
+      if (!this.editing && this.definitionReturn?.definitionPath === file.path) {
+        void this.enterDefinitionEdit(file);
         return;
       }
       this.editing = !this.editing;
@@ -471,6 +480,7 @@ export class NoteDetailPanel extends Component {
   private async reviewDefinitionImpact(file: TFile): Promise<void> {
     try {
       const impact = await this.host.definitionImpact(file.path);
+      this.definitionImpactReviewedPath = file.path;
       new ReportModal(
         this.app,
         `Definition impact — ${file.basename}`,
@@ -492,10 +502,29 @@ export class NoteDetailPanel extends Component {
       localId: record.localId,
       definitionPath: definitionFile.path,
     };
+    this.definitionImpactReviewedPath = null;
     await this.show(definitionFile, false);
-    if (this.current?.path !== definitionFile.path) return;
-    this.editing = true;
-    await this.show(definitionFile, false);
+    if (this.current?.path === definitionFile.path) {
+      new Notice("Definition opened. Review impact before editing when this definition is currently used.", 6000);
+    }
+  }
+
+  private async enterDefinitionEdit(file: TFile): Promise<void> {
+    try {
+      const impact = await this.host.definitionImpact(file.path);
+      const hasImpact = impact.notes + impact.occurrences > 0;
+      if (hasImpact && this.definitionImpactReviewedPath !== file.path) {
+        new Notice(
+          `Review impact before editing ${file.basename}: ${impact.notes} note-level use${impact.notes === 1 ? "" : "s"} and ${impact.occurrences} occurrence${impact.occurrences === 1 ? "" : "s"} depend on it.`,
+          10000,
+        );
+        return;
+      }
+      this.editing = true;
+      await this.show(file, false);
+    } catch (e) {
+      new Notice(`Cannot enter definition edit mode: ${(e as Error).message}`, 12000);
+    }
   }
 
   private async returnToOccurrence(): Promise<void> {
@@ -525,6 +554,7 @@ export class NoteDetailPanel extends Component {
     }
 
     this.definitionReturn = null;
+    this.definitionImpactReviewedPath = null;
     this.editing = false;
     this.showLocal(owner, record, false);
   }
@@ -1018,6 +1048,7 @@ export class NoteDetailPanel extends Component {
     this.current = null;
     this.currentLocal = null;
     this.definitionReturn = null;
+    this.definitionImpactReviewedPath = null;
     this.history = [];
     this.editing = false;
     this.bodyArea = null;
