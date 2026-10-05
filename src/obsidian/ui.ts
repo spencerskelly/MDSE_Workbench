@@ -860,3 +860,112 @@ export class LocalEndpointPartReassignModal extends Modal {
     })();
   }
 }
+
+
+export class LocalEndpointParentReassignModal extends Modal {
+  private staged: StagedLocalPatch | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly endpoint: LocalRecord,
+    private readonly endpoints: LocalRecord[],
+    private readonly stage: (parent: LocalRecord | null) => Promise<StagedLocalPatch>,
+    private readonly apply: (id: string) => Promise<void>,
+    private readonly cancel: (id: string) => void,
+    private readonly onApplied: () => void,
+  ) { super(app); }
+
+  onOpen(): void { this.compose(); }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try { this.cancel(staged.transaction.id); } catch {}
+  }
+
+  private compose(): void {
+    this.titleEl.setText("Change endpoint parent");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Select another endpoint in ${this.ownerName} as the parent of ${this.endpoint.identifier}, or clear the parent relationship.` });
+
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Parent endpoint" });
+    const pick = row.createEl("select", { cls: "mdse-detail-input" });
+    pick.createEl("option", { text: "Choose parent…", value: "" });
+    if (this.endpoint.parent) pick.createEl("option", { text: "Clear parent", value: "__clear__" });
+    for (const candidate of this.endpoints) {
+      pick.createEl("option", { text: `${candidate.identifier} — ^${candidate.localId}`, value: candidate.localId });
+    }
+
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Endpoint: ${this.endpoint.identifier} (#^${this.endpoint.localId})` });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const target = pick.value === "__clear__" ? null : this.endpoints.find((candidate) => candidate.localId === pick.value);
+        if (pick.value !== "__clear__" && !target) throw new Error("Choose a parent endpoint.");
+        const staged = await this.stage(target ?? null);
+        this.staged = staged;
+        this.renderReview(staged, target ?? null);
+      } catch (e) {
+        new Notice(`Cannot stage parent reassignment: ${(e as Error).message}`, 12000);
+        review.disabled = false;
+      }
+    })();
+  }
+
+  private renderReview(staged: StagedLocalPatch, target: LocalRecord | null): void {
+    this.titleEl.setText("Review endpoint parent reassignment");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: [string, string][] = [
+      ["Owner", this.ownerName],
+      ["Endpoint", this.endpoint.identifier],
+      ["New parent", target?.identifier ?? "none"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will change only the endpoint parent assignment." });
+    } else {
+      for (const finding of staged.plan.findings) {
+        this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : undefined });
+      }
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally { this.staged = null; this.close(); }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new Notice(target
+          ? `Reassigned endpoint ${this.endpoint.identifier} parent to ${target.identifier}.`
+          : `Cleared parent from endpoint ${this.endpoint.identifier}.`, 5000);
+      } catch (e) {
+        new Notice(`Not applied: ${(e as Error).message}`, 12000);
+        apply.disabled = false;
+      }
+    })();
+  }
+}
