@@ -1,4 +1,4 @@
-import { parseDocument, stringify } from "yaml";
+import { parseDocument } from "yaml";
 import { noteRef } from "./localmodel";
 import { planDefinitionRetirement, type DefinitionDeletionImpact, type DefinitionRetirementPlan } from "./definition-lifecycle";
 import { TransactionManager, type EditTransaction } from "./transaction";
@@ -29,11 +29,23 @@ export function retireDefinitionText(text: string): { text: string; currentStatu
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (!match) throw new Error("Definition note must begin with YAML frontmatter.");
 
-  const doc = parseDocument(match[1]);
+  const yaml = match[1];
+  const doc = parseDocument(yaml);
+  if (doc.errors.length) throw new Error(`Definition frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
   const currentStatus = doc.get("status");
-  doc.set("status", "retired");
-  const yaml = stringify(doc.toJS()).trimEnd();
-  const after = `---\n${yaml}\n---\n${text.slice(match[0].length)}`;
+  const node = doc.get("status", true);
+
+  let nextYaml: string;
+  if (node === undefined || node === null) {
+    const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}status: retired`;
+    nextYaml = yaml + addition;
+  } else {
+    const range = (node as { range?: [number, number, number?] }).range;
+    if (!range) throw new Error("Cannot safely update status; YAML source range is unavailable.");
+    nextYaml = yaml.slice(0, range[0]) + "retired" + yaml.slice(range[1]);
+  }
+
+  const after = `---\n${nextYaml}\n---\n${text.slice(match[0].length)}`;
   return { text: after, currentStatus };
 }
 
