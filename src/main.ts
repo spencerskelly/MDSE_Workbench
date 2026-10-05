@@ -17,7 +17,7 @@ import { DefinitionRetirementService } from "./core/definition-retire";
 import { DefinitionSupersessionService } from "./core/definition-supersede-service";
 import { definitionMigrationCandidates, type DefinitionMigrationCandidate } from "./core/definition-supersede";
 import { DefinitionNoteMigrationService } from "./core/definition-note-migrate-service";
-import { planDefinitionOccurrenceMigration } from "./core/definition-migrate";
+import { assertDefinitionSourceUid, planDefinitionOccurrenceMigration } from "./core/definition-migrate";
 import type { DefinitionDeletionImpact } from "./core/definition-lifecycle";
 import { canPublishCoreReady } from "./core/core-readiness";
 import { recoverWithColdBuild } from "./core/startup-recovery";
@@ -504,14 +504,7 @@ export default class MdseWorkbench extends Plugin {
         throw new Error(`${normalizedReplacement} no longer exists; reopen supersession migration review.`);
       }
       const text = await this.app.vault.read(currentReplacement);
-      const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
-      const frontmatter = match ? parseYaml(match[1]) as Record<string, unknown> | null : null;
-      const sourceUid = typeof frontmatter?.uid === "string" ? frontmatter.uid.trim() : "";
-      if (!sourceUid || sourceUid !== replacementUid) {
-        throw new Error(
-          `${normalizedReplacement} identity changed; expected uid ${replacementUid}, found ${sourceUid || "none"}. Reopen supersession migration review.`,
-        );
-      }
+      assertDefinitionSourceUid(text, normalizedReplacement, replacementUid);
     };
     await validateReplacementIdentity();
 
