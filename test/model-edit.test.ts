@@ -1830,3 +1830,86 @@ test("cancelled endpoint definition edit leaves source and history untouched", a
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged flow definition change stays unwritten until Apply and preserves connection and roles", async () => {
+  const flowId = "flow-20261005012000004skellyspencer";
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+    fields: { definition: "[[New Data]]" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- definition: [[New Data]]"));
+  assert.ok(store.text.includes("^" + connectionId));
+  assert.ok(store.text.includes("- endpointA: transmit"));
+  assert.ok(store.text.includes("- endpointB: receive"));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.ok(store.text.includes("- definition: [[New Data]]"));
+  assert.ok(store.text.includes("- endpointA: transmit"));
+  assert.ok(store.text.includes("- endpointB: receive"));
+});
+
+test("staged flow definition edit blocks clearing required definition at Apply", async () => {
+  const flowId = "flow-20261005012000004skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+    fields: { definition: null },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.code === "record.missing-definition" && finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("staged flow definition edit blocks block-fragment definitions at Apply", async () => {
+  const flowId = "flow-20261005012000004skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+    fields: { definition: "[[New Data#^ep-20261005012000000skellyspencer|Bad]]" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.code === "definition.incompatible" && finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled flow definition edit leaves source and history untouched", async () => {
+  const flowId = "flow-20261005012000004skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+    fields: { definition: "[[New Data]]" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
