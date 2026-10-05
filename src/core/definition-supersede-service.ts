@@ -59,9 +59,16 @@ function withRelationship(text: string, field: string, targetPath: string): stri
     return `---\n${parsed.yaml}${addition}\n---\n${parsed.body}`;
   }
 
+  const nodeValue = (value: unknown): unknown => {
+    if (typeof value === "object" && value !== null && "toJSON" in value) {
+      const toJSON = (value as { toJSON?: () => unknown }).toJSON;
+      if (typeof toJSON === "function") return toJSON.call(value);
+    }
+    return value;
+  };
   const values = isSeq(node)
-    ? node.items.map((item) => String(item?.toJSON?.() ?? ""))
-    : [String((node as { toJSON?: () => unknown }).toJSON?.() ?? node)];
+    ? node.items.map((item) => String(nodeValue(item) ?? ""))
+    : [String(nodeValue(node) ?? "")];
   if (values.includes(link)) return text;
   values.push(link);
   values.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
