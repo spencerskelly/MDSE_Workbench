@@ -186,17 +186,21 @@ var TransactionManager = class {
     return this.snapshot(tx);
   }
   review(transactionId) {
-    const tx = this.require(transactionId);
-    if (tx.status === "draft") tx.issues = this.validate(tx);
+    const tx = this.requireOpen(transactionId);
+    tx.issues = this.validate(tx);
+    tx.status = "reviewed";
     return this.snapshot(tx);
   }
   canApply(transactionId) {
-    const tx = this.requireDraft(transactionId);
+    const tx = this.requireOpen(transactionId);
     tx.issues = this.validate(tx);
-    return !tx.issues.some(isBlocking);
+    return (tx.scope === "atomic" || tx.status === "reviewed") && !tx.issues.some(isBlocking);
   }
   async apply(transactionId, executor) {
-    const tx = this.requireDraft(transactionId);
+    const tx = this.requireOpen(transactionId);
+    if (tx.scope === "structural" && tx.status !== "reviewed") {
+      throw new Error(`Structural transaction ${tx.label} must be reviewed before Apply.`);
+    }
     tx.issues = this.validate(tx);
     const blocking = tx.issues.filter(isBlocking);
     if (blocking.length) throw new Error(`Transaction ${tx.label} has ${blocking.length} blocking validation issue${blocking.length === 1 ? "" : "s"}.`);
@@ -218,7 +222,7 @@ var TransactionManager = class {
     return entry;
   }
   cancel(transactionId) {
-    const tx = this.requireDraft(transactionId);
+    const tx = this.requireOpen(transactionId);
     tx.status = "cancelled";
     this.drafts.delete(transactionId);
     return this.snapshot(tx);
@@ -280,6 +284,13 @@ var TransactionManager = class {
   requireDraft(id) {
     const tx = this.require(id);
     if (tx.status !== "draft") throw new Error(`Transaction ${id} is ${tx.status}, not draft.`);
+    return tx;
+  }
+  requireOpen(id) {
+    const tx = this.require(id);
+    if (tx.status !== "draft" && tx.status !== "reviewed") {
+      throw new Error(`Transaction ${id} is ${tx.status}, not open.`);
+    }
     return tx;
   }
   snapshot(tx) {
@@ -1156,6 +1167,10 @@ var ModelEditService = class {
     this.pendingPatches.set(txId, { path, plan, label });
     return { transaction, plan, path };
   }
+  async stageAndReviewLocalRecordPatch(path, localId, patch) {
+    const staged = await this.stageLocalRecordPatch(path, localId, patch);
+    return this.reviewLocalPatch(staged.transaction.id);
+  }
   reviewLocalPatch(transactionId) {
     const pending = this.requirePendingPatch(transactionId);
     return {
@@ -1212,6 +1227,10 @@ var ModelEditService = class {
     });
     this.pendingCreates.set(txId, { path, plan, label });
     return { transaction, plan, path };
+  }
+  async stageAndReviewLocalRecordCreate(path, input) {
+    const staged = await this.stageLocalRecordCreate(path, input);
+    return this.reviewLocalCreate(staged.transaction.id);
   }
   reviewLocalCreate(transactionId) {
     const pending = this.requirePendingCreate(transactionId);
@@ -1274,6 +1293,10 @@ var ModelEditService = class {
       path,
       externalImpacts: this.externalLocalDeleteImpacts(path, localId)
     };
+  }
+  async stageAndReviewLocalRecordDelete(path, localId) {
+    const staged = await this.stageLocalRecordDelete(path, localId);
+    return this.reviewLocalDelete(staged.transaction.id);
   }
   reviewLocalDelete(transactionId) {
     const pending = this.requirePendingDelete(transactionId);
@@ -6806,7 +6829,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         (mode, target) => {
           const remaining = endpoint2.equals.filter((link) => !(mode === "remove" && !link.target && link.blockId === target.localId)).map((link) => link.text);
           if (mode === "add") remaining.push(`[[#^${target.localId}|${target.identifier}]]`);
-          return editor.stageLocalRecordPatch(file.path, endpoint2.localId, {
+          return editor.stageAndReviewLocalRecordPatch(file.path, endpoint2.localId, {
             fields: { equals: remaining.length ? remaining.join(" ") : null }
           });
         },
@@ -6843,7 +6866,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         (mode, target) => {
           const remaining = endpoint2.exposes.filter((link) => !(mode === "remove" && !link.target && link.blockId === target.localId)).map((link) => link.text);
           if (mode === "add") remaining.push(`[[#^${target.localId}|${target.identifier}]]`);
-          return editor.stageLocalRecordPatch(file.path, endpoint2.localId, {
+          return editor.stageAndReviewLocalRecordPatch(file.path, endpoint2.localId, {
             fields: { exposes: remaining.length ? remaining.join(" ") : null }
           });
         },
@@ -6876,7 +6899,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         file.basename,
         endpoint2,
         endpoints,
-        (parent) => editor.stageLocalRecordPatch(file.path, endpoint2.localId, {
+        (parent) => editor.stageAndReviewLocalRecordPatch(file.path, endpoint2.localId, {
           fields: parent ? { parent: `[[#^${parent.localId}|${parent.identifier}]]`, part: null } : { parent: null }
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -6906,7 +6929,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         file.basename,
         endpoint2,
         parts,
-        (part) => editor.stageLocalRecordPatch(file.path, endpoint2.localId, {
+        (part) => editor.stageAndReviewLocalRecordPatch(file.path, endpoint2.localId, {
           fields: { part: `[[#^${part.localId}|${part.identifier}]]` }
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -6929,7 +6952,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         flow,
-        (definition) => editor.stageLocalRecordPatch(file.path, flow.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, flow.localId, {
           fields: { definition }
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -6952,7 +6975,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         endpoint2,
-        (definition) => editor.stageLocalRecordPatch(file.path, endpoint2.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, endpoint2.localId, {
           fields: { definition }
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -6975,7 +6998,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         part,
-        (definition) => editor.stageLocalRecordPatch(file.path, part.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, part.localId, {
           fields: { definition }
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -6998,7 +7021,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         connection,
-        (definition) => editor.stageLocalRecordPatch(file.path, connection.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, connection.localId, {
           fields: { definition }
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -7029,7 +7052,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         connection,
         end,
         options,
-        (target) => editor.stageLocalRecordPatch(file.path, connection.localId, {
+        (target) => editor.stageAndReviewLocalRecordPatch(file.path, connection.localId, {
           fields: { [end]: `[[#^${target.localId}|${target.identifier}]]` }
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -7056,7 +7079,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         file.basename,
         connection,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => {
           editor.cancelLocalCreate(transactionId);
@@ -7087,7 +7110,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         source,
         options,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => {
           editor.cancelLocalCreate(transactionId);
@@ -7113,7 +7136,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         part.identifier,
         part.localId,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => {
           editor.cancelLocalCreate(transactionId);
@@ -7136,7 +7159,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         file.basename,
         record.identifier,
         record.kind,
-        () => editor.stageLocalRecordDelete(file.path, record.localId),
+        () => editor.stageAndReviewLocalRecordDelete(file.path, record.localId),
         (transactionId) => editor.applyLocalDelete(transactionId),
         (transactionId) => {
           editor.cancelLocalDelete(transactionId);
@@ -7160,7 +7183,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => {
           editor.cancelLocalCreate(transactionId);
