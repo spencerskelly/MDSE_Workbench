@@ -254,3 +254,33 @@ custom: 'keep me'
   assert.ok(after.includes("custom: 'keep me'"));
   assert.ok(after.endsWith("\n# Old\n"));
 });
+
+
+test("note migration undo rolls back earlier files if a later paired-file write fails",async()=>{
+  class FailingUndoStore extends MemoryStore {
+    failPath:string|null=null;
+    failText:string|null=null;
+    async write(path:string,text:string){
+      if(path===this.failPath && text===this.failText) throw new Error("injected undo write failure");
+      return super.write(path,text);
+    }
+  }
+  const store=new FailingUndoStore();
+  store.files.set(owner,ownerText); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
+  const staged=await service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel});
+  await service.apply(staged.transaction.id);
+
+  const ownerAfter=await store.read(owner);
+  const oldAfter=await store.read(oldPath);
+  const newAfter=await store.read(newPath);
+  store.failPath=oldPath;
+  store.failText=oldText;
+
+  await assert.rejects(tx.undo(),/injected undo write failure/);
+  assert.equal(await store.read(owner),ownerAfter);
+  assert.equal(await store.read(oldPath),oldAfter);
+  assert.equal(await store.read(newPath),newAfter);
+  assert.equal(tx.history().length,1);
+});
