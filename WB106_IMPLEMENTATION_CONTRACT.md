@@ -19,9 +19,9 @@ If the Local Model schema is unsupported, structured Local Model behavior is dis
 Workbench must load three vault schemas:
 - `relationships.yaml` 1.35;
 - `element-types.yaml` 1.17;
-- `local-model.yaml`, reading 0.1 and 0.2.
+- `local-model.yaml`, reading 0.1, 0.2 and 0.3.
 
-Structured Local Model editing is now an approved WB-106 direction. Workbench may write only schema 0.2 records through the governed model-edit service. Schema 0.1 remains read-compatible and read-only unless an explicit migration operation converts the governed region to 0.2.
+Structured Local Model editing is an approved WB-106 direction. Schema 0.1 remains read-compatible and read-only. Existing 0.2 regions remain editable under their original semantics; new governed regions use schema 0.3. Workbench must not silently reinterpret or auto-migrate a 0.2 endpoint that lacks the definition required by 0.2.
 
 Unknown future Local Model versions remain readable as Markdown but structured Local Model actions are disabled.
 
@@ -56,7 +56,8 @@ Parse at most one governed region per note.
 
 Support:
 - 0.1 records exactly as governed by the historical schema;
-- 0.2 records exactly as governed by current schema.
+- 0.2 records exactly as governed by its frozen semantics, including a required reusable Port definition for every endpoint;
+- 0.3 records under W-377, where an endpoint may omit `definition` when no reusable Port concept is deterministically supported.
 
 Normalize a 0.1 part/endpoint in memory as:
 - `usage = standard`;
@@ -65,7 +66,7 @@ Normalize a 0.1 part/endpoint in memory as:
 
 Never mutate a 0.1 file simply because it was read.
 
-0.2 omission of `usage` likewise means standard.
+0.2 omission of `usage` means standard. In 0.3 the same is true when a part/endpoint has a definition; a definitionless endpoint may not carry `usage` because variation semantics require a reusable definition.
 
 Connection and flow records reject `usage`.
 
@@ -84,7 +85,8 @@ For body text:
 - until that writer is active, ordinary body text editing remains disabled for notes containing a governed region.
 
 Structured Local Model editing:
-- writes schema 0.2 only;
+- preserves an existing 0.2 region as 0.2 and applies the 0.2 validation contract;
+- creates new governed Local Model regions as schema 0.3 and applies W-377 semantics;
 - never rewrites a 0.1 region merely because it was read;
 - goes through the model-edit service rather than view-specific Markdown manipulation.
 
@@ -97,7 +99,8 @@ WB-106 must report at least:
 - malformed native block ID;
 - global identity-token collision with any note/local record;
 - broken local block links;
-- missing/incompatible definitions;
+- missing/incompatible definitions where the active schema requires them;
+- `usage` on a definitionless 0.3 endpoint;
 - invalid part/parent references;
 - invalid connection endpoints;
 - orphan/misnested flow;
@@ -267,7 +270,8 @@ Do not fold these into WB-106:
 
 Add fixtures/tests for:
 - Local Model 0.1 read compatibility;
-- Local Model 0.2 canonical parse;
+- Local Model 0.2 canonical parse and frozen endpoint-definition requirement;
+- Local Model 0.3 canonical parse with both defined and definitionless contextual endpoints;
 - marker errors;
 - native block-link preservation;
 - 30-character global identity collisions;
@@ -285,7 +289,7 @@ WB-106 is the Workbench keepability gate for the first accepted v0.8 whole-model
 
 **The original WB-106 read/navigation baseline is complete in the standalone 0.1.17 candidate.** The former keepability-gate behavior is present:
 
-- three-schema compatibility remains in place: relationships 1.35, element-types 1.17, Local Model read 0.1 + 0.2;
+- the original 0.1.17 baseline shipped with relationships 1.35, element-types 1.17 and Local Model read 0.1 + 0.2; W-377 compatibility work extends the Local Model reader/editor to 0.3 without changing 0.2 semantics;
 - durable `ModelRef` identity and native block-fragment preservation;
 - Local Model parser, validation, identity-collision checks, abstract/usage checks and specialization candidates;
 - ordinary body-edit refusal around governed Local Model content;
