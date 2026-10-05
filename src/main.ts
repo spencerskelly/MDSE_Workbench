@@ -1258,6 +1258,7 @@ export default class MdseWorkbench extends Plugin {
         },
         (path) => this.definitionDeletionImpact(path),
         this.transactions,
+        (uid) => this.definitionUidInUse(uid),
       );
       this.definitionRetirer = new DefinitionRetirementService(
         {
