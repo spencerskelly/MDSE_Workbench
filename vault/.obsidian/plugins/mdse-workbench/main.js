@@ -8078,6 +8078,58 @@ var DefinitionRetirementService = class {
   }
 };
 
+// src/core/frontmatter.ts
+function linkTarget(value) {
+  if (typeof value !== "string") return void 0;
+  const m = /^\s*\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]\s*$/.exec(value);
+  return (m ? m[1] : value).trim() || void 0;
+}
+function asList(v) {
+  if (v === void 0 || v === null || v === "") return [];
+  return Array.isArray(v) ? [...v] : [v];
+}
+function sortLinks(list2) {
+  return list2.sort(
+    (a, b) => (linkTarget(a) ?? String(a)).localeCompare(linkTarget(b) ?? String(b), void 0, { sensitivity: "base" })
+  );
+}
+function addLink(fm, field, linkText, same) {
+  const list2 = asList(fm[field]);
+  const already = same ?? ((v) => linkTarget(v)?.toLowerCase() === linkText.toLowerCase());
+  if (list2.some(already)) return false;
+  list2.push(`[[${linkText}]]`);
+  fm[field] = sortLinks(list2);
+  return true;
+}
+function removeLink(fm, field, linkText, same) {
+  const list2 = asList(fm[field]);
+  const match = same ?? ((v) => linkTarget(v)?.toLowerCase() === linkText.toLowerCase());
+  const kept = list2.filter((v) => !match(v));
+  if (kept.length === list2.length) return false;
+  fm[field] = kept;
+  return true;
+}
+function canonicalOrder(schema4) {
+  const common = [...schema4.commonProperties];
+  const tagsAt = common.indexOf("tags");
+  common.splice(tagsAt < 0 ? common.length : tagsAt, 0, ...schema4.translatedOnlyProperties);
+  const rel = [];
+  for (const r of schema4.relationships) {
+    rel.push(r.field);
+    if (r.inverse) rel.push(r.inverse);
+  }
+  return [...common, ...schema4.optionalProperties, ...rel];
+}
+function orderProperties(fm, order) {
+  const rank = new Map(order.map((k, i) => [k, i]));
+  const keys = Object.keys(fm);
+  const known = keys.filter((k) => rank.has(k)).sort((a, b) => rank.get(a) - rank.get(b));
+  const rest = keys.filter((k) => !rank.has(k));
+  const copy = { ...fm };
+  for (const k of keys) delete fm[k];
+  for (const k of [...known, ...rest]) fm[k] = copy[k];
+}
+
 // src/core/definition-supersede.ts
 function planDefinitionSupersession(request) {
   const replacedPath = request.replacedPath.trim();
@@ -8129,11 +8181,11 @@ function frontmatter(text) {
   if (!match) throw new Error("Definition note must begin with YAML frontmatter.");
   return { yaml: match[1], body: text.slice(match[0].length), prefixLength: match[0].length };
 }
-function withRelationship(text, field, targetPath) {
+function withRelationship(text, sourcePath, field, targetPath, resolve, linkText) {
   const parsed = frontmatter(text);
   const doc = parseDocument(parsed.yaml);
   if (doc.errors.length) throw new Error(`Definition frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
-  const link = `[[${targetPath.replace(/\.md$/i, "")}]]`;
+  const link = `[[${linkText(targetPath, sourcePath)}]]`;
   const node = doc.get(field, true);
   if (node === void 0 || node === null) {
     const addition = `${parsed.yaml.endsWith("\n") || parsed.yaml.length === 0 ? "" : "\n"}${field}:
@@ -8151,7 +8203,10 @@ ${parsed.body}`;
     return value;
   };
   const values = isSeq(node) ? node.items.map((item) => String(nodeValue(item) ?? "")) : [String(nodeValue(node) ?? "")];
-  if (values.includes(link)) return text;
+  if (values.some((value) => {
+    const target = linkTarget(value);
+    return !!target && resolve(target, sourcePath) === targetPath;
+  })) return text;
   values.push(link);
   values.sort((a, b) => a.localeCompare(b, void 0, { sensitivity: "base" }));
   const range = node.range;
@@ -8172,9 +8227,11 @@ function impactSignature(impact) {
 ${occurrence}`;
 }
 var DefinitionSupersessionService = class {
-  constructor(store, impactFor, transactions) {
+  constructor(store, impactFor, resolve, linkText, transactions) {
     this.store = store;
     this.impactFor = impactFor;
+    this.resolve = resolve;
+    this.linkText = linkText;
     this.transactions = transactions;
     this.sequence = 0;
     this.pending = /* @__PURE__ */ new Map();
@@ -8194,8 +8251,22 @@ var DefinitionSupersessionService = class {
     if (!plan.valid) throw new Error(plan.blockers.join(" "));
     const replacedBefore = await this.store.read(request.replacedPath);
     const replacementBefore = await this.store.read(request.replacementPath);
-    const replacementAfter = withRelationship(replacementBefore, "supersedes", request.replacedPath);
-    const replacedAfter = withRelationship(replacedBefore, "supersededBy", request.replacementPath);
+    const replacementAfter = withRelationship(
+      replacementBefore,
+      request.replacementPath,
+      "supersedes",
+      request.replacedPath,
+      this.resolve,
+      this.linkText
+    );
+    const replacedAfter = withRelationship(
+      replacedBefore,
+      request.replacedPath,
+      "supersededBy",
+      request.replacementPath,
+      this.resolve,
+      this.linkText
+    );
     const id = `definition-supersede-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `supersede ${request.replacedPath} with ${request.replacementPath}`;
     this.transactions.begin(id, label, "structural");
@@ -8297,58 +8368,6 @@ var DefinitionSupersessionService = class {
     return pending;
   }
 };
-
-// src/core/frontmatter.ts
-function linkTarget(value) {
-  if (typeof value !== "string") return void 0;
-  const m = /^\s*\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]\s*$/.exec(value);
-  return (m ? m[1] : value).trim() || void 0;
-}
-function asList(v) {
-  if (v === void 0 || v === null || v === "") return [];
-  return Array.isArray(v) ? [...v] : [v];
-}
-function sortLinks(list2) {
-  return list2.sort(
-    (a, b) => (linkTarget(a) ?? String(a)).localeCompare(linkTarget(b) ?? String(b), void 0, { sensitivity: "base" })
-  );
-}
-function addLink(fm, field, linkText, same) {
-  const list2 = asList(fm[field]);
-  const already = same ?? ((v) => linkTarget(v)?.toLowerCase() === linkText.toLowerCase());
-  if (list2.some(already)) return false;
-  list2.push(`[[${linkText}]]`);
-  fm[field] = sortLinks(list2);
-  return true;
-}
-function removeLink(fm, field, linkText, same) {
-  const list2 = asList(fm[field]);
-  const match = same ?? ((v) => linkTarget(v)?.toLowerCase() === linkText.toLowerCase());
-  const kept = list2.filter((v) => !match(v));
-  if (kept.length === list2.length) return false;
-  fm[field] = kept;
-  return true;
-}
-function canonicalOrder(schema4) {
-  const common = [...schema4.commonProperties];
-  const tagsAt = common.indexOf("tags");
-  common.splice(tagsAt < 0 ? common.length : tagsAt, 0, ...schema4.translatedOnlyProperties);
-  const rel = [];
-  for (const r of schema4.relationships) {
-    rel.push(r.field);
-    if (r.inverse) rel.push(r.inverse);
-  }
-  return [...common, ...schema4.optionalProperties, ...rel];
-}
-function orderProperties(fm, order) {
-  const rank = new Map(order.map((k, i) => [k, i]));
-  const keys = Object.keys(fm);
-  const known = keys.filter((k) => rank.has(k)).sort((a, b) => rank.get(a) - rank.get(b));
-  const rest = keys.filter((k) => !rank.has(k));
-  const copy = { ...fm };
-  for (const k of keys) delete fm[k];
-  for (const k of [...known, ...rest]) fm[k] = copy[k];
-}
 
 // src/core/definition-note-migrate.ts
 function planDefinitionNoteMigration(request) {
@@ -16789,7 +16808,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI also supports one stale-guarded note-level relationship migration at a time. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI also supports one stale-guarded note-level relationship migration at a time. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
@@ -17785,6 +17804,11 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
           write: async (path, text) => this.app.vault.modify(localFile((0, import_obsidian8.normalizePath)(path)), text)
         },
         (path) => this.definitionDeletionImpact(path),
+        (target, fromPath) => this.app.metadataCache.getFirstLinkpathDest((0, import_obsidian8.getLinkpath)(target), (0, import_obsidian8.normalizePath)(fromPath))?.path ?? null,
+        (targetPath, fromPath) => {
+          const file = localFile((0, import_obsidian8.normalizePath)(targetPath));
+          return this.app.metadataCache.fileToLinktext(file, (0, import_obsidian8.normalizePath)(fromPath), true);
+        },
         this.transactions
       );
       this.definitionNoteMigrator = new DefinitionNoteMigrationService(
