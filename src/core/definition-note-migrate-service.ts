@@ -74,18 +74,24 @@ function fieldPairRange(
     return String(value ?? "") === field;
   });
   const keyRange = pair?.key?.range;
-  const valueNode = doc.get(field, true) as { range?: [number, number, number?] } | undefined;
-  const valueRange = valueNode?.range;
-  if (!keyRange || !valueRange) return null;
+  if (!keyRange) return null;
 
   const start = yaml.lastIndexOf("\n", Math.max(0, keyRange[0] - 1)) + 1;
-  // YAML node range[2] includes trailing node trivia when available. Fall back to the semantic
-  // value end, then consume exactly its line ending. This removes the top-level mapping pair but
-  // does not consume comments before the key or comments/properties that follow it.
-  const semanticEnd = valueRange[2] ?? valueRange[1];
-  const lineEnd = yaml.indexOf("\n", semanticEnd);
-  const end = lineEnd < 0 ? yaml.length : lineEnd + 1;
-  return [start, end];
+  let cursor = yaml.indexOf("\n", keyRange[1]);
+  if (cursor < 0) return [start, yaml.length];
+  cursor += 1;
+
+  // A governed relationship is a top-level field. Its block value consists only of indented
+  // continuation lines. Stop before the next top-level property or comment so unrelated source
+  // text is preserved byte-for-byte.
+  while (cursor < yaml.length) {
+    const next = yaml.indexOf("\n", cursor);
+    const end = next < 0 ? yaml.length : next;
+    const line = yaml.slice(cursor, end);
+    if (line.length > 0 && !/^\s/.test(line)) break;
+    cursor = next < 0 ? yaml.length : next + 1;
+  }
+  return [start, cursor];
 }
 
 function mutateRelationship(
