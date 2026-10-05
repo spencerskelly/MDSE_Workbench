@@ -6842,6 +6842,8 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     this.history = [];
     this.current = null;
     this.currentLocal = null;
+    /** Exact occurrence to return to while definition editing is active. */
+    this.definitionReturn = null;
     this.generation = 0;
     /** Edit mode is explicit and temporary (WB-039, WB-040): off for every note the popup opens. */
     this.editing = false;
@@ -6889,6 +6891,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     }
     if (switching) {
       this.editing = false;
+      if (this.definitionReturn && file.path !== this.definitionReturn.definitionPath) this.definitionReturn = null;
       if (remember && this.current) this.history.push(this.current.path);
     }
     this.current = file;
@@ -6915,7 +6918,17 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       if (f instanceof import_obsidian4.TFile) void this.show(f, false);
     };
     head.createDiv({ cls: "mdse-detail-title", text: file.basename }).setAttr("title", file.path);
-    const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
+    if (this.definitionReturn?.definitionPath === file.path) {
+      const returnToOccurrence = head.createEl("button", { text: "Back to occurrence", cls: "mdse-detail-btn" });
+      returnToOccurrence.setAttr("title", "Return to the contextual Local Model occurrence without changing its storage.");
+      returnToOccurrence.onclick = () => {
+        void this.returnToOccurrence();
+      };
+    }
+    const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit definition", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
+    if (!this.definitionReturn || this.definitionReturn.definitionPath !== file.path) {
+      edit.setText(this.editing ? "Done" : "Edit");
+    }
     if (blocked && !this.editing) {
       edit.disabled = true;
       edit.setAttr("title", blocked);
@@ -6954,7 +6967,12 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const v = fm?.[k];
       if (v !== void 0 && v !== null && String(v) !== "") chips.createSpan({ cls: "mdse-detail-chip", text: k === "type" || k === "subtype" ? String(v) : `${k} ${String(v)}` });
     }
-    if (this.editing) chips.createSpan({ cls: "mdse-detail-chip mdse-detail-chip-edit", text: "editing" });
+    if (this.editing) {
+      chips.createSpan({
+        cls: "mdse-detail-chip mdse-detail-chip-edit",
+        text: this.definitionReturn?.definitionPath === file.path ? "editing definition" : "editing"
+      });
+    }
     const schema = this.host.schema();
     const fields = new Set(schema ? [...schema.byField.keys(), ...schema.byInverse.keys()] : []);
     this.propertiesSection(root, file, fm, fields, schema);
@@ -7199,8 +7217,13 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     if (!this.el || this.current !== ownerFile || !this.currentLocal) return;
     const head = content.createDiv({ cls: "mdse-detail-head" });
     head.createDiv({ cls: "mdse-detail-title", text: definitionFile.basename }).setAttr("title", definitionFile.path);
-    const open = head.createEl("button", { text: "Open definition", cls: "mdse-detail-btn" });
-    open.setAttr("title", "Definition edits belong to the canonical reusable note.");
+    const editDefinition = head.createEl("button", { text: "Edit definition", cls: "mdse-detail-btn mod-cta" });
+    editDefinition.setAttr("title", "Edit the canonical reusable note in a separate definition surface.");
+    editDefinition.onclick = () => {
+      void this.editDefinitionFromOccurrence(ownerFile, this.currentLocal, definitionFile);
+    };
+    const open = head.createEl("button", { text: "Open note", cls: "mdse-detail-btn" });
+    open.setAttr("title", "Open the canonical reusable definition note in a tab.");
     open.onclick = () => void this.app.workspace.getLeaf(true).openFile(definitionFile);
     const chips = content.createDiv({ cls: "mdse-detail-chips" });
     chips.createSpan({ cls: "mdse-detail-chip", text: "definition" });
@@ -7230,6 +7253,46 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     const body = content.createDiv({ cls: "mdse-detail-body markdown-rendered" });
     if (md.trim()) await import_obsidian4.MarkdownRenderer.render(this.app, md, body, definitionFile.path, this);
     else body.createEl("p", { cls: "mdse-detail-empty", text: "This definition has no text." });
+  }
+  async editDefinitionFromOccurrence(ownerFile, record, definitionFile) {
+    if (!record) return;
+    this.definitionReturn = {
+      ownerPath: ownerFile.path,
+      localId: record.localId,
+      definitionPath: definitionFile.path
+    };
+    await this.show(definitionFile, false);
+    if (this.current?.path !== definitionFile.path) return;
+    this.editing = true;
+    await this.show(definitionFile, false);
+  }
+  async returnToOccurrence() {
+    const back = this.definitionReturn;
+    if (!back) return;
+    if (this.isDirty()) {
+      new ConfirmModal(this.app, "Discard the unsaved definition text changes?", "Discard", () => {
+        this.bodyArea = null;
+        void this.returnToOccurrence();
+      }).open();
+      return;
+    }
+    const owner = this.app.vault.getAbstractFileByPath(back.ownerPath);
+    if (!(owner instanceof import_obsidian4.TFile)) {
+      new import_obsidian4.Notice("The occurrence owner note no longer exists.", 8e3);
+      this.definitionReturn = null;
+      return;
+    }
+    const text = await this.app.vault.cachedRead(owner);
+    const region = parseLocalModel(text);
+    const record = region?.records.find((candidate) => candidate.localId === back.localId);
+    if (!record) {
+      new import_obsidian4.Notice("The original occurrence no longer exists.", 8e3);
+      this.definitionReturn = null;
+      return;
+    }
+    this.definitionReturn = null;
+    this.editing = false;
+    this.showLocal(owner, record, false);
   }
   renderDefinitionRow(table, row, sourceFile) {
     const tr = table.createEl("tr");
@@ -7745,6 +7808,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     this.generation++;
     this.current = null;
     this.currentLocal = null;
+    this.definitionReturn = null;
     this.history = [];
     this.editing = false;
     this.bodyArea = null;
@@ -8727,7 +8791,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, and occurrence details expose the canonical reusable definition through a lazy read-only Definition section. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, and definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence. */
     this.modelEditor = null;
     /** One semantic history stack for every Workbench model writer (WB-114). */
     this.transactions = new TransactionManager();
