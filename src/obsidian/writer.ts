@@ -5,6 +5,7 @@
  */
 import { App, getLinkpath, TFile } from "obsidian";
 import { bodyUnchanged, PROTECTED_PROPERTIES, replaceBody } from "../core/edit";
+import { assertIndexedNoteUidMatchesSource } from "../core/identity";
 import { noteRef, type ModelRef } from "../core/localmodel";
 import { TransactionManager, type AppliedEdit, type SemanticChange } from "../core/transaction";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink, type SameNote } from "../core/frontmatter";
@@ -88,6 +89,7 @@ export class RelationshipWriter {
 
     const edit = async (file: TFile, field: string, linkTo: TFile) => {
       const before = await this.app.vault.read(file);
+      this.assertCurrentIdentity(file.path, before, "add relationship to");
       let changed = false;
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         changed = addLink(fm, field, linkTextFor(this.app, linkTo, file.path), pointsAt(this.app, linkTo, file.path));
@@ -112,6 +114,7 @@ export class RelationshipWriter {
     const tx: Transaction = { label: `remove ${owner.basename} ${def.field} ${target.basename}`, files: [] };
     const edit = async (file: TFile, field: string, linkTo: TFile) => {
       const before = await this.app.vault.read(file);
+      this.assertCurrentIdentity(file.path, before, "remove relationship from");
       let changed = false;
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         changed = removeLink(fm, field, linkTextFor(this.app, linkTo, file.path), pointsAt(this.app, linkTo, file.path));
@@ -211,6 +214,12 @@ export class RelationshipWriter {
     } catch (e) {
       return "Not redone: " + (e as Error).message;
     }
+  }
+
+  private assertCurrentIdentity(path: string, source: string, operation: string): void {
+    const uid = this.getIndex().notes.get(path)?.uid;
+    if (!uid) throw new Error(`Cannot ${operation} ${path}: the note is not indexed with a durable uid.`);
+    assertIndexedNoteUidMatchesSource(path, source, uid, operation);
   }
 
   private refs(...paths: string[]): ModelRef[] {
