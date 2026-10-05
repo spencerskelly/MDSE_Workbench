@@ -14,9 +14,10 @@ import { nextAvailableLocalId, type LocalRecordPatch } from "../core/localmodel-
 import type { ModelEditService } from "../core/model-edit";
 import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { StagedDefinitionDelete } from "../core/definition-delete";
+import type { StagedDefinitionRetirement } from "../core/definition-retire";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, DefinitionCreateFromOccurrenceModal, DefinitionDeleteModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
+import { ConfirmModal, DefinitionCreateFromOccurrenceModal, DefinitionDeleteModal, DefinitionRetireModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -41,6 +42,9 @@ export interface DetailHost {
   stageDefinitionDeletion(path: string, uid: string): Promise<StagedDefinitionDelete>;
   applyDefinitionDeletion(transactionId: string): Promise<void>;
   cancelDefinitionDeletion(transactionId: string): void;
+  stageDefinitionRetirement(path: string, uid: string): Promise<StagedDefinitionRetirement>;
+  applyDefinitionRetirement(transactionId: string): Promise<void>;
+  cancelDefinitionRetirement(transactionId: string): void;
   stageOccurrenceDefinitionBinding(ownerPath: string, localId: string, definitionPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
   applyOccurrenceDefinitionBinding(transactionId: string): Promise<void>;
   cancelOccurrenceDefinitionBinding(transactionId: string): void;
@@ -154,6 +158,19 @@ export class NoteDetailPanel extends Component {
       returnToOccurrence.onclick = () => { void this.returnToOccurrence(); };
       const uid = typeof fm?.uid === "string" ? fm.uid : "";
       if (uid) {
+        const retire = head.createEl("button", { text: "Retire definition…", cls: "mdse-detail-btn" });
+        retire.setAttr("title", "Review all current uses, then set only canonical lifecycle status to retired.");
+        retire.onclick = () => {
+          new DefinitionRetireModal(
+            this.app,
+            file.basename,
+            () => this.host.stageDefinitionRetirement(file.path, uid),
+            (transactionId) => this.host.applyDefinitionRetirement(transactionId),
+            (transactionId) => this.host.cancelDefinitionRetirement(transactionId),
+            () => { void this.show(file, false); },
+          ).open();
+        };
+
         const remove = head.createEl("button", { text: "Delete definition…", cls: "mdse-detail-btn" });
         remove.setAttr("title", "Review all active references before destructive definition deletion.");
         remove.onclick = () => {
