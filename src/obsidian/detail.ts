@@ -359,6 +359,8 @@ export class NoteDetailPanel extends Component {
       row("Endpoint B role", record.roleB ?? "");
     }
 
+    this.localDefinitionSection(root, file, record);
+
     root.createEl("p", {
       cls: "mdse-muted",
       text: this.editing
@@ -366,6 +368,99 @@ export class NoteDetailPanel extends Component {
         : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data.",
     });
     root.scrollTop = 0;
+  }
+
+  /**
+   * WB-114 definition/context ownership seam. The reusable definition is visible from an occurrence
+   * without copying definition data into the Local Model. The section is lazy and read-only; definition
+   * edits continue to use the canonical note surface.
+   */
+  private localDefinitionSection(root: HTMLElement, ownerFile: TFile, record: LocalRecord): void {
+    const link = record.definition;
+    if (!link?.target) return;
+
+    const details = root.createEl("details", { cls: "mdse-local-definition" });
+    details.createEl("summary", { text: "Definition" });
+    const content = details.createDiv({ cls: "mdse-local-definition-content" });
+    content.createEl("p", { cls: "mdse-muted", text: "Expand to load the reusable definition." });
+    let loaded = false;
+
+    details.addEventListener("toggle", () => {
+      if (!details.open || loaded) return;
+      loaded = true;
+      void this.renderLocalDefinition(content, ownerFile, link.target);
+    });
+  }
+
+  private async renderLocalDefinition(content: HTMLElement, ownerFile: TFile, linkpath: string): Promise<void> {
+    content.empty();
+    const definitionFile = this.app.metadataCache.getFirstLinkpathDest(linkpath.split("#")[0], ownerFile.path);
+    if (!definitionFile) {
+      content.createEl("p", { cls: "mdse-warn", text: `Definition could not be resolved: ${linkpath}` });
+      return;
+    }
+
+    const cache = this.app.metadataCache.getFileCache(definitionFile);
+    const fm = (cache?.frontmatter ?? null) as Record<string, unknown> | null;
+    const text = await this.app.vault.cachedRead(definitionFile);
+    if (!this.el || this.current !== ownerFile || !this.currentLocal) return;
+
+    const head = content.createDiv({ cls: "mdse-detail-head" });
+    head.createDiv({ cls: "mdse-detail-title", text: definitionFile.basename }).setAttr("title", definitionFile.path);
+    const open = head.createEl("button", { text: "Open definition", cls: "mdse-detail-btn" });
+    open.setAttr("title", "Definition edits belong to the canonical reusable note.");
+    open.onclick = () => void this.app.workspace.getLeaf(true).openFile(definitionFile);
+
+    const chips = content.createDiv({ cls: "mdse-detail-chips" });
+    chips.createSpan({ cls: "mdse-detail-chip", text: "definition" });
+    for (const key of ["type", "subtype", "id", "status"]) {
+      const value = fm?.[key];
+      if (value !== undefined && value !== null && String(value) !== "") {
+        chips.createSpan({ cls: "mdse-detail-chip", text: key === "type" || key === "subtype" ? String(value) : `${key} ${String(value)}` });
+      }
+    }
+
+    const schema = this.host.schema();
+    const relationshipFields = new Set(schema ? [...schema.byField.keys(), ...schema.byInverse.keys()] : []);
+    const properties = propertyRows(fm, relationshipFields);
+    if (properties.length) {
+      const table = content.createEl("table", { cls: "mdse-finding" });
+      for (const property of properties) this.renderDefinitionRow(table, property, definitionFile);
+    }
+
+    const relationships = relationshipRows(fm, relationshipFields);
+    const relationshipDetails = content.createEl("details", { cls: "mdse-local-definition-relationships" });
+    relationshipDetails.createEl("summary", { text: `Relationships (${relationships.length})` });
+    if (relationships.length) {
+      const table = relationshipDetails.createEl("table", { cls: "mdse-finding" });
+      for (const relationship of relationships) this.renderDefinitionRow(table, relationship, definitionFile);
+    } else {
+      relationshipDetails.createEl("p", { cls: "mdse-detail-empty", text: "No authored relationships." });
+    }
+
+    const md = bodyOf(text, cache?.frontmatterPosition?.end.offset);
+    const body = content.createDiv({ cls: "mdse-detail-body markdown-rendered" });
+    if (md.trim()) await MarkdownRenderer.render(this.app, md, body, definitionFile.path, this);
+    else body.createEl("p", { cls: "mdse-detail-empty", text: "This definition has no text." });
+  }
+
+  private renderDefinitionRow(table: HTMLElement, row: PropertyRow, sourceFile: TFile): void {
+    const tr = table.createEl("tr");
+    tr.createEl("td", { text: row.key });
+    const td = tr.createEl("td");
+    for (const part of row.parts) {
+      if (!part.link) {
+        td.appendText(part.text);
+        continue;
+      }
+      const a = td.createEl("a", { text: part.text, href: "#" });
+      a.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const target = this.app.metadataCache.getFirstLinkpathDest(part.link!, sourceFile.path);
+        if (target) void this.show(target);
+      };
+    }
   }
 
   private async editEndpointEquals(file: TFile, endpoint: LocalRecord): Promise<void> {
