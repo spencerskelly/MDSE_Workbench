@@ -1524,3 +1524,54 @@ test("flow definition edit rejects a block-fragment definition", () => {
     finding.severity === "error"
   ));
 });
+
+
+test("plans endpoint part assignment by clearing an existing parent in the same patch", () => {
+  const partId = "part-20261005022000000skellyspencer";
+  const parentId = "ep-20261005022000001skellyspencer";
+  const endpointId = "ep-20261005022000002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Main Contactor]]",
+    "^" + partId,
+    "",
+    "### Local Interfaces",
+    "#### Parent",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partId + "|K1]]",
+    "^" + parentId,
+    "",
+    "#### Child",
+    "- definition: [[CAN Port]]",
+    "- parent: [[#^" + parentId + "|Parent]]",
+    "^" + endpointId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    endpointId,
+    {
+      fields: {
+        part: "[[#^" + partId + "|K1]]",
+        parent: null,
+      },
+    },
+    { allowInvalidTarget: true },
+  );
+
+  const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
+  assert.equal(endpoint?.part?.blockId, partId);
+  assert.equal(endpoint?.parent, null);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
