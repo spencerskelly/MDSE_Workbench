@@ -679,6 +679,7 @@ export class LocalFlowCreateModal extends Modal {
     private readonly ownerName: string,
     private readonly connection: LocalRecord,
     private readonly localId: string,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (input: NewLocalRecord) => Promise<StagedLocalCreate>,
     private readonly apply: (id: string) => Promise<void>,
     private readonly cancel: (id: string) => void,
@@ -709,7 +710,11 @@ export class LocalFlowCreateModal extends Modal {
     };
 
     const heading=input("Flow name","Commands");
-    const definition=input("Reusable definition","[[CAN Data]]");
+    const definitionRow=this.contentEl.createDiv({cls:"mdse-create-field"});
+    definitionRow.createEl("label",{text:"Reusable definition"});
+    const definition=definitionRow.createEl("select",{cls:"mdse-detail-input"});
+    definition.createEl("option",{text:"Choose a model definition…",value:""});
+    for(const option of this.definitions) definition.createEl("option",{text:`${option.name} — ${option.type ?? "model"}`,value:option.path});
     const roleA=input("Endpoint A role","transmit");
     const roleB=input("Endpoint B role","receive");
 
@@ -722,19 +727,22 @@ export class LocalFlowCreateModal extends Modal {
     review.onclick=()=>void(async()=>{
       review.disabled=true;
       try{
+        const selected=this.definitions.find((option)=>option.path===definition.value);
+        if(!selected) throw new Error("Choose a reusable definition from the model.");
+        const definitionLink=`[[${selected.path.replace(/\.md$/i,"")}]]`;
         const staged=await this.stage({
           kind:"flow",
           localId:this.localId,
           connectionId:this.connection.localId,
           heading:heading.value.trim(),
           fields:{
-            definition:definition.value.trim(),
+            definition:definitionLink,
             endpointA:roleA.value.trim(),
             endpointB:roleB.value.trim(),
           },
         });
         this.staged=staged;
-        this.review(staged,heading.value.trim(),definition.value.trim(),roleA.value.trim(),roleB.value.trim());
+        this.review(staged,heading.value.trim(),definitionLink,roleA.value.trim(),roleB.value.trim());
       }catch(e){
         new Notice(`Cannot stage flow: ${(e as Error).message}`,12000);
         review.disabled=false;
@@ -1691,6 +1699,7 @@ export class LocalFlowDefinitionEditModal extends Modal {
     app: App,
     private readonly ownerName: string,
     private readonly flow: LocalRecord,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (definition: string) => Promise<StagedLocalPatch>,
     private readonly apply: (id: string) => Promise<void>,
     private readonly cancel: (id: string) => void,
@@ -1704,13 +1713,14 @@ export class LocalFlowDefinitionEditModal extends Modal {
 
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Reusable definition" });
-    const input = row.createEl("input", {
-      type: "text",
-      cls: "mdse-detail-input",
-      value: this.flow.definition?.text ?? "",
-    });
-    input.setAttr("placeholder", "[[CAN Data]]");
-    input.onkeydown = (e) => e.stopPropagation();
+    const input = row.createEl("select", { cls: "mdse-detail-input" });
+    input.createEl("option", { text: "Choose a model definition…", value: "" });
+    const currentTarget = this.flow.definition?.target ?? "";
+    for (const option of this.definitions) {
+      const item = input.createEl("option", { text: `${option.name} — ${option.type ?? "model"}`, value: option.path });
+      const stem = option.path.replace(/\.md$/i, "");
+      if (currentTarget === stem || currentTarget === option.name) item.selected = true;
+    }
 
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
@@ -1718,8 +1728,9 @@ export class LocalFlowDefinitionEditModal extends Modal {
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
-        const value = input.value.trim();
-        if (!value) throw new Error("Flow occurrences require a reusable definition.");
+        const selected = this.definitions.find((option) => option.path === input.value);
+        if (!selected) throw new Error("Choose a reusable definition from the model.");
+        const value = `[[${selected.path.replace(/\.md$/i, "")}]]`;
         const staged = await this.stage(value);
         this.staged = staged;
         this.renderReview(staged, value);
