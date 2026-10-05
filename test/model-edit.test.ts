@@ -2242,3 +2242,26 @@ test("staged Local Model patch semantic guard blocks Apply and Redo when target 
   await assert.rejects(transactions.redo(), /replacement definition no longer exists/);
   assert.equal(store.text, note());
 });
+
+
+test("staged Local Model patch refuses stale indexed owner UID", async () => {
+  const endpointId = "ep-20261005004000002skellyspencer";
+  const targetPartId = "part-20261005004000001skellyspencer";
+  const original = noteWithReassignableEndpoint();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(
+    store,
+    () => "20261005004000999skellyspencer",
+    transactions,
+  );
+
+  await assert.rejects(
+    service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
+      fields: { part: "[[#^" + targetPartId + "|K2]]" },
+    }),
+    /indexed uid .* does not match source uid/,
+  );
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
