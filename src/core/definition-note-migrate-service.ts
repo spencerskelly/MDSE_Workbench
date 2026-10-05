@@ -293,7 +293,16 @@ export class DefinitionNoteMigrationService {
             for(const file of pending.files){
               if(await this.store.read(file.path)!==file.before) throw new Error(`${file.path} changed after undoing ${pending.label}.`);
             }
-            for(const file of pending.files) await this.store.write(file.path,file.after);
+            const rewritten:FileState[]=[];
+            try{
+              for(const file of pending.files){
+                await this.store.write(file.path,file.after);
+                rewritten.push(file);
+              }
+            }catch(error){
+              for(const file of rewritten.reverse()) await this.store.write(file.path,file.before);
+              throw error;
+            }
           },
         };
       },
