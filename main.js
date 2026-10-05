@@ -7980,12 +7980,22 @@ function stringify3(value, replacer, options) {
 function retireDefinitionText(text) {
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (!match) throw new Error("Definition note must begin with YAML frontmatter.");
-  const doc = parseDocument(match[1]);
+  const yaml = match[1];
+  const doc = parseDocument(yaml);
+  if (doc.errors.length) throw new Error(`Definition frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
   const currentStatus = doc.get("status");
-  doc.set("status", "retired");
-  const yaml = stringify3(doc.toJS()).trimEnd();
+  const node = doc.get("status", true);
+  let nextYaml;
+  if (node === void 0 || node === null) {
+    const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}status: retired`;
+    nextYaml = yaml + addition;
+  } else {
+    const range = node.range;
+    if (!range) throw new Error("Cannot safely update status; YAML source range is unavailable.");
+    nextYaml = yaml.slice(0, range[0]) + "retired" + yaml.slice(range[1]);
+  }
   const after = `---
-${yaml}
+${nextYaml}
 ---
 ${text.slice(match[0].length)}`;
   return { text: after, currentStatus };
