@@ -5,6 +5,7 @@ import type { ViewProfile } from "../core/views";
 import type { NewLocalRecord } from "../core/localmodel-edit";
 import type { LocalRecord } from "../core/localmodel";
 import type { StagedLocalCreate, StagedLocalDelete, StagedLocalPatch } from "../core/model-edit";
+import type { StagedDefinitionCreation } from "../core/definition-create";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -2027,5 +2028,137 @@ export class LocalFlowConnectionMoveModal extends Modal {
         apply.disabled = false;
       }
     })();
+  }
+}
+
+
+export class DefinitionCreateFromOccurrenceModal extends Modal {
+  private staged: StagedDefinitionCreation | null = null;
+  private definitionApplied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly occurrence: LocalRecord,
+    private readonly stage: (name: string, path: string) => StagedDefinitionCreation,
+    private readonly applyDefinition: (transactionId: string) => Promise<void>,
+    private readonly cancelDefinition: (transactionId: string) => void,
+    private readonly bindOccurrence: (definitionPath: string) => Promise<void>,
+    private readonly onApplied: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.renderCompose();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.definitionApplied) {
+      try { this.cancelDefinition(staged.transaction.id); } catch { /* already closed */ }
+    }
+  }
+
+  private renderCompose(): void {
+    this.titleEl.setText("Create reusable definition");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Create a reusable definition for ${this.occurrence.kind} occurrence "${this.occurrence.identifier}" in ${this.ownerName}. The occurrence is not rebound until the definition has been created successfully.`,
+    });
+
+    const field = (label: string, value = "", placeholder = ""): HTMLInputElement => {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: label });
+      const input = row.createEl("input", { type: "text", cls: "mdse-detail-input", value });
+      if (placeholder) input.setAttr("placeholder", placeholder);
+      input.onkeydown = (e) => e.stopPropagation();
+      return input;
+    };
+
+    const name = field("Definition name", this.occurrence.identifier, "Reusable definition name");
+    const path = field("Vault path", "", "e.g. 40_Objects/Main Contactor.md");
+    this.contentEl.createEl("p", {
+      cls: "mdse-muted",
+      text: "Choose the canonical vault location explicitly. Workbench will generate the governed UID from your configured creator identity.",
+    });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => {
+      review.disabled = true;
+      try {
+        const staged = this.stage(name.value.trim(), path.value.trim());
+        this.staged = staged;
+        this.renderReview(staged);
+      } catch (e) {
+        new Notice(`Cannot stage definition creation: ${(e as Error).message}`, 12000);
+        review.disabled = false;
+      }
+    };
+  }
+
+  private renderReview(staged: StagedDefinitionCreation): void {
+    this.titleEl.setText("Review reusable definition");
+    this.contentEl.empty();
+
+    const rows: Array<[string, string]> = [
+      ["Owner", this.ownerName],
+      ["Occurrence", `${this.occurrence.kind} ${this.occurrence.identifier}`],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+      ["Definition", staged.plan.name],
+      ["Type", staged.plan.type],
+      ["UID", staged.plan.uid],
+      ["Path", staged.plan.path],
+    ];
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    this.contentEl.createEl("p", {
+      cls: "mdse-muted",
+      text: "Apply creates the reusable definition first. Workbench then binds this occurrence through a separate reviewed Local Model transaction. If the occurrence changed meanwhile, binding is refused and the valid definition remains available.",
+    });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancelDefinition(staged.transaction.id); } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply definition + bind", cls: "mod-cta" });
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.applyDefinition(staged.transaction.id);
+          this.definitionApplied = true;
+          this.staged = null;
+          await this.bindOccurrence(staged.plan.path);
+          this.close();
+          this.onApplied();
+          new Notice(`Created ${staged.plan.name} and bound ${this.occurrence.identifier} to it.`, 6000);
+        } catch (e) {
+          if (this.definitionApplied) {
+            new Notice(`Definition was created, but the occurrence was not rebound: ${(e as Error).message}`, 15000);
+            this.contentEl.createEl("p", {
+              cls: "mdse-warn",
+              text: "The reusable definition now exists, but the occurrence binding was safely refused. Close and reopen the occurrence before binding it.",
+            });
+          } else {
+            new Notice(`Definition was not created: ${(e as Error).message}`, 15000);
+            apply.disabled = false;
+          }
+        }
+      })();
+    };
   }
 }
