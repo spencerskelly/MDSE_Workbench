@@ -2707,6 +2707,37 @@ export class DefinitionSupersedeModal extends Modal {
     buttons.createEl("button", { text: "Done" }).onclick = () => this.close();
   }
 
+  private renderMigrationRefreshFailure(
+    supersession: StagedDefinitionSupersession,
+    error: unknown,
+  ): void {
+    this.titleEl.setText("Migration applied");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: "The migration was applied successfully, but Workbench could not refresh the remaining dependent inventory.",
+    });
+    this.contentEl.createEl("p", {
+      cls: "mdse-warn",
+      text: `Refresh failed: ${(error as Error).message}`,
+    });
+    this.contentEl.createEl("p", {
+      text: "Do not re-apply the completed migration. Retry the inventory refresh or close this dialog and reopen supersession later.",
+    });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    const retry = buttons.createEl("button", { text: "Retry inventory", cls: "mod-cta" });
+    retry.onclick = () => {
+      void (async () => {
+        retry.disabled = true;
+        try {
+          await this.refreshMigration(supersession);
+        } catch (e) {
+          this.renderMigrationRefreshFailure(supersession, e);
+        }
+      })();
+    };
+    buttons.createEl("button", { text: "Done" }).onclick = () => this.close();
+  }
+
   private renderNoteMigrationReview(
     supersession: StagedDefinitionSupersession,
     candidate: StagedDefinitionSupersession["plan"]["migrationCandidates"][number],
@@ -2752,13 +2783,18 @@ export class DefinitionSupersedeModal extends Modal {
         apply.disabled = true;
         try {
           await this.applyNoteMigration(migration.transaction.id);
-          this.noteMigrationApplied = true;
-          this.stagedNoteMigration = null;
-          new Notice(`Migrated ${candidate.ownerPath} ${candidate.field} to the replacement definition.`, 6000);
-          await this.refreshMigration(supersession);
         } catch (e) {
           new Notice(`Relationship migration was not applied: ${(e as Error).message}`, 15000);
           apply.disabled = false;
+          return;
+        }
+        this.noteMigrationApplied = true;
+        this.stagedNoteMigration = null;
+        new Notice(`Migrated ${candidate.ownerPath} ${candidate.field} to the replacement definition.`, 6000);
+        try {
+          await this.refreshMigration(supersession);
+        } catch (e) {
+          this.renderMigrationRefreshFailure(supersession, e);
         }
       })();
     };
@@ -2808,13 +2844,18 @@ export class DefinitionSupersedeModal extends Modal {
         apply.disabled = true;
         try {
           await this.applyMigration(migration.transaction.id);
-          this.migrationApplied = true;
-          this.stagedMigration = null;
-          new Notice(`Migrated occurrence ^${candidate.localId} to the replacement definition.`, 6000);
-          await this.refreshMigration(supersession);
         } catch (e) {
           new Notice(`Occurrence migration was not applied: ${(e as Error).message}`, 15000);
           apply.disabled = blocking;
+          return;
+        }
+        this.migrationApplied = true;
+        this.stagedMigration = null;
+        new Notice(`Migrated occurrence ^${candidate.localId} to the replacement definition.`, 6000);
+        try {
+          await this.refreshMigration(supersession);
+        } catch (e) {
+          this.renderMigrationRefreshFailure(supersession, e);
         }
       })();
     };
