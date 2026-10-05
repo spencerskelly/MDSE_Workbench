@@ -932,3 +932,107 @@ test("endpoint exposes edit surfaces a missing same-note target as blocking vali
     finding.severity === "error"
   ));
 });
+
+
+test("plans adding one endpoint equals target while preserving existing equals links", () => {
+  const sourceId = "ep-20261005009000000skellyspencer";
+  const existingId = "ep-20261005009000001skellyspencer";
+  const addId = "ep-20261005009000002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### Boundary",
+    "- definition: [[CAN Port]]",
+    "- equals: [[#^" + existingId + "|J1]] [[External#^ep-20261005009000009skellyspencer|Remote]]",
+    "^" + sourceId,
+    "",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + existingId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + addId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    sourceId,
+    { fields: { equals: "[[#^" + existingId + "|J1]] [[External#^ep-20261005009000009skellyspencer|Remote]] [[#^" + addId + "|J2]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
+  assert.deepEqual(source?.equals.map((link) => [link.target, link.blockId]), [
+    ["", existingId],
+    ["External", "ep-20261005009000009skellyspencer"],
+    ["", addId],
+  ]);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("plans removing one endpoint equals target without changing the others", () => {
+  const sourceId = "ep-20261005009100000skellyspencer";
+  const removeId = "ep-20261005009100001skellyspencer";
+  const keepId = "ep-20261005009100002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### Boundary",
+    "- definition: [[CAN Port]]",
+    "- equals: [[#^" + removeId + "|J1]] [[#^" + keepId + "|J2]]",
+    "^" + sourceId,
+    "",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + removeId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + keepId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    sourceId,
+    { fields: { equals: "[[#^" + keepId + "|J2]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
+  assert.deepEqual(source?.equals.map((link) => link.blockId), [keepId]);
+});
+
+test("endpoint equals edit surfaces a missing same-note target as blocking validation", () => {
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordPatch(
+    note(),
+    endpointId,
+    { fields: { equals: "[[#^ep-20261005009200099skellyspencer|Missing]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === endpointId &&
+    finding.code === "ref.local-missing" &&
+    finding.severity === "error"
+  ));
+});
