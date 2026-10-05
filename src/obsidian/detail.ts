@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -233,6 +233,8 @@ export class NoteDetailPanel extends Component {
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
     }
     if (this.editing && record.kind === "endpoint") {
+      const definition = head.createEl("button", { text: "Change definition…", cls: "mdse-detail-btn" });
+      definition.onclick = () => this.editEndpointDefinition(file, record);
       const reassignPart = head.createEl("button", { text: "Change part…", cls: "mdse-detail-btn" });
       reassignPart.onclick = () => { void this.reassignEndpointPart(file, record); };
       const reassignParent = head.createEl("button", { text: "Change parent…", cls: "mdse-detail-btn" });
@@ -487,6 +489,26 @@ export class NoteDetailPanel extends Component {
       ).open();
     } catch (e) {
       new Notice(`Cannot reassign endpoint part: ${(e as Error).message}`, 12000);
+    }
+  }
+
+  private editEndpointDefinition(file: TFile, endpoint: LocalRecord): void {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalEndpointDefinitionEditModal(
+        this.app,
+        file.basename,
+        endpoint,
+        (definition) => editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+          fields: { definition },
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, endpoint.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot edit endpoint definition: ${(e as Error).message}`, 12000);
     }
   }
 
