@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextLocalId, planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch } from "../src/core/localmodel-edit";
+import { nextAvailableLocalId, nextLocalId, planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch } from "../src/core/localmodel-edit";
 import { parseLocalModel } from "../src/core/localmodel";
 
 const tokenA = "20261003133512742skellyspencer";
@@ -198,6 +198,43 @@ test("a staged planner may represent temporary invalidity when explicitly reques
 test("generates governed Local Model IDs from UTC timestamp and owner author suffix", () => {
   const id = nextLocalId("part", "20261003130000000skellyspencer", new Date("2026-10-04T23:30:45.123Z"));
   assert.equal(id, "part-20261004233045123skellyspencer");
+});
+
+
+test("retries Local Model ID collisions by +1 ms until unique", () => {
+  const ownerUid = "20261003130000000skellyspencer";
+  const now = new Date("2026-10-04T23:30:45.123Z");
+  const first = nextLocalId("part", ownerUid, now);
+  const second = nextLocalId("part", ownerUid, new Date(now.getTime() + 1));
+  const third = nextLocalId("part", ownerUid, new Date(now.getTime() + 2));
+
+  assert.equal(
+    nextAvailableLocalId("part", ownerUid, new Set([first, second]), now),
+    third,
+  );
+});
+
+test("collision retry preserves governed prefixes for every Local Model kind", () => {
+  const ownerUid = "20261003130000000skellyspencer";
+  const now = new Date("2026-10-04T23:30:45.123Z");
+  for (const kind of ["part", "endpoint", "connection", "flow"] as const) {
+    const first = nextLocalId(kind, ownerUid, now);
+    const expected = nextLocalId(kind, ownerUid, new Date(now.getTime() + 1));
+    const actual = nextAvailableLocalId(kind, ownerUid, [first], now);
+    assert.equal(actual, expected);
+  }
+});
+
+test("collision retry treats IDs from other Local Model kinds as non-colliding", () => {
+  const ownerUid = "20261003130000000skellyspencer";
+  const now = new Date("2026-10-04T23:30:45.123Z");
+  const endpointAtSameMillisecond = nextLocalId("endpoint", ownerUid, now);
+  const partAtSameMillisecond = nextLocalId("part", ownerUid, now);
+
+  assert.equal(
+    nextAvailableLocalId("part", ownerUid, [endpointAtSameMillisecond], now),
+    partAtSameMillisecond,
+  );
 });
 
 test("refuses Local Model ID generation when the owner UID has no governed author suffix", () => {
