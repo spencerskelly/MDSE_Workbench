@@ -8139,21 +8139,42 @@ function planDefinitionSupersession(request) {
 function frontmatter(text) {
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (!match) throw new Error("Definition note must begin with YAML frontmatter.");
-  return { doc: parseDocument(match[1]), body: text.slice(match[0].length) };
+  return { yaml: match[1], body: text.slice(match[0].length), prefixLength: match[0].length };
 }
 function withRelationship(text, field, targetPath) {
-  const { doc, body } = frontmatter(text);
-  const existing = doc.get(field);
+  const parsed = frontmatter(text);
+  const doc = parseDocument(parsed.yaml);
+  if (doc.errors.length) throw new Error(`Definition frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
   const link = `[[${targetPath.replace(/\.md$/i, "")}]]`;
-  const values = Array.isArray(existing) ? existing.map((value) => String(value)) : existing === void 0 || existing === null || existing === "" ? [] : [String(existing)];
-  if (!values.some((value) => value === link)) values.push(link);
+  const node = doc.get(field, true);
+  if (node === void 0 || node === null) {
+    const addition = `${parsed.yaml.endsWith("\n") || parsed.yaml.length === 0 ? "" : "\n"}${field}:
+  - "${link}"`;
+    return `---
+${parsed.yaml}${addition}
+---
+${parsed.body}`;
+  }
+  const nodeValue = (value) => {
+    if (typeof value === "object" && value !== null && "toJSON" in value) {
+      const toJSON = value.toJSON;
+      if (typeof toJSON === "function") return toJSON.call(value);
+    }
+    return value;
+  };
+  const values = isSeq(node) ? node.items.map((item) => String(nodeValue(item) ?? "")) : [String(nodeValue(node) ?? "")];
+  if (values.includes(link)) return text;
+  values.push(link);
   values.sort((a, b) => a.localeCompare(b, void 0, { sensitivity: "base" }));
-  doc.set(field, values);
-  const yaml = stringify3(doc.toJS()).trimEnd();
+  const range = node.range;
+  if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
+  const replacement = values.length === 1 ? `"${values[0]}"` : `
+${values.map((value) => `  - "${value}"`).join("\n")}`;
+  const yaml = parsed.yaml.slice(0, range[0]) + replacement + parsed.yaml.slice(range[1]);
   return `---
 ${yaml}
 ---
-${body}`;
+${parsed.body}`;
 }
 function impactSignature(impact) {
   const note = impact.noteUses.map((use) => `${use.fromPath}|${use.field}`).sort().join("\n");
