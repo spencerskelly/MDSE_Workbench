@@ -1277,4 +1277,56 @@ export class LocalConnectionEndpointRewireModal extends Modal {
       review.disabled = false;
     }
   }
+
+  private renderReview(staged: StagedLocalPatch, target: LocalRecord): void {
+    this.titleEl.setText("Review connection endpoint rewire");
+    this.contentEl.empty();
+    const other = this.end === "endpointA" ? this.connection.endpointB : this.connection.endpointA;
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: [string, string][] = [
+      ["Owner", this.ownerName],
+      ["Connection", this.connection.identifier],
+      ["Changed end", this.end],
+      ["New endpoint", target.identifier],
+      ["Opposite endpoint", other?.text ?? "-"],
+      ["Child flows", "preserved"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: `Validation passed. Apply will change only connection ${this.end}.` });
+    } else {
+      for (const finding of staged.plan.findings) {
+        this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : undefined });
+      }
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally { this.staged = null; this.close(); }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new Notice(`Rewired ${this.connection.identifier} ${this.end} to ${target.identifier}.`, 5000);
+      } catch (e) {
+        new Notice(`Not applied: ${(e as Error).message}`, 12000);
+        apply.disabled = false;
+      }
+    })();
+  }
 }
