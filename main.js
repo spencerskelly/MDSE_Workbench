@@ -6261,6 +6261,108 @@ var LocalEndpointDefinitionEditModal = class extends import_obsidian3.Modal {
     })();
   }
 };
+var LocalFlowDefinitionEditModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, flow, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.flow = flow;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.titleEl.setText("Edit flow definition");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Change only the reusable definition link for ${this.flow.identifier}. Flow identity, owning connection, and both endpoint roles remain unchanged.` });
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Reusable definition" });
+    const input = row.createEl("input", {
+      type: "text",
+      cls: "mdse-detail-input",
+      value: this.flow.definition?.text ?? ""
+    });
+    input.setAttr("placeholder", "[[CAN Data]]");
+    input.onkeydown = (e) => e.stopPropagation();
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const value = input.value.trim();
+        if (!value) throw new Error("Flow occurrences require a reusable definition.");
+        const staged = await this.stage(value);
+        this.staged = staged;
+        this.renderReview(staged, value);
+      } catch (e) {
+        new import_obsidian3.Notice(`Cannot stage flow definition edit: ${e.message}`, 12e3);
+        review.disabled = false;
+      }
+    })();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  renderReview(staged, value) {
+    this.titleEl.setText("Review flow definition edit");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Flow", this.flow.identifier],
+      ["New definition", value],
+      ["Connection", this.flow.connectionId ?? "none"],
+      ["Endpoint A role", this.flow.roleA ?? "none"],
+      ["Endpoint B role", this.flow.roleB ?? "none"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope]
+    ];
+    for (const [key2, val] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: val });
+    }
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    for (const finding of staged.plan.findings) {
+      this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : void 0 });
+    }
+    if (!staged.plan.findings.length) this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will change only the flow definition field." });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new import_obsidian3.Notice(`Updated definition for flow ${this.flow.identifier}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -6589,6 +6691,10 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const addFlow = head.createEl("button", { text: "Add flow\u2026", cls: "mdse-detail-btn" });
       addFlow.onclick = () => this.createFlowOccurrence(file, record);
     }
+    if (this.editing && record.kind === "flow") {
+      const definition = head.createEl("button", { text: "Change definition\u2026", cls: "mdse-detail-btn" });
+      definition.onclick = () => this.editFlowDefinition(file, record);
+    }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
@@ -6813,6 +6919,29 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       ).open();
     } catch (e) {
       new import_obsidian4.Notice(`Cannot reassign endpoint part: ${e.message}`, 12e3);
+    }
+  }
+  editFlowDefinition(file, flow) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalFlowDefinitionEditModal(
+        this.app,
+        file.basename,
+        flow,
+        (definition) => editor.stageLocalRecordPatch(file.path, flow.localId, {
+          fields: { definition }
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => {
+          editor.cancelLocalPatch(transactionId);
+        },
+        () => {
+          void this.refreshLocal(file, flow.localId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot edit flow definition: ${e.message}`, 12e3);
     }
   }
   editEndpointDefinition(file, endpoint2) {
