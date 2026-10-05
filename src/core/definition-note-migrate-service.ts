@@ -42,7 +42,16 @@ function frontmatter(text: string): { doc: ReturnType<typeof parseDocument>; bod
 
 function list(value: unknown): unknown[] {
   if (value === undefined || value === null || value === "") return [];
-  return Array.isArray(value) ? [...value] : [value];
+  if (Array.isArray(value)) return [...value];
+
+  // yaml Document#get() returns YAML collection nodes by default. Normalize those nodes to their
+  // plain JS value before inspecting relationship lists; otherwise a YAMLSeq is mistaken for one
+  // scalar string and fresh-source target resolution fails closed for every list relationship.
+  if (typeof value === "object" && value !== null && "toJSON" in value) {
+    const toJSON = (value as { toJSON?: () => unknown }).toJSON;
+    if (typeof toJSON === "function") return list(toJSON.call(value));
+  }
+  return [value];
 }
 
 function mutateRelationship(
