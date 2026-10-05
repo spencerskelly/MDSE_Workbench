@@ -157,6 +157,7 @@ export default class MdseWorkbench extends Plugin {
       relate: (a, b) => this.relate(a, b),
       undo: () => this.undo(),
       pickView: (path) => this.pickView(path),
+      definitionImpact: (path) => this.definitionImpact(path),
     });
     this.addChild(this.detail);
     this.registerDetailClicks();
@@ -292,6 +293,46 @@ export default class MdseWorkbench extends Plugin {
       );
       this.cancelStartupHandoff = handoff.cancel;
     });
+  }
+
+  private async definitionImpact(path: string): Promise<{ rows: string[]; notes: number; occurrences: number }> {
+    const indexer = this.indexer;
+    if (!indexer || !this.isReady()) throw new Error("Workbench is still starting.");
+
+    // Impact review is an explicit foreground request, so complete occurrence hydration before
+    // reporting usage. This avoids presenting a partial Where Used result from bounded retention.
+    await indexer.whenSourceSettled();
+    await indexer.whenLocalSettled(true);
+
+    const noteUses = indexer.index.in(path).slice().sort((a, b) =>
+      a.from.localeCompare(b.from) || a.field.localeCompare(b.field)
+    );
+    const occurrences = indexer.local.occurrencesOf(
+      path,
+      (target, fromPath) => this.app.metadataCache.getFirstLinkpathDest(target, fromPath)?.path,
+    ).sort((a, b) =>
+      a.path.localeCompare(b.path) ||
+      a.record.kind.localeCompare(b.record.kind) ||
+      a.record.identifier.localeCompare(b.record.identifier)
+    );
+
+    const rows: string[] = [];
+    if (noteUses.length) {
+      rows.push("Note-level uses:");
+      for (const use of noteUses) {
+        const source = indexer.index.notes.get(use.from);
+        rows.push(`- ${source?.name ?? use.from} — ${use.field}`);
+      }
+    }
+    if (occurrences.length) {
+      if (rows.length) rows.push("");
+      rows.push("Local Model occurrences:");
+      for (const occurrence of occurrences) {
+        const owner = indexer.index.notes.get(occurrence.path);
+        rows.push(`- ${owner?.name ?? occurrence.path} — ${occurrence.record.kind} ${occurrence.record.identifier} (^${occurrence.record.localId})`);
+      }
+    }
+    return { rows, notes: noteUses.length, occurrences: occurrences.length };
   }
 
   private async loadIntegrationProbe(): Promise<void> {
