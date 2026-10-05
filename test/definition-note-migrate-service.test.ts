@@ -326,3 +326,38 @@ test("note migration redo rolls back earlier files if a later paired-file write 
   assert.equal(tx.history().length,0);
   void migratedOwner;
 });
+
+
+test("one-way note migration refuses Apply and Redo when replacement definition disappears",async()=>{
+  const oneWay={
+    field:"participants",kind:"oneWay",from:"any",to:"any",sameClass:false,
+    excludePairs:[],provisional:false,temporary:false,order:0,
+  } as RelationshipDef;
+  const oneWayOwner="20_UseCases/Charge.md";
+  const oneWayOwnerText="---\ntype: Use Case\nuid: 20261005061500003skellyspencer\nparticipants:\n  - \"[[30_Objects/Old Contactor]]\"\n---\n\n# Charge\n";
+
+  const store=new MemoryStore();
+  store.files.set(oneWayOwner,oneWayOwnerText);
+  store.files.set(oldPath,oldText);
+  store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
+
+  const staged=await service.stageAndReview({
+    ownerPath:oneWayOwner,field:"participants",replacedPath:oldPath,replacementPath:newPath,relationship:oneWay,
+  });
+  store.files.delete(newPath);
+  await assert.rejects(service.apply(staged.transaction.id),/no longer exists/);
+  assert.equal(await store.read(oneWayOwner),oneWayOwnerText);
+  service.cancel(staged.transaction.id);
+
+  store.files.set(newPath,newText);
+  const staged2=await service.stageAndReview({
+    ownerPath:oneWayOwner,field:"participants",replacedPath:oldPath,replacementPath:newPath,relationship:oneWay,
+  });
+  await service.apply(staged2.transaction.id);
+  await tx.undo();
+  store.files.delete(newPath);
+  await assert.rejects(tx.redo(),/no longer exists/);
+  assert.equal(await store.read(oneWayOwner),oneWayOwnerText);
+});
