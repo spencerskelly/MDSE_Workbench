@@ -190,21 +190,6 @@ export class DefinitionNoteMigrationService {
     validateUid(replacedBefore, request.replacedPath, request.replacedUid);
     validateUid(replacementBefore, request.replacementPath, request.replacementUid);
 
-    const assertReplacementIdentity = async (): Promise<void> => {
-      if (!request.replacementUid) return;
-      if (!(await this.store.exists(request.replacementPath))) {
-        throw new Error(`${request.replacementPath} no longer exists; reopen supersession migration review.`);
-      }
-      const current = await this.store.read(request.replacementPath);
-      const parsed = frontmatter(current);
-      const storedUid = String(parsed.doc.get("uid") ?? "").trim();
-      if (!storedUid || storedUid !== request.replacementUid) {
-        throw new Error(
-          `${request.replacementPath} identity changed; expected uid ${request.replacementUid}, found ${storedUid || "none"}. Reopen supersession migration review.`,
-        );
-      }
-    };
-
     const parsedOwner = frontmatter(ownerBefore);
     const currentTargets = list(parsedOwner.doc.get(request.field))
       .map((value) => linkTarget(value))
