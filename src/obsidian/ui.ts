@@ -284,7 +284,7 @@ export class LocalOccurrenceDeleteModal extends Modal {
     app: App,
     private readonly ownerName: string,
     private readonly occurrenceName: string,
-    private readonly occurrenceKind: "part" | "endpoint",
+    private readonly occurrenceKind: "part" | "endpoint" | "connection",
     private readonly stage: () => Promise<StagedLocalDelete>,
     private readonly apply: (transactionId: string) => Promise<void>,
     private readonly cancel: (transactionId: string) => void,
