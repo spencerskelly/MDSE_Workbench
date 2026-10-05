@@ -1283,6 +1283,7 @@ export default class MdseWorkbench extends Plugin {
       );
       this.definitionNoteMigrator = new DefinitionNoteMigrationService(
         {
+          exists: async (path) => this.app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
           read: async (path) => this.app.vault.read(localFile(normalizePath(path))),
           write: async (path, text) => this.app.vault.modify(localFile(normalizePath(path)), text),
         },
