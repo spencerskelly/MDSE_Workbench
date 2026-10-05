@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessDefinitionDeletion } from "../src/core/definition-lifecycle";
+import { assessDefinitionDeletion, planDefinitionRetirement } from "../src/core/definition-lifecycle";
 
 test("definition deletion is allowed when no active references remain", () => {
   const result = assessDefinitionDeletion({
@@ -77,4 +77,52 @@ test("definition deletion reports note and occurrence blockers without mutating 
     'LOCAL: A.md contains part "A" (^part-a) using this definition.',
     'LOCAL: Z.md contains flow "Z" (^flow-z) using this definition.',
   ]);
+});
+
+
+test("definition retirement preserves active references and reports them as impact", () => {
+  const impact = {
+    definitionPath: "30_Objects/Contactor.md",
+    noteUses: [{ fromPath: "10_Systems/Charger.md", field: "hasPart" }],
+    occurrenceUses: [{
+      ownerPath: "30_Objects/Assembly.md",
+      localId: "part-20261005055500000skellyspencer",
+      kind: "part" as const,
+      identifier: "K1",
+    }],
+  };
+  const plan = planDefinitionRetirement("30_Objects/Contactor.md", "active", impact);
+
+  assert.equal(plan.fromStatus, "active");
+  assert.equal(plan.toStatus, "retired");
+  assert.equal(plan.changed, true);
+  assert.equal(plan.preservesReferences, true);
+  assert.equal(plan.noteUseCount, 1);
+  assert.equal(plan.occurrenceUseCount, 1);
+  assert.equal(plan.impactRows.length, 2);
+});
+
+test("definition retirement is idempotent when status is already retired", () => {
+  const plan = planDefinitionRetirement(
+    "30_Objects/Contactor.md",
+    " Retired ",
+    { definitionPath: "30_Objects/Contactor.md", noteUses: [], occurrenceUses: [] },
+  );
+
+  assert.equal(plan.fromStatus, "retired");
+  assert.equal(plan.changed, false);
+  assert.equal(plan.toStatus, "retired");
+  assert.equal(plan.preservesReferences, true);
+});
+
+test("definition retirement treats missing status as an explicit transition to retired", () => {
+  const plan = planDefinitionRetirement(
+    "30_Objects/Contactor.md",
+    undefined,
+    { definitionPath: "30_Objects/Contactor.md", noteUses: [], occurrenceUses: [] },
+  );
+
+  assert.equal(plan.fromStatus, null);
+  assert.equal(plan.changed, true);
+  assert.equal(plan.toStatus, "retired");
 });
