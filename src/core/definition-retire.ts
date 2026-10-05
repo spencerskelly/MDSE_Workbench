@@ -156,6 +156,10 @@ export class DefinitionRetirementService {
             await this.store.write(pending.path, pending.before);
           },
           redo: async () => {
+            const latestImpact = await this.impactFor(pending.path);
+            if (impactSignature(latestImpact) !== pending.impactSignature) {
+              throw new Error(`Cannot redo ${pending.label}: dependent usage changed after Review.`);
+            }
             if (!(await this.store.exists(pending.path))) throw new Error(`${pending.path} no longer exists before retirement redo.`);
             const restored = await this.store.read(pending.path);
             if (restored !== pending.before) throw new Error(`${pending.path} changed after undoing retirement.`);
