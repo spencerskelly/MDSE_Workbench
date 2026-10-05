@@ -151,7 +151,7 @@ export class ModelEditService {
     const txId = `local-move-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `move flow ${flowId} to ${connectionId}`;
     this.transactions.begin(txId, label, "structural");
-    const transaction = this.transactions.add(txId, {
+    this.transactions.add(txId, {
       id: txId + "-move",
       label,
       changes: [{
