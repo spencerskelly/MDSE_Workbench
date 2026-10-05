@@ -18,6 +18,18 @@ export interface StagedLocalCreate {
   path: string;
 }
 
+export interface StagedLocalPatch {
+  transaction: EditTransaction;
+  plan: PlannedLocalEdit;
+  path: string;
+}
+
+interface PendingLocalPatch {
+  path: string;
+  plan: PlannedLocalEdit;
+  label: string;
+}
+
 interface PendingLocalCreate {
   path: string;
   plan: PlannedLocalEdit;
@@ -53,6 +65,7 @@ interface PendingLocalDelete {
 export class ModelEditService {
   private sequence = 0;
   private readonly pendingCreates = new Map<string, PendingLocalCreate>();
+  private readonly pendingPatches = new Map<string, PendingLocalPatch>();
   private readonly pendingDeletes = new Map<string, PendingLocalDelete>();
 
   constructor(
@@ -97,6 +110,67 @@ export class ModelEditService {
     }
 
     return { changed: true, plan };
+  }
+
+  async stageLocalRecordPatch(path: string, localId: string, patch: LocalRecordPatch): Promise<StagedLocalPatch> {
+    const before = await this.store.read(path);
+    const plan = planLocalRecordPatch(before, localId, patch, { allowInvalidTarget: true });
+    if (!plan.changed) throw new Error("This structural edit would not change the Local Model.");
+
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+
+    const txId = `local-patch-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `reassign ${plan.kind} ${localId}`;
+    this.transactions.begin(txId, label, "structural");
+    const transaction = this.transactions.add(txId, {
+      id: txId + "-patch",
+      label,
+      changes: [{
+        kind: "local.patch",
+        summary: label,
+        refs: [localRef(uid, plan.kind, localId)],
+        metadata: { path, localId, localKind: plan.kind },
+      }],
+    });
+    this.pendingPatches.set(txId, { path, plan, label });
+    return { transaction, plan, path };
+  }
+
+  reviewLocalPatch(transactionId: string): StagedLocalPatch {
+    const pending = this.requirePendingPatch(transactionId);
+    return {
+      transaction: this.transactions.review(transactionId),
+      plan: pending.plan,
+      path: pending.path,
+    };
+  }
+
+  async applyLocalPatch(transactionId: string): Promise<void> {
+    const pending = this.requirePendingPatch(transactionId);
+    const blocking = pending.plan.findings.filter((finding) => finding.severity === "error");
+    if (blocking.length) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blocking.length} blocking Local Model finding${blocking.length === 1 ? "" : "s"} — ${blocking.map((finding) => finding.message).join(" ")}`,
+      );
+    }
+    await this.transactions.apply(transactionId, {
+      apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label),
+    });
+    this.pendingPatches.delete(transactionId);
+  }
+
+  cancelLocalPatch(transactionId: string): EditTransaction {
+    this.requirePendingPatch(transactionId);
+    const cancelled = this.transactions.cancel(transactionId);
+    this.pendingPatches.delete(transactionId);
+    return cancelled;
+  }
+
+  private requirePendingPatch(transactionId: string): PendingLocalPatch {
+    const pending = this.pendingPatches.get(transactionId);
+    if (!pending) throw new Error(`Structural Local Model patch transaction ${transactionId} does not exist.`);
+    return pending;
   }
 
   /**
