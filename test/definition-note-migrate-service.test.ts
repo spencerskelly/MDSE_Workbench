@@ -76,3 +76,60 @@ test("note migration refuses staging when fresh targets no longer include supers
   const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
   await assert.rejects(service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel}),/no longer targets/);
 });
+
+
+test("note migration preserves unrelated YAML formatting across all paired files",async()=>{
+  const formattedOwner=`---
+# owner comment
+type: Object
+uid: 20261005061500000skellyspencer
+status: "active"
+hasPart:
+  - "[[30_Objects/Old Contactor]]"
+custom: 'owner unchanged'
+---
+
+# Charger
+`;
+  const formattedOld=`---
+type: Object
+# old inverse comment
+uid: 20261005061500001skellyspencer
+partOf:
+  - "[[10_Systems/Charger]]"
+custom: [one, two]
+---
+
+# Old
+`;
+  const formattedNew=`---
+type: Object
+uid: 20261005061500002skellyspencer
+custom:
+  nested: "keep"
+---
+
+# New
+`;
+  const store=new MemoryStore();
+  store.files.set(owner,formattedOwner); store.files.set(oldPath,formattedOld); store.files.set(newPath,formattedNew);
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,new TransactionManager());
+  const staged=await service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel});
+  await service.apply(staged.transaction.id);
+
+  const ownerAfter=await store.read(owner);
+  const oldAfter=await store.read(oldPath);
+  const newAfter=await store.read(newPath);
+  assert.ok(ownerAfter.includes("# owner comment\ntype: Object\nuid: 20261005061500000skellyspencer\nstatus: \"active\"\n"));
+  assert.ok(ownerAfter.includes("custom: 'owner unchanged'"));
+  assert.ok(ownerAfter.endsWith("\n# Charger\n"));
+  assert.ok(oldAfter.includes("type: Object\n# old inverse comment\nuid: 20261005061500001skellyspencer\n"));
+  assert.ok(oldAfter.includes("custom: [one, two]"));
+  assert.ok(oldAfter.endsWith("\n# Old\n"));
+  assert.ok(newAfter.includes("custom:\n  nested: \"keep\""));
+  assert.ok(newAfter.endsWith("\n# New\n"));
+  assert.match(ownerAfter,/New Contactor/);
+  assert.doesNotMatch(ownerAfter,/Old Contactor/);
+  assert.doesNotMatch(oldAfter,/Charger/);
+  assert.match(newAfter,/Charger/);
+});
