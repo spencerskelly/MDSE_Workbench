@@ -2145,3 +2145,64 @@ test("cancelled flow endpoint-role edit leaves source and history untouched", as
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithMovableFlow(): string {
+  const endpointA = "ep-20261005025000000skellyspencer";
+  const endpointB = "ep-20261005025000001skellyspencer";
+  const connectionA = "conn-20261005025000002skellyspencer";
+  const connectionB = "conn-20261005025000003skellyspencer";
+  const flowId = "flow-20261005025000004skellyspencer";
+  return [
+    "---", "type: Object", "uid: " + ownerUid, "---", "", "# Assembly", "",
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1", "- definition: [[CAN Port]]", "^" + endpointA, "",
+    "#### J2", "- definition: [[CAN Port]]", "^" + endpointB, "",
+    "### Connections",
+    "#### Primary", "- endpointA: [[#^" + endpointA + "|J1]]", "- endpointB: [[#^" + endpointB + "|J2]]", "^" + connectionA,
+    "##### Commands", "- definition: [[CAN Data]]", "- endpointA: transmit", "- endpointB: receive", "^" + flowId, "",
+    "#### Backup", "- endpointA: [[#^" + endpointA + "|J1]]", "- endpointB: [[#^" + endpointB + "|J2]]", "^" + connectionB,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("staged flow ownership move stays unwritten until Apply and supports undo/redo", async () => {
+  const flowId = "flow-20261005025000004skellyspencer";
+  const connectionA = "conn-20261005025000002skellyspencer";
+  const connectionB = "conn-20261005025000003skellyspencer";
+  const original = noteWithMovableFlow();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalFlowMove("Assembly.md", flowId, connectionB);
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(staged.transaction.status, "reviewed");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  const moved = parseLocalModel(store.text)?.records.find((record) => record.localId === flowId);
+  assert.equal(moved?.connectionId, connectionB);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.move");
+
+  await transactions.undo();
+  assert.equal(parseLocalModel(store.text)?.records.find((record) => record.localId === flowId)?.connectionId, connectionA);
+  await transactions.redo();
+  assert.equal(parseLocalModel(store.text)?.records.find((record) => record.localId === flowId)?.connectionId, connectionB);
+});
+
+test("cancelled flow ownership move leaves source and semantic history untouched", async () => {
+  const flowId = "flow-20261005025000004skellyspencer";
+  const connectionB = "conn-20261005025000003skellyspencer";
+  const original = noteWithMovableFlow();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalFlowMove("Assembly.md", flowId, connectionB);
+  service.cancelLocalPatch(staged.transaction.id);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
