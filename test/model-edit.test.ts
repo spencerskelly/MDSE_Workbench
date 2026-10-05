@@ -2010,7 +2010,7 @@ test("first part occurrence can create the governed Local Model region on an emp
   assert.equal(staged.transaction.status, "reviewed");
   assert.equal(store.text, original, "Review must not write the owner note");
   assert.match(staged.plan.after, /## Local Model/);
-  assert.match(staged.plan.after, /<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->/);
+  assert.match(staged.plan.after, /<!-- MDSE:LOCAL-MODEL START schema=0\.3 -->/);
   assert.match(staged.plan.after, /### Part Occurrences/);
   assert.match(staged.plan.after, /#### K1/);
   assert.ok(staged.plan.after.includes("^" + partId));
