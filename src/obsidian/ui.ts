@@ -9,6 +9,7 @@ import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { StagedDefinitionDelete } from "../core/definition-delete";
 import type { StagedDefinitionRetirement } from "../core/definition-retire";
 import type { StagedDefinitionSupersession } from "../core/definition-supersede-service";
+import type { StagedDefinitionNoteMigration } from "../core/definition-note-migrate-service";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -2449,8 +2450,10 @@ export class DefinitionRetireModal extends Modal {
 export class DefinitionSupersedeModal extends Modal {
   private staged: StagedDefinitionSupersession | null = null;
   private stagedMigration: StagedLocalPatch | null = null;
+  private stagedNoteMigration: StagedDefinitionNoteMigration | null = null;
   private applied = false;
   private migrationApplied = false;
+  private noteMigrationApplied = false;
 
   constructor(
     app: App,
@@ -2462,6 +2465,9 @@ export class DefinitionSupersedeModal extends Modal {
     private readonly stageMigration: (ownerPath: string, localId: string, replacedPath: string, replacementPath: string) => Promise<StagedLocalPatch>,
     private readonly applyMigration: (transactionId: string) => Promise<void>,
     private readonly cancelMigration: (transactionId: string) => void,
+    private readonly stageNoteMigration: (ownerPath: string, field: string, replacedPath: string, replacementPath: string) => Promise<StagedDefinitionNoteMigration>,
+    private readonly applyNoteMigration: (transactionId: string) => Promise<void>,
+    private readonly cancelNoteMigration: (transactionId: string) => void,
     private readonly onApplied: () => void,
   ) {
     super(app);
@@ -2474,11 +2480,16 @@ export class DefinitionSupersedeModal extends Modal {
   onClose(): void {
     const staged = this.staged;
     const migration = this.stagedMigration;
+    const noteMigration = this.stagedNoteMigration;
     this.staged = null;
     this.stagedMigration = null;
+    this.stagedNoteMigration = null;
     this.contentEl.empty();
     if (migration && !this.migrationApplied) {
       try { this.cancelMigration(migration.transaction.id); } catch { /* already closed */ }
+    }
+    if (noteMigration && !this.noteMigrationApplied) {
+      try { this.cancelNoteMigration(noteMigration.transaction.id); } catch { /* already closed */ }
     }
     if (staged && !this.applied) {
       try { this.cancel(staged.transaction.id); } catch { /* already closed */ }
@@ -2590,55 +2601,151 @@ export class DefinitionSupersedeModal extends Modal {
   }
 
   private renderMigration(staged: StagedDefinitionSupersession): void {
-    this.titleEl.setText("Migrate one occurrence");
+    this.titleEl.setText("Migrate one dependent");
     this.contentEl.empty();
 
     const occurrenceCandidates = staged.plan.migrationCandidates.filter(
       (candidate) => candidate.scope === "occurrence" && !!candidate.localId,
     );
+    const noteCandidates = staged.plan.migrationCandidates.filter(
+      (candidate) => candidate.scope === "note",
+    );
 
     this.contentEl.createEl("p", {
-      text: "Supersession is recorded. You may now migrate one Local Model occurrence as a separate reviewed transaction. Workbench rechecks that the occurrence still uses the superseded definition before staging.",
+      text: "Supersession is recorded. Migrate one dependent at a time as a separate reviewed transaction. Workbench rechecks fresh source before staging.",
     });
 
-    if (!occurrenceCandidates.length) {
-      this.contentEl.createEl("p", { cls: "mdse-muted", text: "There are no Local Model occurrences to migrate." });
+    if (!occurrenceCandidates.length && !noteCandidates.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "There are no remaining dependents to migrate." });
       const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
       buttons.createEl("button", { text: "Done", cls: "mod-cta" }).onclick = () => this.close();
       return;
     }
 
-    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
-    row.createEl("label", { text: "Occurrence" });
-    const pick = row.createEl("select", { cls: "mdse-detail-input" });
-    pick.createEl("option", { text: "Choose occurrence…", value: "" });
-    occurrenceCandidates.forEach((candidate, index) => {
-      pick.createEl("option", {
-        text: `${candidate.ownerPath} — ${candidate.kind} ${candidate.identifier} (^${candidate.localId})`,
-        value: String(index),
+    if (occurrenceCandidates.length) {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: "Local Model occurrence" });
+      const pick = row.createEl("select", { cls: "mdse-detail-input" });
+      pick.createEl("option", { text: "Choose occurrence…", value: "" });
+      occurrenceCandidates.forEach((candidate, index) => {
+        pick.createEl("option", {
+          text: `${candidate.ownerPath} — ${candidate.kind} ${candidate.identifier} (^${candidate.localId})`,
+          value: String(index),
+        });
       });
-    });
+      const review = row.createEl("button", { text: "Review occurrence migration", cls: "mod-cta" });
+      review.onclick = () => {
+        void (async () => {
+          review.disabled = true;
+          try {
+            const candidate = occurrenceCandidates[Number(pick.value)];
+            if (!candidate?.localId) throw new Error("Choose an occurrence.");
+            const migration = await this.stageMigration(
+              candidate.ownerPath,
+              candidate.localId,
+              staged.plan.replacedPath,
+              staged.plan.replacementPath,
+            );
+            this.stagedMigration = migration;
+            this.renderMigrationReview(staged, candidate, migration);
+          } catch (e) {
+            new Notice(`Cannot stage occurrence migration: ${(e as Error).message}`, 15000);
+            review.disabled = false;
+          }
+        })();
+      };
+    }
+
+    if (noteCandidates.length) {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: "Model relationship" });
+      const pick = row.createEl("select", { cls: "mdse-detail-input" });
+      pick.createEl("option", { text: "Choose relationship…", value: "" });
+      noteCandidates.forEach((candidate, index) => {
+        pick.createEl("option", {
+          text: `${candidate.ownerPath} — ${candidate.field}`,
+          value: String(index),
+        });
+      });
+      const review = row.createEl("button", { text: "Review relationship migration", cls: "mod-cta" });
+      review.onclick = () => {
+        void (async () => {
+          review.disabled = true;
+          try {
+            const candidate = noteCandidates[Number(pick.value)];
+            if (!candidate) throw new Error("Choose a model relationship.");
+            const migration = await this.stageNoteMigration(
+              candidate.ownerPath,
+              candidate.field,
+              staged.plan.replacedPath,
+              staged.plan.replacementPath,
+            );
+            this.stagedNoteMigration = migration;
+            this.renderNoteMigrationReview(staged, candidate, migration);
+          } catch (e) {
+            new Notice(`Cannot stage relationship migration: ${(e as Error).message}`, 15000);
+            review.disabled = false;
+          }
+        })();
+      };
+    }
 
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Done" }).onclick = () => this.close();
-    const review = buttons.createEl("button", { text: "Review migration", cls: "mod-cta" });
-    review.onclick = () => {
+  }
+
+  private renderNoteMigrationReview(
+    supersession: StagedDefinitionSupersession,
+    candidate: StagedDefinitionSupersession["plan"]["migrationCandidates"][number],
+    migration: StagedDefinitionNoteMigration,
+  ): void {
+    this.titleEl.setText("Review relationship migration");
+    this.contentEl.empty();
+
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: Array<[string, string]> = [
+      ["Owner", candidate.ownerPath],
+      ["Relationship", candidate.field],
+      ["From definition", supersession.plan.replacedPath],
+      ["To definition", supersession.plan.replacementPath],
+      ["Inverse field", migration.plan.inverseField ?? "none"],
+      ["Affected notes", String(migration.affectedPaths.length)],
+      ["Transaction", migration.transaction.label],
+      ["Scope", migration.transaction.scope],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    const affected = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+    affected.createEl("strong", { text: "Files changed together" });
+    for (const path of migration.affectedPaths) affected.createEl("p", { text: path });
+    affected.createEl("p", {
+      text: "Apply replaces the authored target and moves any paired or symmetric inverse relationship in the same structural transaction.",
+    });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel migration" }).onclick = () => {
+      try { this.cancelNoteMigration(migration.transaction.id); } finally {
+        this.stagedNoteMigration = null;
+        this.renderMigration(supersession);
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply relationship migration", cls: "mod-cta" });
+    apply.onclick = () => {
       void (async () => {
-        review.disabled = true;
+        apply.disabled = true;
         try {
-          const candidate = occurrenceCandidates[Number(pick.value)];
-          if (!candidate?.localId) throw new Error("Choose an occurrence.");
-          const migration = await this.stageMigration(
-            candidate.ownerPath,
-            candidate.localId,
-            staged.plan.replacedPath,
-            staged.plan.replacementPath,
-          );
-          this.stagedMigration = migration;
-          this.renderMigrationReview(staged, candidate, migration);
+          await this.applyNoteMigration(migration.transaction.id);
+          this.noteMigrationApplied = true;
+          this.stagedNoteMigration = null;
+          new Notice(`Migrated ${candidate.ownerPath} ${candidate.field} to the replacement definition.`, 6000);
+          this.close();
         } catch (e) {
-          new Notice(`Cannot stage occurrence migration: ${(e as Error).message}`, 15000);
-          review.disabled = false;
+          new Notice(`Relationship migration was not applied: ${(e as Error).message}`, 15000);
+          apply.disabled = false;
         }
       })();
     };
