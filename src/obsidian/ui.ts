@@ -6,6 +6,7 @@ import type { NewLocalRecord } from "../core/localmodel-edit";
 import type { LocalRecord } from "../core/localmodel";
 import type { StagedLocalCreate, StagedLocalDelete, StagedLocalPatch } from "../core/model-edit";
 import type { StagedDefinitionCreation } from "../core/definition-create";
+import type { StagedDefinitionDelete } from "../core/definition-delete";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -2222,3 +2223,110 @@ export class DefinitionCreateFromOccurrenceModal extends Modal {
   }
 }
 
+
+
+export class DefinitionDeleteModal extends Modal {
+  private staged: StagedDefinitionDelete | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly definitionName: string,
+    private readonly stage: () => Promise<StagedDefinitionDelete>,
+    private readonly apply: (transactionId: string) => Promise<void>,
+    private readonly cancel: (transactionId: string) => void,
+    private readonly onApplied: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText("Review definition deletion");
+    void this.load();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try { this.cancel(staged.transaction.id); } catch { /* already closed */ }
+    }
+  }
+
+  private async load(): Promise<void> {
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Checking every indexed note relationship and Local Model occurrence that may use ${this.definitionName}…`,
+    });
+    try {
+      const staged = await this.stage();
+      this.staged = staged;
+      this.renderReview(staged);
+    } catch (e) {
+      this.contentEl.empty();
+      this.contentEl.createEl("p", { cls: "mdse-warn", text: `Cannot stage deletion: ${(e as Error).message}` });
+      const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+      buttons.createEl("button", { text: "Close" }).onclick = () => this.close();
+    }
+  }
+
+  private renderReview(staged: StagedDefinitionDelete): void {
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: Array<[string, string]> = [
+      ["Definition", this.definitionName],
+      ["Path", staged.path],
+      ["UID", staged.uid],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+      ["Note-level uses", String(staged.impact.noteUseCount)],
+      ["Local Model occurrences", String(staged.impact.occurrenceUseCount)],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    if (staged.impact.allowed) {
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "Impact review passed. No active note-level or Local Model occurrence references use this definition. Apply will delete only this canonical definition note.",
+      });
+    } else {
+      const box = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      box.createEl("strong", { text: "Deletion blocked by active references" });
+      for (const blocker of staged.impact.blockers) {
+        box.createEl("p", { cls: "mdse-warn", text: blocker });
+      }
+      box.createEl("p", {
+        text: "Resolve these references through explicit model edits, retirement, or supersession. Workbench will not silently detach them.",
+      });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const apply = buttons.createEl("button", { text: "Delete definition", cls: "mod-warning" });
+    apply.disabled = !staged.impact.allowed;
+    apply.setAttr("title", staged.impact.allowed
+      ? "Delete this definition. Apply will recheck impact and file contents before mutation."
+      : "Deletion is blocked while active references remain.");
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied();
+          new Notice(`Deleted reusable definition ${this.definitionName}.`, 6000);
+        } catch (e) {
+          new Notice(`Definition was not deleted: ${(e as Error).message}`, 15000);
+          apply.disabled = !staged.impact.allowed;
+        }
+      })();
+    };
+  }
+}
