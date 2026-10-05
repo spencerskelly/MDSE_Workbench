@@ -26,12 +26,7 @@ paired:
 - {forward: realizedBy, inverse: realizes, from: [Use Case], to: [Behavior, Condition]}
 - {forward: optionOf, inverse: hasOption, from: [Use Case], to: [Use Case]}
 - {forward: affects, inverse: affectedBy, from: [Issue, Failure Mode, Use Case], to: any}
-temporaryPairs:
-- forward: hasClassifier
-  inverse: classifierOf
-  from: [Port, Object]
-  to: [Object, Item Flow]
-  meaning: 'The element named by the EA Classifier field of a Port, or by the PDATA1 typing link of a Port when the target is not a Port note (a Hardware Component or a Signal). Written by the translator on the Port note; inverse generated. Temporary (W-125, W-127): kept to keep the import clean and resolved in a later stage into copyOf/hasCopy or another relationship, then removed.'
+temporaryPairs: []
 symmetric:
 - field: conflictsWith
   between: any
