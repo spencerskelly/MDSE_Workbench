@@ -84,3 +84,24 @@ test("definition deletion participates in undo and guarded redo", async()=>{
   await assert.rejects(tx.redo(),/active references/);
   assert.equal(await store.exists(path),true);
 });
+
+
+test("definition deletion remains blocked by supersession provenance", async()=>{
+  const store=new MemoryDeleteStore(); store.files.set(path,text);
+  const tx=new TransactionManager();
+  const impact:DefinitionDeletionImpact={
+    definitionPath:path,
+    noteUses:[{fromPath:"30_Objects/New Contactor.md",field:"supersedes"}],
+    occurrenceUses:[],
+  };
+  const service=new DefinitionDeletionService(store,async()=>impact,tx);
+
+  const staged=await service.stageAndReview(path,uid);
+  assert.equal(staged.impact.allowed,false);
+  assert.equal(staged.impact.noteUseCount,1);
+  assert.match(staged.impact.blockers[0] ?? "",/supersedes/);
+  await assert.rejects(service.apply(staged.transaction.id),/active reference/);
+  assert.equal(await store.exists(path),true);
+  assert.equal(tx.history().length,0);
+  service.cancel(staged.transaction.id);
+});
