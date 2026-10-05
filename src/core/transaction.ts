@@ -2,7 +2,7 @@ import type { ModelRef } from "./localmodel";
 
 export type EditScope = "atomic" | "structural";
 export type EditSeverity = "error" | "warning";
-export type TransactionStatus = "draft" | "applied" | "cancelled";
+export type TransactionStatus = "draft" | "reviewed" | "applied" | "cancelled";
 
 export interface EditIssue {
   code: string;
@@ -110,19 +110,23 @@ export class TransactionManager {
   }
 
   review(transactionId: string): EditTransaction {
-    const tx = this.require(transactionId);
-    if (tx.status === "draft") tx.issues = this.validate(tx);
+    const tx = this.requireDraft(transactionId);
+    tx.issues = this.validate(tx);
+    tx.status = "reviewed";
     return this.snapshot(tx);
   }
 
   canApply(transactionId: string): boolean {
-    const tx = this.requireDraft(transactionId);
+    const tx = this.requireOpen(transactionId);
     tx.issues = this.validate(tx);
-    return !tx.issues.some(isBlocking);
+    return (tx.scope === "atomic" || tx.status === "reviewed") && !tx.issues.some(isBlocking);
   }
 
   async apply(transactionId: string, executor: EditExecutor): Promise<SemanticHistoryEntry> {
-    const tx = this.requireDraft(transactionId);
+    const tx = this.requireOpen(transactionId);
+    if (tx.scope === "structural" && tx.status !== "reviewed") {
+      throw new Error(`Structural transaction ${tx.label} must be reviewed before Apply.`);
+    }
     tx.issues = this.validate(tx);
     const blocking = tx.issues.filter(isBlocking);
     if (blocking.length) throw new Error(`Transaction ${tx.label} has ${blocking.length} blocking validation issue${blocking.length === 1 ? "" : "s"}.`);
@@ -146,7 +150,7 @@ export class TransactionManager {
   }
 
   cancel(transactionId: string): EditTransaction {
-    const tx = this.requireDraft(transactionId);
+    const tx = this.requireOpen(transactionId);
     tx.status = "cancelled";
     this.drafts.delete(transactionId);
     return this.snapshot(tx);
@@ -223,6 +227,14 @@ export class TransactionManager {
   private requireDraft(id: string): EditTransaction {
     const tx = this.require(id);
     if (tx.status !== "draft") throw new Error(`Transaction ${id} is ${tx.status}, not draft.`);
+    return tx;
+  }
+
+  private requireOpen(id: string): EditTransaction {
+    const tx = this.require(id);
+    if (tx.status !== "draft" && tx.status !== "reviewed") {
+      throw new Error(`Transaction ${id} is ${tx.status}, not open.`);
+    }
     return tx;
   }
 
