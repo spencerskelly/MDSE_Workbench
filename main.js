@@ -6053,6 +6053,108 @@ var LocalConnectionDefinitionEditModal = class extends import_obsidian3.Modal {
     })();
   }
 };
+var LocalPartDefinitionEditModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, part, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.part = part;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.titleEl.setText("Edit part definition");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Change only the reusable definition link for ${this.part.identifier}. Part identity, usage, multiplicity, and attached endpoints remain unchanged.` });
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Reusable definition" });
+    const input = row.createEl("input", {
+      type: "text",
+      cls: "mdse-detail-input",
+      value: this.part.definition?.text ?? ""
+    });
+    input.setAttr("placeholder", "[[Main Contactor]]");
+    input.onkeydown = (e) => e.stopPropagation();
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const value = input.value.trim();
+        if (!value) throw new Error("Part occurrences require a reusable definition.");
+        const staged = await this.stage(value);
+        this.staged = staged;
+        this.renderReview(staged, value);
+      } catch (e) {
+        new import_obsidian3.Notice(`Cannot stage part definition edit: ${e.message}`, 12e3);
+        review.disabled = false;
+      }
+    })();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  renderReview(staged, value) {
+    this.titleEl.setText("Review part definition edit");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Part", this.part.identifier],
+      ["New definition", value],
+      ["Usage", this.part.usage],
+      ["Multiplicity", this.part.multiplicity ?? "none"],
+      ["Attached endpoints", "preserved"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope]
+    ];
+    for (const [key2, val] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: val });
+    }
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    for (const finding of staged.plan.findings) {
+      this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : void 0 });
+    }
+    if (!staged.plan.findings.length) this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will change only the part definition field." });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new import_obsidian3.Notice(`Updated definition for part ${this.part.identifier}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -6336,6 +6438,8 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       addPart.onclick = () => this.createPartOccurrence(file);
     }
     if (this.editing && record.kind === "part") {
+      const definition = head.createEl("button", { text: "Change definition\u2026", cls: "mdse-detail-btn" });
+      definition.onclick = () => this.editPartDefinition(file, record);
       const addEndpoint = head.createEl("button", { text: "Add endpoint\u2026", cls: "mdse-detail-btn" });
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
     }
@@ -6601,6 +6705,29 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       ).open();
     } catch (e) {
       new import_obsidian4.Notice(`Cannot reassign endpoint part: ${e.message}`, 12e3);
+    }
+  }
+  editPartDefinition(file, part) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalPartDefinitionEditModal(
+        this.app,
+        file.basename,
+        part,
+        (definition) => editor.stageLocalRecordPatch(file.path, part.localId, {
+          fields: { definition }
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => {
+          editor.cancelLocalPatch(transactionId);
+        },
+        () => {
+          void this.refreshLocal(file, part.localId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot edit part definition: ${e.message}`, 12e3);
     }
   }
   editConnectionDefinition(file, connection) {
