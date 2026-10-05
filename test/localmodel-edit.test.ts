@@ -95,6 +95,17 @@ test("schema 0.1 is read-compatible but structured edits are refused", () => {
   assert.throws(() => planLocalRecordPatch(note("0.1"), "part-" + tokenA, { fields: { identifier: "X" } }), /read-only/);
 });
 
+test("schema 0.2 remains editable and schema 0.3 allows a definitionless endpoint", () => {
+  const oldEdit = planLocalRecordPatch(note("0.2"), "part-" + tokenA, { fields: { identifier: "K1-OLD" } });
+  assert.match(oldEdit.after, /schema=0\.2/);
+
+  const endpointId = "ep-" + tokenC;
+  const current = planLocalRecordPatch(note("0.3"), endpointId, { fields: { definition: null } });
+  const record = parseLocalModel(current.after)?.records.find((r) => r.localId === endpointId);
+  assert.equal(record?.definition, null);
+  assert.ok(!(parseLocalModel(current.after)?.findings ?? []).some((x) => x.localId === endpointId && x.code === "record.missing-definition"));
+});
+
 test("unknown fields are not introduced by a patch", () => {
   assert.throws(
     () => planLocalRecordPatch(note(), "part-" + tokenA, { fields: { notAField: "x" } }),
@@ -127,7 +138,7 @@ test("creates a first governed region using importer-compatible section formatti
     heading: "K1",
     fields: { definition: "[[Main Contactor]]", identifier: "K1", usage: "standard" },
   });
-  assert.match(result.after, /## Local Model\n<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->/);
+  assert.match(result.after, /## Local Model\n<!-- MDSE:LOCAL-MODEL START schema=0\.3 -->/);
   assert.match(result.after, /### Part Occurrences\n\n#### K1\n- definition: \[\[Main Contactor\]\]\n- identifier: K1\n\^part-/);
   assert.doesNotMatch(result.after, /- usage: standard/);
   assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === id)?.kind, "part");
