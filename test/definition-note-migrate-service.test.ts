@@ -133,3 +133,62 @@ custom:
   assert.doesNotMatch(oldAfter,/Charger/);
   assert.match(newAfter,/Charger/);
 });
+
+
+test("note migration moves a paired relationship authored through the inverse field",async()=>{
+  const inverseOwner="30_Objects/Contactor.md";
+  const oldSystem="10_Systems/Old Charger.md";
+  const newSystem="10_Systems/New Charger.md";
+  const inverseOwnerText=`---
+type: Object
+uid: 20261005061500010skellyspencer
+partOf:
+  - "[[10_Systems/Old Charger]]"
+---
+
+# Contactor
+`;
+  const oldSystemText=`---
+type: Object
+uid: 20261005061500011skellyspencer
+hasPart:
+  - "[[30_Objects/Contactor]]"
+---
+
+# Old Charger
+`;
+  const newSystemText=`---
+type: Object
+uid: 20261005061500012skellyspencer
+---
+
+# New Charger
+`;
+  const localResolve=(target:string)=>{
+    if(target==="10_Systems/Old Charger") return oldSystem;
+    if(target==="10_Systems/New Charger") return newSystem;
+    if(target==="30_Objects/Contactor") return inverseOwner;
+    return target.endsWith(".md")?target:target+".md";
+  };
+  const store=new MemoryStore();
+  store.files.set(inverseOwner,inverseOwnerText);
+  store.files.set(oldSystem,oldSystemText);
+  store.files.set(newSystem,newSystemText);
+  const service=new DefinitionNoteMigrationService(
+    store,(target)=>localResolve(target),(target)=>target.replace(/\.md$/,""),new TransactionManager(),
+  );
+  const staged=await service.stageAndReview({
+    ownerPath:inverseOwner,
+    field:"partOf",
+    replacedPath:oldSystem,
+    replacementPath:newSystem,
+    relationship:rel,
+  });
+  assert.equal(staged.plan.authoredAsInverse,true);
+  await service.apply(staged.transaction.id);
+  assert.match(await store.read(inverseOwner),/New Charger/);
+  assert.doesNotMatch(await store.read(inverseOwner),/Old Charger/);
+  assert.doesNotMatch(await store.read(oldSystem),/Contactor/);
+  assert.match(await store.read(newSystem),/hasPart:/);
+  assert.match(await store.read(newSystem),/Contactor/);
+});
