@@ -2470,6 +2470,7 @@ export class DefinitionSupersedeModal extends Modal {
     private readonly applyNoteMigration: (transactionId: string) => Promise<void>,
     private readonly cancelNoteMigration: (transactionId: string) => void,
     private readonly refreshMigrationCandidates: (replacedPath: string) => Promise<DefinitionMigrationCandidate[]>,
+    private readonly onRetireReplaced: () => void,
     private readonly onApplied: () => void,
   ) {
     super(app);
@@ -2627,9 +2628,20 @@ export class DefinitionSupersedeModal extends Modal {
     });
 
     if (!occurrenceCandidates.length && !noteCandidates.length) {
-      this.contentEl.createEl("p", { cls: "mdse-muted", text: "There are no remaining dependents to migrate." });
+      this.titleEl.setText("Supersession migration complete");
+      this.contentEl.createEl("p", {
+        text: "Supersession is recorded and there are no remaining dependents using the replaced definition.",
+      });
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "The replaced definition is still preserved. Retirement is a separate governed lifecycle change and is never applied automatically.",
+      });
       const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
-      buttons.createEl("button", { text: "Done", cls: "mod-cta" }).onclick = () => this.close();
+      buttons.createEl("button", { text: "Done" }).onclick = () => this.close();
+      buttons.createEl("button", { text: "Review retirement…", cls: "mod-cta" }).onclick = () => {
+        this.close();
+        this.onRetireReplaced();
+      };
       return;
     }
 
