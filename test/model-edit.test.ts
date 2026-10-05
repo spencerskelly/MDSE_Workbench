@@ -2265,3 +2265,34 @@ test("staged Local Model patch refuses stale indexed owner UID", async () => {
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged Local Model patch semantic guard runs at Apply and Redo", async () => {
+  const endpointId = "ep-20261005004000002skellyspencer";
+  const targetPartId = "part-20261005004000001skellyspencer";
+  const original = noteWithReassignableEndpoint();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  let identityValid = true;
+  let checks = 0;
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalRecordPatch(
+    "Assembly.md",
+    endpointId,
+    { fields: { part: "[[#^" + targetPartId + "|K2]]" } },
+    async () => {
+      checks += 1;
+      if (!identityValid) throw new Error("definition identity changed");
+    },
+  );
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.equal(checks,1);
+  await transactions.undo();
+
+  identityValid = false;
+  await assert.rejects(transactions.redo(),/definition identity changed/);
+  assert.equal(store.text,original);
+  assert.equal(checks,2);
+});
