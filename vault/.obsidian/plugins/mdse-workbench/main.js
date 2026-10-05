@@ -6445,6 +6445,121 @@ var LocalFlowDefinitionEditModal = class extends import_obsidian3.Modal {
     })();
   }
 };
+var _LocalFlowRolesEditModal = class _LocalFlowRolesEditModal extends import_obsidian3.Modal {
+  constructor(app, ownerName, flow, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.flow = flow;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.titleEl.setText("Edit flow endpoint roles");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Change the Endpoint A/B roles for ${this.flow.identifier}. Flow identity, reusable definition, and owning connection remain unchanged.`
+    });
+    const select = (label, current) => {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: label });
+      const pick = row.createEl("select", { cls: "mdse-detail-input" });
+      for (const role of _LocalFlowRolesEditModal.roles) {
+        const option = pick.createEl("option", { text: role, value: role });
+        if (role === current) option.selected = true;
+      }
+      return pick;
+    };
+    const roleA = select("Endpoint A role", this.flow.roleA);
+    const roleB = select("Endpoint B role", this.flow.roleB);
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const staged = await this.stage(roleA.value, roleB.value);
+        this.staged = staged;
+        this.renderReview(staged, roleA.value, roleB.value);
+      } catch (e) {
+        new import_obsidian3.Notice(`Cannot stage flow role edit: ${e.message}`, 12e3);
+        review.disabled = false;
+      }
+    })();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  renderReview(staged, roleA, roleB) {
+    this.titleEl.setText("Review flow endpoint-role edit");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Flow", this.flow.identifier],
+      ["Reusable definition", this.flow.definition?.text ?? "none"],
+      ["Owning connection", this.flow.connectionId ?? "none"],
+      ["Endpoint A role", `${this.flow.roleA ?? "none"} \u2192 ${roleA}`],
+      ["Endpoint B role", `${this.flow.roleB ?? "none"} \u2192 ${roleB}`],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope]
+    ];
+    for (const [key2, val] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: val });
+    }
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    for (const finding of staged.plan.findings) {
+      this.contentEl.createEl("p", {
+        text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+        cls: finding.severity === "error" ? "mdse-warn" : void 0
+      });
+    }
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "Validation passed. Apply will change only the two governed flow endpoint-role fields."
+      });
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new import_obsidian3.Notice(`Updated endpoint roles for flow ${this.flow.identifier}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
+_LocalFlowRolesEditModal.roles = ["transmit", "receive", "exchange", "unspecified"];
+var LocalFlowRolesEditModal = _LocalFlowRolesEditModal;
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -6790,6 +6905,8 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     if (this.editing && record.kind === "flow") {
       const definition = head.createEl("button", { text: "Change definition\u2026", cls: "mdse-detail-btn" });
       definition.onclick = () => this.editFlowDefinition(file, record);
+      const roles = head.createEl("button", { text: "Change endpoint roles\u2026", cls: "mdse-detail-btn" });
+      roles.onclick = () => this.editFlowRoles(file, record);
     }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
@@ -6867,13 +6984,8 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     }
     row("Connection", record.connectionId ?? "");
     if (record.kind === "flow") {
-      if (this.editing) {
-        editRow("Endpoint A role", record.roleA ?? "", (value) => ({ fields: { endpointA: value } }));
-        editRow("Endpoint B role", record.roleB ?? "", (value) => ({ fields: { endpointB: value } }));
-      } else {
-        row("Endpoint A role", record.roleA ?? "");
-        row("Endpoint B role", record.roleB ?? "");
-      }
+      row("Endpoint A role", record.roleA ?? "");
+      row("Endpoint B role", record.roleB ?? "");
     }
     root.createEl("p", {
       cls: "mdse-muted",
@@ -7018,6 +7130,32 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       ).open();
     } catch (e) {
       new import_obsidian4.Notice(`Cannot reassign endpoint part: ${e.message}`, 12e3);
+    }
+  }
+  editFlowRoles(file, flow) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalFlowRolesEditModal(
+        this.app,
+        file.basename,
+        flow,
+        (roleA, roleB) => editor.stageAndReviewLocalRecordPatch(file.path, flow.localId, {
+          fields: {
+            endpointA: roleA,
+            endpointB: roleB
+          }
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => {
+          editor.cancelLocalPatch(transactionId);
+        },
+        () => {
+          void this.refreshLocal(file, flow.localId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot edit flow endpoint roles: ${e.message}`, 12e3);
     }
   }
   editFlowDefinition(file, flow) {
