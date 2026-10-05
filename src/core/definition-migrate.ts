@@ -1,3 +1,4 @@
+import { parseDocument } from "yaml";
 export interface DefinitionOccurrenceMigrationRequest {
   ownerPath: string;
   localId: string;
@@ -46,4 +47,18 @@ export function planDefinitionOccurrenceMigration(
     replacementPath,
     definitionLink: `[[${replacementPath.replace(/\.md$/i, "")}]]`,
   };
+}
+
+
+export function assertDefinitionSourceUid(text: string, path: string, expectedUid: string): void {
+  const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
+  if (!match) throw new Error(`${path} must begin with YAML frontmatter.`);
+  const doc = parseDocument(match[1]);
+  if (doc.errors.length) throw new Error(`${path} frontmatter is invalid YAML.`);
+  const sourceUid = String(doc.get("uid") ?? "").trim();
+  if (!sourceUid || sourceUid !== expectedUid) {
+    throw new Error(
+      `${path} identity changed; expected uid ${expectedUid}, found ${sourceUid || "none"}. Reopen supersession migration review.`,
+    );
+  }
 }
