@@ -1198,7 +1198,7 @@ var ModelEditService = class {
     }
     return { changed: true, plan };
   }
-  async stageLocalRecordPatch(path, localId, patch) {
+  async stageLocalRecordPatch(path, localId, patch, semanticGuard) {
     const before = await this.store.read(path);
     const plan = planLocalRecordPatch(before, localId, patch, { allowInvalidTarget: true });
     if (!plan.changed) throw new Error("This structural edit would not change the Local Model.");
@@ -1217,11 +1217,11 @@ var ModelEditService = class {
         metadata: { path, localId, localKind: plan.kind }
       }]
     });
-    this.pendingPatches.set(txId, { path, plan, label });
+    this.pendingPatches.set(txId, { path, plan, label, semanticGuard });
     return { transaction, plan, path };
   }
-  async stageAndReviewLocalRecordPatch(path, localId, patch) {
-    const staged = await this.stageLocalRecordPatch(path, localId, patch);
+  async stageAndReviewLocalRecordPatch(path, localId, patch, semanticGuard) {
+    const staged = await this.stageLocalRecordPatch(path, localId, patch, semanticGuard);
     return this.reviewLocalPatch(staged.transaction.id);
   }
   async stageAndReviewLocalFlowMove(path, flowId, connectionId) {
@@ -1266,7 +1266,13 @@ var ModelEditService = class {
       );
     }
     await this.transactions.apply(transactionId, {
-      apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label)
+      apply: async () => this.applyGuarded(
+        pending.path,
+        pending.plan.before,
+        pending.plan.after,
+        pending.label,
+        pending.semanticGuard
+      )
     });
     this.pendingPatches.delete(transactionId);
   }
@@ -1416,7 +1422,8 @@ var ModelEditService = class {
     if (!pending) throw new Error(`Structural Local Model delete transaction ${transactionId} does not exist.`);
     return pending;
   }
-  async applyGuarded(path, before, after, label) {
+  async applyGuarded(path, before, after, label, semanticGuard) {
+    if (semanticGuard) await semanticGuard();
     const current = await this.store.read(path);
     if (current !== before) {
       throw new Error(`${path} changed while "${label}" was being prepared. Reopen the context and try again.`);
@@ -1429,6 +1436,7 @@ var ModelEditService = class {
         await this.store.write(path, before);
       },
       redo: async () => {
+        if (semanticGuard) await semanticGuard();
         const latest = await this.store.read(path);
         if (latest !== before) throw new Error(`${path} changed after undoing "${label}".`);
         await this.store.write(path, after);
@@ -17002,7 +17010,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays; lifecycle impact queries scan both forward- and inverse-authored governed relationships rather than only forward graph edges; supersession relationship writes also fail closed when any existing relationship target cannot be semantically resolved; shared governed relationship removal keeps frontmatter sparse by deleting a relationship property when its final target is removed; when supersession migration reaches zero remaining engineering dependents, the UI marks migration complete and may hand off to a separate governed retirement review without auto-retiring the replaced definition; lifecycle provenance relationships (supersedes/supersededBy) remain impact evidence but are excluded from migration candidates; retirement Apply revalidates the complete reviewed impact inventory and refuses stale evidence; destructive deletion keeps lifecycle provenance authoritative, so a superseded definition remains blocked from deletion while any supersedes/supersededBy reference still points to it; retirement redo also revalidates the reviewed dependency inventory so semantic history cannot reapply retirement after new dependents appear; supersession redo likewise revalidates the reviewed dependency inventory before restoring the paired lifecycle relationships; deletion redo also treats newly appeared lifecycle provenance as an active reference and refuses destructive replay; supersession undo relies on the unified chronological semantic-history stack, so newer migration edits must be undone before the supersession relationship pair can be removed; note-level paired relationship migration undo is atomic across all affected files and rolls back partial reverts on write failure; redo is likewise atomic and restores earlier files to the pre-redo state if a later paired-file write fails. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays; lifecycle impact queries scan both forward- and inverse-authored governed relationships rather than only forward graph edges; supersession relationship writes also fail closed when any existing relationship target cannot be semantically resolved; shared governed relationship removal keeps frontmatter sparse by deleting a relationship property when its final target is removed; when supersession migration reaches zero remaining engineering dependents, the UI marks migration complete and may hand off to a separate governed retirement review without auto-retiring the replaced definition; lifecycle provenance relationships (supersedes/supersededBy) remain impact evidence but are excluded from migration candidates; retirement Apply revalidates the complete reviewed impact inventory and refuses stale evidence; destructive deletion keeps lifecycle provenance authoritative, so a superseded definition remains blocked from deletion while any supersedes/supersededBy reference still points to it; retirement redo also revalidates the reviewed dependency inventory so semantic history cannot reapply retirement after new dependents appear; supersession redo likewise revalidates the reviewed dependency inventory before restoring the paired lifecycle relationships; deletion redo also treats newly appeared lifecycle provenance as an active reference and refuses destructive replay; supersession undo relies on the unified chronological semantic-history stack, so newer migration edits must be undone before the supersession relationship pair can be removed; note-level paired relationship migration undo is atomic across all affected files and rolls back partial reverts on write failure; redo is likewise atomic and restores earlier files to the pre-redo state if a later paired-file write fails; guided occurrence migration carries a target-validity semantic guard so Apply and Redo refuse a missing replacement definition even when the owner note is otherwise unchanged. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
@@ -17337,9 +17345,20 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
       replacedPath: (0, import_obsidian8.normalizePath)(replacedPath),
       replacementPath: (0, import_obsidian8.normalizePath)(replacementPath)
     });
-    return editor.stageAndReviewLocalRecordPatch(normalizedOwner, localId, {
-      fields: { definition: plan.definitionLink }
-    });
+    const normalizedReplacement = (0, import_obsidian8.normalizePath)(replacementPath);
+    const replacementFile = this.app.vault.getAbstractFileByPath(normalizedReplacement);
+    if (!(replacementFile instanceof import_obsidian8.TFile)) throw new Error(`${normalizedReplacement} no longer exists.`);
+    return editor.stageAndReviewLocalRecordPatch(
+      normalizedOwner,
+      localId,
+      { fields: { definition: plan.definitionLink } },
+      async () => {
+        const currentReplacement = this.app.vault.getAbstractFileByPath(normalizedReplacement);
+        if (!(currentReplacement instanceof import_obsidian8.TFile)) {
+          throw new Error(`${normalizedReplacement} no longer exists; reopen supersession migration review.`);
+        }
+      }
+    );
   }
   async definitionSupersessionMigrationCandidates(replacedPath) {
     const impact = await this.definitionDeletionImpact((0, import_obsidian8.normalizePath)(replacedPath));
