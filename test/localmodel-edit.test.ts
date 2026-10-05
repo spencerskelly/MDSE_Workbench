@@ -828,3 +828,107 @@ test("endpoint parent reassignment surfaces a missing target as blocking validat
     finding.severity === "error"
   ));
 });
+
+
+test("plans adding one endpoint exposure while preserving existing exposure links", () => {
+  const sourceId = "ep-20261005007000000skellyspencer";
+  const existingId = "ep-20261005007000001skellyspencer";
+  const addId = "ep-20261005007000002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### Boundary",
+    "- definition: [[CAN Port]]",
+    "- exposes: [[#^" + existingId + "|J1]] [[External#^ep-20261005007000009skellyspencer|Remote]]",
+    "^" + sourceId,
+    "",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + existingId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + addId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    sourceId,
+    { fields: { exposes: "[[#^" + existingId + "|J1]] [[External#^ep-20261005007000009skellyspencer|Remote]] [[#^" + addId + "|J2]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
+  assert.deepEqual(source?.exposes.map((link) => [link.target, link.blockId]), [
+    ["", existingId],
+    ["External", "ep-20261005007000009skellyspencer"],
+    ["", addId],
+  ]);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("plans removing one endpoint exposure without changing other exposures", () => {
+  const sourceId = "ep-20261005007100000skellyspencer";
+  const removeId = "ep-20261005007100001skellyspencer";
+  const keepId = "ep-20261005007100002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### Boundary",
+    "- definition: [[CAN Port]]",
+    "- exposes: [[#^" + removeId + "|J1]] [[#^" + keepId + "|J2]]",
+    "^" + sourceId,
+    "",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + removeId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + keepId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    sourceId,
+    { fields: { exposes: "[[#^" + keepId + "|J2]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
+  assert.deepEqual(source?.exposes.map((link) => link.blockId), [keepId]);
+});
+
+test("endpoint exposes edit surfaces a missing same-note target as blocking validation", () => {
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordPatch(
+    note(),
+    endpointId,
+    { fields: { exposes: "[[#^ep-20261005007200099skellyspencer|Missing]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === endpointId &&
+    finding.code === "ref.local-missing" &&
+    finding.severity === "error"
+  ));
+});
