@@ -234,7 +234,7 @@ export class NoteDetailPanel extends Component {
       const connect = head.createEl("button", { text: "Connect to endpoint…", cls: "mdse-detail-btn" });
       connect.onclick = () => { void this.createConnectionOccurrence(file, record); };
     }
-    if (this.editing && (record.kind === "part" || record.kind === "endpoint")) {
+    if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
     }
@@ -386,7 +386,7 @@ export class NoteDetailPanel extends Component {
   }
 
   private deleteOccurrence(file: TFile, record: LocalRecord): void {
-    if (record.kind !== "part" && record.kind !== "endpoint") return;
+    if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection") return;
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
