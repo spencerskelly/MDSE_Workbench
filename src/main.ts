@@ -1238,6 +1238,7 @@ export default class MdseWorkbench extends Plugin {
         },
         (uid) => this.definitionUidInUse(uid),
         this.transactions,
+        (path) => this.definitionDeletionImpact(path),
       );
       this.definitionDeleter = new DefinitionDeletionService(
         {
