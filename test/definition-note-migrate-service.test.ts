@@ -42,7 +42,10 @@ test("note migration Apply moves paired relationship and supports undo redo",asy
   await service.apply(staged.transaction.id);
   assert.match(await store.read(owner),/New Contactor/);
   assert.doesNotMatch(await store.read(owner),/Old Contactor/);
-  assert.doesNotMatch(await store.read(oldPath),/Charger/);
+  const oldAfter=await store.read(oldPath);
+  assert.doesNotMatch(oldAfter,/Charger/);
+  assert.doesNotMatch(oldAfter,/partOf:/);
+  assert.doesNotMatch(oldAfter,/partOf:\s*\[\]/);
   assert.match(await store.read(newPath),/partOf:/);
   assert.match(await store.read(newPath),/Charger/);
   assert.equal(tx.history().length,1);
@@ -220,4 +223,34 @@ test("note migration refuses an already-present replacement inverse instead of d
   assert.equal(await store.read(owner),ownerText);
   assert.equal(await store.read(oldPath),oldText);
   assert.equal(await store.read(newPath),alreadyLinkedNew);
+});
+
+
+test("note migration removes an emptied inverse property without disturbing adjacent YAML",async()=>{
+  const oldWithAdjacent=`---
+type: Object
+uid: 20261005061500001skellyspencer
+# relationship comment belongs to the property below
+partOf:
+  - "[[10_Systems/Charger]]"
+custom: 'keep me'
+---
+
+# Old
+`;
+  const store=new MemoryStore();
+  store.files.set(owner,ownerText);
+  store.files.set(oldPath,oldWithAdjacent);
+  store.files.set(newPath,newText);
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,new TransactionManager());
+  const staged=await service.stageAndReview({
+    ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel,
+  });
+  await service.apply(staged.transaction.id);
+  const after=await store.read(oldPath);
+  assert.doesNotMatch(after,/^partOf:/m);
+  assert.doesNotMatch(after,/partOf:\s*\[\]/);
+  assert.ok(after.includes("# relationship comment belongs to the property below"));
+  assert.ok(after.includes("custom: 'keep me'"));
+  assert.ok(after.endsWith("\n# Old\n"));
 });
