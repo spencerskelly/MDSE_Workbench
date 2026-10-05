@@ -2045,6 +2045,7 @@ export class DefinitionCreateFromOccurrenceModal extends Modal {
     private readonly stageDefinition: (name: string, path: string) => StagedDefinitionCreation,
     private readonly applyDefinition: (transactionId: string) => Promise<void>,
     private readonly cancelDefinition: (transactionId: string) => void,
+    private readonly rollbackDefinition: (transactionId: string) => Promise<void>,
     private readonly stageBinding: (definitionPath: string) => Promise<StagedLocalPatch>,
     private readonly applyBinding: (transactionId: string) => Promise<void>,
     private readonly cancelBinding: (transactionId: string) => void,
@@ -2184,10 +2185,33 @@ export class DefinitionCreateFromOccurrenceModal extends Modal {
         } catch (e) {
           if (this.definitionApplied && !this.bindingApplied) {
             new Notice(`Definition was created, but the reviewed occurrence binding was refused: ${(e as Error).message}`, 15000);
-            this.contentEl.createEl("p", {
+            const recovery = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+            recovery.createEl("p", {
               cls: "mdse-warn",
-              text: "The reusable definition now exists. The staged binding was not applied, so no dangling reference was created. Close and reopen the occurrence before trying to bind again.",
+              text: "The reusable definition exists, but the occurrence binding was not applied. You can keep the reusable definition, or roll back only that definition creation if no newer semantic edit has occurred.",
             });
+            const recoveryButtons = recovery.createDiv({ cls: "modal-button-container" });
+            const keep = recoveryButtons.createEl("button", { text: "Keep definition" });
+            keep.onclick = () => this.close();
+            const rollback = recoveryButtons.createEl("button", { text: "Roll back definition", cls: "mod-warning" });
+            rollback.onclick = () => {
+              void (async () => {
+                rollback.disabled = true;
+                try {
+                  if (this.stagedBinding) {
+                    try { this.cancelBinding(this.stagedBinding.transaction.id); } catch { /* already closed */ }
+                    this.stagedBinding = null;
+                  }
+                  await this.rollbackDefinition(definition.transaction.id);
+                  this.definitionApplied = false;
+                  this.close();
+                  new Notice(`Rolled back reusable definition ${definition.plan.name}.`, 6000);
+                } catch (rollbackError) {
+                  new Notice(`Definition rollback was refused: ${(rollbackError as Error).message}`, 15000);
+                  rollback.disabled = false;
+                }
+              })();
+            };
           } else {
             new Notice(`Definition workflow was not applied: ${(e as Error).message}`, 15000);
             apply.disabled = bindingBlocking.length > 0;
