@@ -166,3 +166,17 @@ test("definition retirement redo refuses changed impact evidence after undo",asy
   await assert.rejects(tx.redo(),/dependent usage changed after Review/);
   assert.equal(await store.read(path),active);
 });
+
+
+test("definition retirement refuses staging when caller UID does not match source definition",async()=>{
+  const store=new MemoryRetirementStore(); store.files.set(path,active);
+  const tx=new TransactionManager();
+  const service=new DefinitionRetirementService(store,async()=>impact,tx);
+
+  await assert.rejects(
+    service.stageAndReview(path,"20261005060500001skellyspencer"),
+    /expected uid .* found/,
+  );
+  assert.equal(await store.read(path),active);
+  assert.equal(tx.history().length,0);
+});
