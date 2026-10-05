@@ -171,13 +171,21 @@ export function planLocalRecordDelete(text: string, localId: string): PlannedLoc
   const editable = editableLocalRegion(text);
   const record = editable.region.records.find((candidate) => candidate.localId === localId);
   if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
-  if (record.kind !== "part" && record.kind !== "endpoint") {
-    throw new Error("This deletion slice supports part and endpoint occurrences only.");
+  if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection") {
+    throw new Error("This deletion slice supports part, endpoint and connection occurrences only.");
   }
 
   const impacts: LocalDeleteImpact[] = [];
   for (const source of editable.region.records) {
     if (source.localId === localId) continue;
+    if (record.kind === "connection" && source.kind === "flow" && source.connectionId === localId) {
+      impacts.push({
+        sourceLocalId: source.localId,
+        sourceKind: source.kind,
+        sourceIdentifier: source.identifier,
+        field: "connection",
+      });
+    }
     for (const [field, value] of source.fields) {
       for (const link of parseLinks(value)) {
         if (!link.target && link.blockId === localId) {
