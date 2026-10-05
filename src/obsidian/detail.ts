@@ -160,10 +160,13 @@ export class NoteDetailPanel extends Component {
       if (f instanceof TFile) void this.show(f, false);
     };
     head.createDiv({ cls: "mdse-detail-title", text: file.basename }).setAttr("title", file.path);
-    if (this.definitionReturn?.definitionPath === file.path) {
+    const modelType = typeof fm?.type === "string" && this.host.schema()?.classNames.has(fm.type) ? fm.type : null;
+    if (modelType) {
       const impact = head.createEl("button", { text: "Review impact", cls: "mdse-detail-btn" });
-      impact.setAttr("title", "Review note-level and occurrence-level uses of this reusable definition before changing it.");
+      impact.setAttr("title", "Review note-level and occurrence-level uses before changing this canonical model definition.");
       impact.onclick = () => { void this.reviewDefinitionImpact(file); };
+    }
+    if (this.definitionReturn?.definitionPath === file.path) {
       const returnToOccurrence = head.createEl("button", { text: "Back to occurrence", cls: "mdse-detail-btn" });
       returnToOccurrence.setAttr("title", "Return to the contextual Local Model occurrence without changing its storage.");
       returnToOccurrence.onclick = () => { void this.returnToOccurrence(); };
@@ -238,7 +241,7 @@ export class NoteDetailPanel extends Component {
         }).open();
         return;
       }
-      if (!this.editing && this.definitionReturn?.definitionPath === file.path) {
+      if (!this.editing && modelType) {
         void this.enterDefinitionEdit(file);
         return;
       }
@@ -589,7 +592,6 @@ export class NoteDetailPanel extends Component {
    * immediately before Apply rather than only when edit mode was entered.
    */
   private async ensureDefinitionImpactReviewed(file: TFile): Promise<boolean> {
-    if (!this.definitionEditFromOccurrence(file)) return true;
     const impact = await this.host.definitionImpact(file.path);
     if (impact.notes + impact.occurrences === 0) return true;
     if (this.definitionImpactReviewedPath === file.path) return true;
@@ -601,7 +603,7 @@ export class NoteDetailPanel extends Component {
   }
 
   private consumeDefinitionImpactReview(file: TFile): void {
-    if (this.definitionEditFromOccurrence(file)) this.definitionImpactReviewedPath = null;
+    if (this.definitionImpactReviewedPath === file.path) this.definitionImpactReviewedPath = null;
   }
 
   private async reviewDefinitionImpact(file: TFile): Promise<void> {
