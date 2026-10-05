@@ -15,6 +15,7 @@ import { DefinitionCreationService, nextAvailableDefinitionUid, normalizeAuthorS
 import { DefinitionDeletionService } from "./core/definition-delete";
 import { DefinitionRetirementService } from "./core/definition-retire";
 import { DefinitionSupersessionService } from "./core/definition-supersede-service";
+import { planDefinitionOccurrenceMigration } from "./core/definition-migrate";
 import type { DefinitionDeletionImpact } from "./core/definition-lifecycle";
 import { canPublishCoreReady } from "./core/core-readiness";
 import { recoverWithColdBuild } from "./core/startup-recovery";
@@ -22,7 +23,7 @@ import { formatCacheBytes } from "./core/cache-size";
 import { scheduleStartupHandoff } from "./core/startup-handoff";
 import { cacheDirtyBucketsForPaths, planReconciliation, reconciliationMode, restoreCoreSemanticState, restoreSemanticState, serializeSemanticState } from "./core/cache";
 import { readCoreCacheGeneration, readSemanticCacheGeneration, writeSemanticCacheGeneration } from "./core/cache-storage";
-import { validateLocalModels } from "./core/localmodel";
+import { parseLocalModel, validateLocalModels } from "./core/localmodel";
 import { optionsBetween } from "./core/rules";
 import { editingBlocked, parseSchema, type Schema } from "./core/schema";
 import { editingBlockedReason } from "./core/edit-availability";
@@ -103,7 +104,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, and definition mode now offers same-class replacement selection plus full migration review before writing only the paired supersedes/supersededBy relationship. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, and guided Local Model migration now verifies from fresh source that an occurrence still points to the superseded definition before staging a structural definition-field patch whose Apply remains whole-note stale guarded. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
@@ -445,6 +446,41 @@ export default class MdseWorkbench extends Plugin {
     const superseder = this.definitionSuperseder;
     if (!superseder) throw new Error("Definition supersession is unavailable.");
     superseder.cancel(transactionId);
+  }
+
+  private async stageDefinitionOccurrenceMigration(
+    ownerPath: string,
+    localId: string,
+    replacedPath: string,
+    replacementPath: string,
+  ) {
+    const editor = this.modelEditor;
+    if (!editor) throw new Error("Workbench is still starting.");
+
+    const normalizedOwner = normalizePath(ownerPath);
+    const ownerFile = this.app.vault.getAbstractFileByPath(normalizedOwner);
+    if (!(ownerFile instanceof TFile)) throw new Error(`${normalizedOwner} no longer exists.`);
+
+    const source = await this.app.vault.read(ownerFile);
+    const local = parseLocalModel(source);
+    const record = local?.records.find((candidate) => candidate.localId === localId);
+    if (!record) throw new Error(`Occurrence ^${localId} no longer exists in ${normalizedOwner}.`);
+
+    const currentDefinitionPath = record.definition?.target
+      ? this.app.metadataCache.getFirstLinkpathDest(getLinkpath(record.definition.target), normalizedOwner)?.path ?? null
+      : null;
+
+    const plan = planDefinitionOccurrenceMigration({
+      ownerPath: normalizedOwner,
+      localId,
+      currentDefinitionPath,
+      replacedPath: normalizePath(replacedPath),
+      replacementPath: normalizePath(replacementPath),
+    });
+
+    return editor.stageAndReviewLocalRecordPatch(normalizedOwner, localId, {
+      fields: { definition: plan.definitionLink },
+    });
   }
 
   private async stageOccurrenceDefinitionBinding(
