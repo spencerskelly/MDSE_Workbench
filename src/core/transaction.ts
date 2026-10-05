@@ -204,6 +204,17 @@ export class TransactionManager {
     return { ...state.entry, changes: [...state.entry.changes] };
   }
 
+  async undoIfLatest(transactionId: string): Promise<SemanticHistoryEntry> {
+    const state = this.undoStack[this.undoStack.length - 1];
+    if (!state) throw new Error(`Cannot roll back ${transactionId}: semantic history is empty.`);
+    if (state.entry.transactionId !== transactionId) {
+      throw new Error(
+        `Cannot roll back ${transactionId}: a newer semantic edit (${state.entry.label}) exists. Use normal Review/Undo rather than reverting through another edit.`,
+      );
+    }
+    return this.undo();
+  }
+
   async redo(): Promise<SemanticHistoryEntry> {
     const state = this.redoStack[this.redoStack.length - 1];
     if (!state) throw new Error("Nothing to redo.");
