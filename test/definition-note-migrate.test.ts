@@ -33,6 +33,28 @@ test("note migration plans source target replacement plus paired inverse movemen
   ]);
   assert.equal(plan.inverseField,"partOf");
   assert.equal(plan.symmetric,false);
+  assert.equal(plan.authoredAsInverse,false);
+});
+
+test("note migration supports a paired relationship authored through its inverse field",()=>{
+  const plan=planDefinitionNoteMigration({
+    ownerPath:"30_Objects/Contactor.md",
+    field:"partOf",
+    replacedPath:"10_Systems/Old Charger.md",
+    replacementPath:"10_Systems/New Charger.md",
+    relationship:paired,
+    currentTargets:["10_Systems/Old Charger.md"],
+  });
+  assert.equal(plan.authoredAsInverse,true);
+  assert.equal(plan.inverseField,"hasPart");
+  assert.deepEqual(plan.sourceMutation,{
+    removeTarget:"10_Systems/Old Charger.md",
+    addTarget:"10_Systems/New Charger.md",
+  });
+  assert.deepEqual(plan.inverseMutations,[
+    {path:"10_Systems/Old Charger.md",field:"hasPart",removeTarget:"30_Objects/Contactor.md"},
+    {path:"10_Systems/New Charger.md",field:"hasPart",addTarget:"30_Objects/Contactor.md"},
+  ]);
 });
 
 test("note migration plans symmetric inverse movement on the same field",()=>{
