@@ -105,3 +105,23 @@ test("definition deletion remains blocked by supersession provenance", async()=>
   assert.equal(tx.history().length,0);
   service.cancel(staged.transaction.id);
 });
+
+
+test("definition deletion redo is blocked when supersession provenance appears after undo", async()=>{
+  const store=new MemoryDeleteStore(); store.files.set(path,text);
+  const tx=new TransactionManager();
+  let impact=clearImpact();
+  const service=new DefinitionDeletionService(store,async()=>impact,tx);
+
+  const staged=await service.stageAndReview(path,uid);
+  await service.apply(staged.transaction.id);
+  await tx.undo();
+
+  impact={
+    definitionPath:path,
+    noteUses:[{fromPath:"30_Objects/New Contactor.md",field:"supersedes"}],
+    occurrenceUses:[],
+  };
+  await assert.rejects(tx.redo(),/active references/);
+  assert.equal(await store.exists(path),true);
+});
