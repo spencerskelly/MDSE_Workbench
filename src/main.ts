@@ -1255,6 +1255,11 @@ export default class MdseWorkbench extends Plugin {
           write: async (path, text) => this.app.vault.modify(localFile(normalizePath(path)), text),
         },
         (path) => this.definitionDeletionImpact(path),
+        (target, fromPath) => this.app.metadataCache.getFirstLinkpathDest(getLinkpath(target), normalizePath(fromPath))?.path ?? null,
+        (targetPath, fromPath) => {
+          const file = localFile(normalizePath(targetPath));
+          return this.app.metadataCache.fileToLinktext(file, normalizePath(fromPath), true);
+        },
         this.transactions,
       );
       this.definitionNoteMigrator = new DefinitionNoteMigrationService(
