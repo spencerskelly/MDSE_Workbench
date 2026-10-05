@@ -4,7 +4,7 @@ import type { RelationshipOption } from "../core/rules";
 import type { ViewProfile } from "../core/views";
 import type { NewLocalRecord } from "../core/localmodel-edit";
 import type { LocalRecord } from "../core/localmodel";
-import type { StagedLocalCreate, StagedLocalDelete } from "../core/model-edit";
+import type { StagedLocalCreate, StagedLocalDelete, StagedLocalPatch } from "../core/model-edit";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -753,6 +753,106 @@ export class LocalFlowCreateModal extends Modal {
         this.close();
         this.onApplied(staged.plan.localId);
         new Notice(`Created flow ${heading}.`,5000);
+      }catch(e){
+        new Notice(`Not applied: ${(e as Error).message}`,12000);
+        apply.disabled=false;
+      }
+    })();
+  }
+}
+
+
+export class LocalEndpointPartReassignModal extends Modal {
+  private staged: StagedLocalPatch | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly endpoint: LocalRecord,
+    private readonly parts: LocalRecord[],
+    private readonly stage: (part: LocalRecord) => Promise<StagedLocalPatch>,
+    private readonly apply: (id: string) => Promise<void>,
+    private readonly cancel: (id: string) => void,
+    private readonly onApplied: () => void,
+  ) { super(app); }
+
+  onOpen(): void { this.compose(); }
+
+  onClose(): void {
+    const staged=this.staged;
+    this.staged=null;
+    this.contentEl.empty();
+    if(staged && !this.applied) try { this.cancel(staged.transaction.id); } catch {}
+  }
+
+  private compose(): void {
+    this.titleEl.setText("Reassign endpoint part");
+    this.contentEl.empty();
+    this.contentEl.createEl("p",{text:`Move endpoint ${this.endpoint.identifier} to another existing part occurrence in ${this.ownerName}.`});
+
+    const row=this.contentEl.createDiv({cls:"mdse-create-field"});
+    row.createEl("label",{text:"New part"});
+    const pick=row.createEl("select",{cls:"mdse-detail-input"});
+    pick.createEl("option",{text:"Choose part…",value:""});
+    for(const part of this.parts){
+      pick.createEl("option",{text:`${part.identifier} — ^${part.localId}`,value:part.localId});
+    }
+
+    this.contentEl.createEl("p",{cls:"mdse-muted",text:`Endpoint: ${this.endpoint.identifier} (#^${this.endpoint.localId})`});
+    const buttons=this.contentEl.createDiv({cls:"modal-button-container"});
+    buttons.createEl("button",{text:"Cancel"}).onclick=()=>this.close();
+    const review=buttons.createEl("button",{text:"Review",cls:"mod-cta"});
+    review.onclick=()=>void(async()=>{
+      review.disabled=true;
+      try{
+        const target=this.parts.find((part)=>part.localId===pick.value);
+        if(!target) throw new Error("Choose a target part.");
+        const staged=await this.stage(target);
+        this.staged=staged;
+        this.renderReview(staged,target);
+      }catch(e){
+        new Notice(`Cannot stage part reassignment: ${(e as Error).message}`,12000);
+        review.disabled=false;
+      }
+    })();
+  }
+
+  private renderReview(staged:StagedLocalPatch, target:LocalRecord): void {
+    this.titleEl.setText("Review endpoint part reassignment");
+    this.contentEl.empty();
+    const table=this.contentEl.createEl("table",{cls:"mdse-diagnostics"});
+    const rows:[string,string][]=[
+      ["Owner",this.ownerName],
+      ["Endpoint",this.endpoint.identifier],
+      ["New part",target.identifier],
+      ["Transaction",staged.transaction.label],
+      ["Scope",staged.transaction.scope],
+    ];
+    for(const [k,v] of rows){const tr=table.createEl("tr");tr.createEl("td",{text:k});tr.createEl("td",{text:v});}
+
+    const blocking=staged.plan.findings.filter((f)=>f.severity==="error");
+    if(!staged.plan.findings.length){
+      this.contentEl.createEl("p",{cls:"mdse-muted",text:"Validation passed. Apply will change only the endpoint part assignment."});
+    } else {
+      for(const f of staged.plan.findings){
+        this.contentEl.createEl("p",{text:`${f.severity.toUpperCase()}: ${f.message}`,cls:f.severity==="error"?"mdse-warn":undefined});
+      }
+    }
+
+    const buttons=this.contentEl.createDiv({cls:"modal-button-container"});
+    buttons.createEl("button",{text:"Cancel"}).onclick=()=>{try{this.cancel(staged.transaction.id);}finally{this.staged=null;this.close();}};
+    const apply=buttons.createEl("button",{text:"Apply",cls:"mod-cta"});
+    apply.disabled=blocking.length>0;
+    apply.onclick=()=>void(async()=>{
+      apply.disabled=true;
+      try{
+        await this.apply(staged.transaction.id);
+        this.applied=true;
+        this.staged=null;
+        this.close();
+        this.onApplied();
+        new Notice(`Reassigned endpoint ${this.endpoint.identifier} to ${target.identifier}.`,5000);
       }catch(e){
         new Notice(`Not applied: ${(e as Error).message}`,12000);
         apply.disabled=false;
