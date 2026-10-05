@@ -1129,3 +1129,92 @@ test("connection endpoint rewire rejects a non-endpoint local target", () => {
     finding.severity === "error"
   ));
 });
+
+
+test("plans connection definition change while preserving endpoints and child flow", () => {
+  const endpointA = "ep-20261005013000000skellyspencer";
+  const endpointB = "ep-20261005013000001skellyspencer";
+  const connectionId = "conn-20261005013000002skellyspencer";
+  const flowId = "flow-20261005013000003skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "- definition: [[Old Bus]]",
+    "^" + connectionId,
+    "##### Commands",
+    "- definition: [[CAN Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    connectionId,
+    { fields: { definition: "[[New Bus]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const region = parseLocalModel(result.after);
+  const connection = region?.records.find((record) => record.localId === connectionId);
+  const flow = region?.records.find((record) => record.localId === flowId);
+  assert.equal(connection?.definition?.target, "New Bus");
+  assert.equal(connection?.endpointA?.blockId, endpointA);
+  assert.equal(connection?.endpointB?.blockId, endpointB);
+  assert.equal(flow?.connectionId, connectionId);
+  assert.equal(flow?.roleA, "transmit");
+  assert.equal(flow?.roleB, "receive");
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("plans clearing an optional connection definition without changing topology", () => {
+  const connectionId = "conn-" + tokenD;
+  const result = planLocalRecordPatch(
+    note(),
+    connectionId,
+    { fields: { definition: null } },
+    { allowInvalidTarget: true },
+  );
+
+  const connection = parseLocalModel(result.after)?.records.find((record) => record.localId === connectionId);
+  assert.equal(connection?.definition, null);
+  assert.ok(connection?.endpointA);
+  assert.ok(connection?.endpointB);
+});
+
+test("connection definition edit rejects a block-fragment definition", () => {
+  const connectionId = "conn-" + tokenD;
+  const result = planLocalRecordPatch(
+    note(),
+    connectionId,
+    { fields: { definition: "[[Some Note#^ep-" + tokenC + "|Bad]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === connectionId &&
+    finding.code === "definition.incompatible" &&
+    finding.severity === "error"
+  ));
+});
