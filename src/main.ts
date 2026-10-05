@@ -11,7 +11,7 @@ import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-pe
 import { CacheMutationGate } from "./core/cache-mutation";
 import { TransactionManager } from "./core/transaction";
 import { ModelEditService } from "./core/model-edit";
-import { DefinitionCreationService } from "./core/definition-create";
+import { DefinitionCreationService, nextAvailableDefinitionUid, normalizeAuthorSuffix, type StagedDefinitionCreation } from "./core/definition-create";
 import { canPublishCoreReady } from "./core/core-readiness";
 import { recoverWithColdBuild } from "./core/startup-recovery";
 import { formatCacheBytes } from "./core/cache-size";
@@ -99,7 +99,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, and the definition creation service is now bound to real vault storage plus the shared semantic history rather than UI file writes. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, and missing part/endpoint/flow definitions can now be created from occurrence context then bound only after successful definition creation. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
@@ -164,6 +164,10 @@ export default class MdseWorkbench extends Plugin {
       undo: () => this.undo(),
       pickView: (path) => this.pickView(path),
       definitionImpact: (path) => this.definitionImpact(path),
+      stageDefinitionCreation: (kind, name, path) => this.stageDefinitionCreation(kind, name, path),
+      applyDefinitionCreation: (transactionId) => this.applyDefinitionCreation(transactionId),
+      cancelDefinitionCreation: (transactionId) => this.cancelDefinitionCreation(transactionId),
+      bindOccurrenceDefinition: (ownerPath, localId, definitionPath) => this.bindOccurrenceDefinition(ownerPath, localId, definitionPath),
     });
     this.addChild(this.detail);
     this.registerDetailClicks();
@@ -299,6 +303,60 @@ export default class MdseWorkbench extends Plugin {
       );
       this.cancelStartupHandoff = handoff.cancel;
     });
+  }
+
+  private definitionUidInUse(uid: string): boolean {
+    const indexer = this.indexer;
+    if (indexer) {
+      for (const note of indexer.index.notes.values()) if (note.uid === uid) return true;
+    }
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+      if (fm?.uid === uid) return true;
+    }
+    return false;
+  }
+
+  private stageDefinitionCreation(
+    kind: "part" | "endpoint" | "connection" | "flow",
+    name: string,
+    path: string,
+  ): StagedDefinitionCreation {
+    const creator = this.definitionCreator;
+    if (!creator || !this.isReady()) throw new Error("Workbench is still starting.");
+    const suffix = normalizeAuthorSuffix(this.settings.creatorSuffix);
+    const uid = nextAvailableDefinitionUid(suffix, (candidate) => this.definitionUidInUse(candidate));
+    return creator.stageAndReview({ localKind: kind, name, uid, path });
+  }
+
+  private async applyDefinitionCreation(transactionId: string): Promise<void> {
+    const creator = this.definitionCreator;
+    if (!creator) throw new Error("Definition creation is unavailable.");
+    await creator.apply(transactionId);
+  }
+
+  private cancelDefinitionCreation(transactionId: string): void {
+    const creator = this.definitionCreator;
+    if (!creator) throw new Error("Definition creation is unavailable.");
+    creator.cancel(transactionId);
+  }
+
+  private async bindOccurrenceDefinition(ownerPath: string, localId: string, definitionPath: string): Promise<void> {
+    const editor = this.modelEditor;
+    if (!editor) throw new Error("Workbench is still starting.");
+    const normalized = normalizePath(definitionPath);
+    const file = this.app.vault.getAbstractFileByPath(normalized);
+    if (!(file instanceof TFile)) throw new Error(`Created definition ${normalized} is not available in the vault.`);
+    const definitionLink = `[[${normalized.replace(/\.md$/i, "")}]]`;
+    const staged = await editor.stageAndReviewLocalRecordPatch(ownerPath, localId, {
+      fields: { definition: definitionLink },
+    });
+    try {
+      await editor.applyLocalPatch(staged.transaction.id);
+    } catch (error) {
+      try { editor.cancelLocalPatch(staged.transaction.id); } catch { /* already closed */ }
+      throw error;
+    }
   }
 
   private async definitionImpact(path: string): Promise<{ rows: string[]; notes: number; occurrences: number }> {
@@ -923,12 +981,7 @@ export default class MdseWorkbench extends Plugin {
             await this.app.vault.delete(file);
           },
         },
-        (uid) => {
-          for (const note of (this.indexer as Indexer).index.notes.values()) {
-            if (note.uid === uid) return true;
-          }
-          return false;
-        },
+        (uid) => this.definitionUidInUse(uid),
         this.transactions,
       );
       this.assurance = new AssuranceManager({
