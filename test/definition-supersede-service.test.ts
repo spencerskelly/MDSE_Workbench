@@ -208,3 +208,35 @@ supersededBy:
   assert.equal(await store.read(newPath),replacementAlreadyLinked);
   assert.equal(await store.read(oldPath),replacedAlreadyLinked);
 });
+
+
+test("supersession refuses unresolved existing relationship targets instead of appending beside ambiguity",async()=>{
+  const replacementWithBrokenExisting=`---
+type: Object
+uid: ${newUid}
+status: active
+supersedes:
+  - "[[Missing Definition]]"
+---
+
+# New Contactor
+`;
+  const store=new MemorySupersessionStore();
+  store.files.set(oldPath,oldText);
+  store.files.set(newPath,replacementWithBrokenExisting);
+  const unresolved=(target:string,fromPath:string)=>{
+    void fromPath;
+    if(target==="Missing Definition") return null;
+    return resolve(target,fromPath);
+  };
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),unresolved,linkText,new TransactionManager());
+  await assert.rejects(
+    service.stageAndReview({
+      replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+      replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
+    }),
+    /existing relationship target "Missing Definition" cannot be resolved/,
+  );
+  assert.equal(await store.read(newPath),replacementWithBrokenExisting);
+  assert.equal(await store.read(oldPath),oldText);
+});
