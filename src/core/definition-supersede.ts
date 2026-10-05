@@ -30,6 +30,38 @@ export interface DefinitionSupersessionPlan {
   rewritesReferences: false;
 }
 
+const LIFECYCLE_PROVENANCE_FIELDS = new Set(["supersedes", "supersededBy"]);
+
+/**
+ * Convert complete lifecycle impact into the subset that should actually be migrated to a
+ * replacement definition. Supersession provenance remains attached to the historical definitions;
+ * it is evidence for lifecycle review, not an engineering dependency to retarget.
+ */
+export function definitionMigrationCandidates(impact: DefinitionDeletionImpact): DefinitionMigrationCandidate[] {
+  return [
+    ...impact.noteUses
+      .filter((use) => !LIFECYCLE_PROVENANCE_FIELDS.has(use.field))
+      .map((use) => ({
+        scope: "note" as const,
+        ownerPath: use.fromPath,
+        field: use.field,
+      })),
+    ...impact.occurrenceUses.map((use) => ({
+      scope: "occurrence" as const,
+      ownerPath: use.ownerPath,
+      field: "definition",
+      localId: use.localId,
+      kind: use.kind,
+      identifier: use.identifier,
+    })),
+  ].sort((a, b) =>
+    a.ownerPath.localeCompare(b.ownerPath) ||
+    a.scope.localeCompare(b.scope) ||
+    a.field.localeCompare(b.field) ||
+    (a.scope === "occurrence" ? a.localId : "").localeCompare(b.scope === "occurrence" ? b.localId : "")
+  );
+}
+
 /**
  * Pure WB-106 supersession planner.
  *
@@ -55,26 +87,7 @@ export function planDefinitionSupersession(request: DefinitionSupersessionReques
   }
   if (status === "retired") warnings.push("The selected replacement definition is already retired.");
 
-  const migrationCandidates: DefinitionMigrationCandidate[] = [
-    ...request.impact.noteUses.map((use) => ({
-      scope: "note" as const,
-      ownerPath: use.fromPath,
-      field: use.field,
-    })),
-    ...request.impact.occurrenceUses.map((use) => ({
-      scope: "occurrence" as const,
-      ownerPath: use.ownerPath,
-      field: "definition",
-      localId: use.localId,
-      kind: use.kind,
-      identifier: use.identifier,
-    })),
-  ].sort((a, b) =>
-    a.ownerPath.localeCompare(b.ownerPath) ||
-    a.scope.localeCompare(b.scope) ||
-    a.field.localeCompare(b.field) ||
-    (a.scope === "occurrence" ? a.localId : "").localeCompare(b.scope === "occurrence" ? b.localId : "")
-  );
+  const migrationCandidates = definitionMigrationCandidates(request.impact);
 
   return {
     replacedPath,
