@@ -240,3 +240,21 @@ supersedes:
   assert.equal(await store.read(newPath),replacementWithBrokenExisting);
   assert.equal(await store.read(oldPath),oldText);
 });
+
+
+test("supersession redo refuses changed migration inventory after undo",async()=>{
+  const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  let impact=clearImpact();
+  const service=new DefinitionSupersessionService(store,async()=>impact,resolve,linkText,tx);
+  const staged=await service.stageAndReview({
+    replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+    replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
+  });
+  await service.apply(staged.transaction.id);
+  await tx.undo();
+  impact={definitionPath:oldPath,noteUses:[{fromPath:"System.md",field:"hasPart"}],occurrenceUses:[]};
+  await assert.rejects(tx.redo(),/dependent usage changed after Review/);
+  assert.equal(await store.read(oldPath),oldText);
+  assert.equal(await store.read(newPath),newText);
+});
