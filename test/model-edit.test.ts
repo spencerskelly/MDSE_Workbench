@@ -1597,7 +1597,7 @@ function noteWithDefinedPartAndEndpoint(): string {
     "### Part Occurrences",
     "#### K1",
     "- definition: [[Old Contactor]]",
-    "- usage: spare",
+    "- usage: option",
     "- multiplicity: 2",
     "^" + partId,
     "",
@@ -1628,7 +1628,7 @@ test("staged part definition change stays unwritten until Apply and preserves at
 
   await service.applyLocalPatch(staged.transaction.id);
   assert.ok(store.text.includes("- definition: [[New Contactor]]"));
-  assert.ok(store.text.includes("- usage: spare"));
+  assert.ok(store.text.includes("- usage: option"));
   assert.ok(store.text.includes("- multiplicity: 2"));
   assert.ok(store.text.includes("- part: [[#^" + partId + "|K1]]"));
   assert.ok(store.text.includes("^" + endpointId));
@@ -1652,7 +1652,7 @@ test("staged part definition edit blocks clearing required definition at Apply",
     fields: { definition: null },
   });
 
-  assert.ok(staged.plan.findings.some((finding) => finding.code === "definition.required" && finding.severity === "error"));
+  assert.ok(staged.plan.findings.some((finding) => finding.code === "record.missing-definition" && finding.severity === "error"));
   await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
