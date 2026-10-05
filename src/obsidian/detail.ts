@@ -385,7 +385,7 @@ export class NoteDetailPanel extends Component {
             .filter((link) => !(mode === "remove" && !link.target && link.blockId === target.localId))
             .map((link) => link.text);
           if (mode === "add") remaining.push(`[[#^${target.localId}|${target.identifier}]]`);
-          return editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+          return editor.stageAndReviewLocalRecordPatch(file.path, endpoint.localId, {
             fields: { equals: remaining.length ? remaining.join(" ") : null },
           });
         },
@@ -423,7 +423,7 @@ export class NoteDetailPanel extends Component {
             .filter((link) => !(mode === "remove" && !link.target && link.blockId === target.localId))
             .map((link) => link.text);
           if (mode === "add") remaining.push(`[[#^${target.localId}|${target.identifier}]]`);
-          return editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+          return editor.stageAndReviewLocalRecordPatch(file.path, endpoint.localId, {
             fields: { exposes: remaining.length ? remaining.join(" ") : null },
           });
         },
@@ -455,7 +455,7 @@ export class NoteDetailPanel extends Component {
         file.basename,
         endpoint,
         endpoints,
-        (parent) => editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+        (parent) => editor.stageAndReviewLocalRecordPatch(file.path, endpoint.localId, {
           fields: parent
             ? { parent: `[[#^${parent.localId}|${parent.identifier}]]`, part: null }
             : { parent: null },
@@ -484,7 +484,7 @@ export class NoteDetailPanel extends Component {
         file.basename,
         endpoint,
         parts,
-        (part) => editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+        (part) => editor.stageAndReviewLocalRecordPatch(file.path, endpoint.localId, {
           fields: { part: `[[#^${part.localId}|${part.identifier}]]` },
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -504,7 +504,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         flow,
-        (definition) => editor.stageLocalRecordPatch(file.path, flow.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, flow.localId, {
           fields: { definition },
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -524,7 +524,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         endpoint,
-        (definition) => editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, endpoint.localId, {
           fields: { definition },
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -544,7 +544,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         part,
-        (definition) => editor.stageLocalRecordPatch(file.path, part.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, part.localId, {
           fields: { definition },
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -564,7 +564,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         connection,
-        (definition) => editor.stageLocalRecordPatch(file.path, connection.localId, {
+        (definition) => editor.stageAndReviewLocalRecordPatch(file.path, connection.localId, {
           fields: { definition },
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -598,7 +598,7 @@ export class NoteDetailPanel extends Component {
         connection,
         end,
         options,
-        (target) => editor.stageLocalRecordPatch(file.path, connection.localId, {
+        (target) => editor.stageAndReviewLocalRecordPatch(file.path, connection.localId, {
           fields: { [end]: `[[#^${target.localId}|${target.identifier}]]` },
         }),
         (transactionId) => editor.applyLocalPatch(transactionId),
@@ -622,7 +622,7 @@ export class NoteDetailPanel extends Component {
         file.basename,
         connection,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => { editor.cancelLocalCreate(transactionId); },
         (createdId) => { void this.refreshLocal(file, createdId, true); },
@@ -650,7 +650,7 @@ export class NoteDetailPanel extends Component {
         source,
         options,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => { editor.cancelLocalCreate(transactionId); },
         (createdId) => { void this.refreshLocal(file, createdId, true); },
@@ -673,7 +673,7 @@ export class NoteDetailPanel extends Component {
         part.identifier,
         part.localId,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => { editor.cancelLocalCreate(transactionId); },
         (createdId) => { void this.refreshLocal(file, createdId, true); },
@@ -693,7 +693,7 @@ export class NoteDetailPanel extends Component {
         file.basename,
         record.identifier,
         record.kind,
-        () => editor.stageLocalRecordDelete(file.path, record.localId),
+        () => editor.stageAndReviewLocalRecordDelete(file.path, record.localId),
         (transactionId) => editor.applyLocalDelete(transactionId),
         (transactionId) => { editor.cancelLocalDelete(transactionId); },
         () => { void this.show(file, false); },
@@ -714,7 +714,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         localId,
-        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => { editor.cancelLocalCreate(transactionId); },
         (createdId) => { void this.refreshLocal(file, createdId, true); },
