@@ -67,7 +67,17 @@ test("note migration refuses a changed or already migrated relationship",()=>{
 });
 
 test("note migration with one-way relationship has no inverse mutations",()=>{
-  const oneWay={field:"participants",kind:"one-way"} as RelationshipDef;
+  const oneWay: RelationshipDef = {
+    field: "participants",
+    kind: "oneWay",
+    from: "any",
+    to: "any",
+    sameClass: false,
+    excludePairs: [],
+    provisional: false,
+    temporary: false,
+    order: 0,
+  };
   const plan=planDefinitionNoteMigration({
     ownerPath:"20_UseCases/Charge.md",field:"participants",
     replacedPath:"30_Objects/Old Charger.md",replacementPath:"30_Objects/New Charger.md",
