@@ -1691,3 +1691,142 @@ test("cancelled part definition edit leaves source and history untouched", async
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithDefinedEndpointAndConnection(): string {
+  const partId = "part-20261005017000000skellyspencer";
+  const endpointId = "ep-20261005017000001skellyspencer";
+  const peerId = "ep-20261005017000002skellyspencer";
+  const exposureId = "ep-20261005017000003skellyspencer";
+  const equalsId = "ep-20261005017000004skellyspencer";
+  const connectionId = "conn-20261005017000005skellyspencer";
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Contactor]]",
+    "^" + partId,
+    "",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[Old Port]]",
+    "- usage: option",
+    "- multiplicity: 2",
+    "- part: [[#^" + partId + "|K1]]",
+    "- exposes: [[#^" + exposureId + "|J3]]",
+    "- equals: [[#^" + equalsId + "|J4]]",
+    "^" + endpointId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + peerId,
+    "",
+    "#### J3",
+    "- definition: [[CAN Port]]",
+    "^" + exposureId,
+    "",
+    "#### J4",
+    "- definition: [[CAN Port]]",
+    "^" + equalsId,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointId + "|J1]]",
+    "- endpointB: [[#^" + peerId + "|J2]]",
+    "^" + connectionId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("staged endpoint definition change stays unwritten until Apply and preserves topology", async () => {
+  const endpointId = "ep-20261005017000001skellyspencer";
+  const partId = "part-20261005017000000skellyspencer";
+  const connectionId = "conn-20261005017000005skellyspencer";
+  const original = noteWithDefinedEndpointAndConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { definition: "[[New Port]]" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- definition: [[New Port]]"));
+  assert.ok(store.text.includes("- usage: option"));
+  assert.ok(store.text.includes("- multiplicity: 2"));
+  assert.ok(store.text.includes("- part: [[#^" + partId + "|K1]]"));
+  assert.ok(store.text.includes("- exposes:"));
+  assert.ok(store.text.includes("- equals:"));
+  assert.ok(store.text.includes("^" + connectionId));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.ok(store.text.includes("- definition: [[New Port]]"));
+  assert.ok(store.text.includes("^" + connectionId));
+});
+
+test("staged endpoint definition edit blocks clearing required definition at Apply", async () => {
+  const endpointId = "ep-20261005017000001skellyspencer";
+  const original = noteWithDefinedEndpointAndConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { definition: null },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.code === "record.missing-definition" && finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("staged endpoint definition edit blocks block-fragment definitions at Apply", async () => {
+  const endpointId = "ep-20261005017000001skellyspencer";
+  const original = noteWithDefinedEndpointAndConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { definition: "[[New Port#^ep-20261005017000002skellyspencer|Bad]]" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.code === "definition.incompatible" && finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled endpoint definition edit leaves source and history untouched", async () => {
+  const endpointId = "ep-20261005017000001skellyspencer";
+  const original = noteWithDefinedEndpointAndConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { definition: "[[New Port]]" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
