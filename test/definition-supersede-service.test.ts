@@ -294,16 +294,16 @@ test("semantic history requires newer migration-like edits to undo before supers
 
 
 test("supersession refuses staging when either source UID does not match the canonical note", async()=>{
-  const store=new MemoryStore();
+  const store=new MemorySupersessionStore();
   store.files.set(oldPath,oldText);
   store.files.set(newPath,newText);
   const tx=new TransactionManager();
-  const service=new DefinitionSupersessionService(store,async()=>impact,(target)=>resolve(target),linkText,tx);
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),resolve,linkText,tx);
 
   await assert.rejects(
     service.stageAndReview({
       replacedPath:oldPath,replacedUid:"20261005061000009skellyspencer",replacedType:"Object",
-      replacementPath:newPath,replacementUid:"20261005061000002skellyspencer",replacementType:"Object",
+      replacementPath:newPath,replacementUid:newUid,replacementType:"Object",
       replacementStatus:"active",
     }),
     /expected .* uid .* found/,
@@ -311,7 +311,7 @@ test("supersession refuses staging when either source UID does not match the can
 
   await assert.rejects(
     service.stageAndReview({
-      replacedPath:oldPath,replacedUid:"20261005061000001skellyspencer",replacedType:"Object",
+      replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
       replacementPath:newPath,replacementUid:"20261005061000009skellyspencer",replacementType:"Object",
       replacementStatus:"active",
     }),
