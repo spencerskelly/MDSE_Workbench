@@ -421,6 +421,7 @@ export class LocalEndpointCreateModal extends Modal {
     private readonly partName: string,
     private readonly partLocalId: string,
     private readonly localId: string,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (input: NewLocalRecord) => Promise<StagedLocalCreate>,
     private readonly apply: (transactionId: string) => Promise<void>,
     private readonly cancel: (transactionId: string) => void,
@@ -459,7 +460,13 @@ export class LocalEndpointCreateModal extends Modal {
     };
 
     const heading = field("Endpoint name", "", "J1");
-    const definition = field("Reusable definition", "", "[[CAN Port]]");
+    const definitionRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    definitionRow.createEl("label", { text: "Reusable definition" });
+    const definition = definitionRow.createEl("select", { cls: "mdse-detail-input" });
+    definition.createEl("option", { text: "Choose a model definition…", value: "" });
+    for (const option of this.definitions) {
+      definition.createEl("option", { text: `${option.name} — ${option.type ?? "model"}`, value: option.path });
+    }
     const endpointKind = field("Endpoint kind", "", "physical");
     const usage = field("Usage", "standard", "standard");
     const multiplicity = field("Multiplicity", "", "optional");
@@ -475,8 +482,11 @@ export class LocalEndpointCreateModal extends Modal {
       void (async () => {
         review.disabled = true;
         try {
+          const selected = this.definitions.find((option) => option.path === definition.value);
+          if (!selected) throw new Error("Choose a reusable definition from the model.");
+          const definitionLink = `[[${selected.path.replace(/\.md$/i, "")}]]`;
           const fields: Record<string, string> = {
-            definition: definition.value.trim(),
+            definition: definitionLink,
             part: `[[#^${this.partLocalId}|${this.partName}]]`,
           };
           if (endpointKind.value.trim()) fields.kind = endpointKind.value.trim();
@@ -492,7 +502,7 @@ export class LocalEndpointCreateModal extends Modal {
           this.staged = staged;
           this.renderReview(staged, {
             heading: heading.value.trim(),
-            definition: definition.value.trim(),
+            definition: definitionLink,
             endpointKind: endpointKind.value.trim(),
             usage: usage.value.trim() || "standard",
             multiplicity: multiplicity.value.trim(),
@@ -1560,6 +1570,7 @@ export class LocalEndpointDefinitionEditModal extends Modal {
     app: App,
     private readonly ownerName: string,
     private readonly endpoint: LocalRecord,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (definition: string) => Promise<StagedLocalPatch>,
     private readonly apply: (id: string) => Promise<void>,
     private readonly cancel: (id: string) => void,
@@ -1573,13 +1584,14 @@ export class LocalEndpointDefinitionEditModal extends Modal {
 
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Reusable definition" });
-    const input = row.createEl("input", {
-      type: "text",
-      cls: "mdse-detail-input",
-      value: this.endpoint.definition?.text ?? "",
-    });
-    input.setAttr("placeholder", "[[CAN Port]]");
-    input.onkeydown = (e) => e.stopPropagation();
+    const input = row.createEl("select", { cls: "mdse-detail-input" });
+    input.createEl("option", { text: "Choose a model definition…", value: "" });
+    const currentTarget = this.endpoint.definition?.target ?? "";
+    for (const option of this.definitions) {
+      const item = input.createEl("option", { text: `${option.name} — ${option.type ?? "model"}`, value: option.path });
+      const stem = option.path.replace(/\.md$/i, "");
+      if (currentTarget === stem || currentTarget === option.name) item.selected = true;
+    }
 
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
@@ -1587,8 +1599,9 @@ export class LocalEndpointDefinitionEditModal extends Modal {
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
-        const value = input.value.trim();
-        if (!value) throw new Error("Endpoint occurrences require a reusable definition.");
+        const selected = this.definitions.find((option) => option.path === input.value);
+        if (!selected) throw new Error("Choose a reusable definition from the model.");
+        const value = `[[${selected.path.replace(/\.md$/i, "")}]]`;
         const staged = await this.stage(value);
         this.staged = staged;
         this.renderReview(staged, value);
