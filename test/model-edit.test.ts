@@ -1977,3 +1977,68 @@ test("structural Local Model delete cannot Apply before Review", async () => {
   await service.applyLocalDelete(staged.transaction.id);
   assert.notEqual(store.text, original);
 });
+
+
+function objectOwnerWithoutLocalModel(): string {
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Empty Assembly",
+    "",
+    "Narrative only.",
+  ].join("\n");
+}
+
+test("first part occurrence can create the governed Local Model region on an empty Object owner", async () => {
+  const original = objectOwnerWithoutLocalModel();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const partId = "part-20261005021000000skellyspencer";
+
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
+    kind: "part",
+    localId: partId,
+    heading: "K1",
+    fields: { definition: "[[Main Contactor]]" },
+  });
+
+  assert.equal(staged.transaction.status, "reviewed");
+  assert.equal(store.text, original, "Review must not write the owner note");
+  assert.match(staged.plan.after, /## Local Model/);
+  assert.match(staged.plan.after, /<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->/);
+  assert.match(staged.plan.after, /### Part Occurrences/);
+  assert.match(staged.plan.after, /#### K1/);
+  assert.ok(staged.plan.after.includes("^" + partId));
+
+  await service.applyLocalCreate(staged.transaction.id);
+  assert.match(store.text, /## Local Model/);
+  assert.match(store.text, /#### K1/);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.create");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.match(store.text, /#### K1/);
+});
+
+test("first part creation remains cancellable before the owner note is changed", async () => {
+  const original = objectOwnerWithoutLocalModel();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
+    kind: "part",
+    localId: "part-20261005021000001skellyspencer",
+    heading: "K1",
+    fields: { definition: "[[Main Contactor]]" },
+  });
+
+  service.cancelLocalCreate(staged.transaction.id);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
