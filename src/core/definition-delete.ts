@@ -1,3 +1,4 @@
+import { parseDocument } from "yaml";
 import { noteRef } from "./localmodel";
 import { assessDefinitionDeletion, type DefinitionDeletionImpact, type DefinitionDeletionAssessment } from "./definition-lifecycle";
 import { TransactionManager, type EditTransaction } from "./transaction";
@@ -38,6 +39,14 @@ export class DefinitionDeletionService {
   async stage(path: string, uid: string): Promise<StagedDefinitionDelete> {
     if (!(await this.store.exists(path))) throw new Error(`${path} does not exist.`);
     const before = await this.store.read(path);
+    const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(before);
+    if (!frontmatterMatch) throw new Error(`${path} must begin with YAML frontmatter.`);
+    const doc = parseDocument(frontmatterMatch[1]);
+    if (doc.errors.length) throw new Error(`${path} frontmatter is invalid YAML.`);
+    const storedUid = String(doc.get("uid") ?? "").trim();
+    if (!storedUid || storedUid !== uid) {
+      throw new Error(`Cannot stage deletion of ${path}: expected uid ${uid}, found ${storedUid || "none"}.`);
+    }
     const impact = assessDefinitionDeletion(await this.impactFor(path));
     const id = `definition-delete-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `delete definition ${path}`;
