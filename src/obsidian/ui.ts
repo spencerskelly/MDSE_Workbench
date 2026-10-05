@@ -3,6 +3,7 @@ import type { NoteRecord } from "../core/model";
 import type { RelationshipOption } from "../core/rules";
 import type { ViewProfile } from "../core/views";
 import type { NewLocalRecord } from "../core/localmodel-edit";
+import type { LocalRecord } from "../core/localmodel";
 import type { StagedLocalCreate, StagedLocalDelete } from "../core/model-edit";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
