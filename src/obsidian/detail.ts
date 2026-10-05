@@ -170,60 +170,61 @@ export class NoteDetailPanel extends Component {
       const returnToOccurrence = head.createEl("button", { text: "Back to occurrence", cls: "mdse-detail-btn" });
       returnToOccurrence.setAttr("title", "Return to the contextual Local Model occurrence without changing its storage.");
       returnToOccurrence.onclick = () => { void this.returnToOccurrence(); };
-      const uid = typeof fm?.uid === "string" ? fm.uid : "";
-      if (uid) {
-        const retire = head.createEl("button", { text: "Retire definition…", cls: "mdse-detail-btn" });
-        retire.setAttr("title", "Review all current uses, then set only canonical lifecycle status to retired.");
-        retire.onclick = () => {
-          new DefinitionRetireModal(
-            this.app,
-            file.basename,
-            () => this.host.stageDefinitionRetirement(file.path, uid),
-            (transactionId) => this.host.applyDefinitionRetirement(transactionId),
-            (transactionId) => this.host.cancelDefinitionRetirement(transactionId),
-            () => { void this.show(file, false); },
-          ).open();
-        };
+    }
 
-        const definitionType = typeof fm?.type === "string" ? fm.type : "";
-        if (definitionType) {
-          const supersede = head.createEl("button", { text: "Supersede definition…", cls: "mdse-detail-btn" });
-          supersede.setAttr("title", "Choose a same-class replacement and review the complete guided migration inventory.");
-          supersede.onclick = () => {
-            const candidates = this.host.elements(file.path)
-              .filter((candidate) => candidate.type === definitionType)
-              .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
-            new DefinitionSupersedeModal(
-              this.app,
-              file.basename,
-              candidates,
-              (replacementPath) => this.host.stageDefinitionSupersession(file.path, uid, definitionType, replacementPath),
-              (transactionId) => this.host.applyDefinitionSupersession(transactionId),
-              (transactionId) => this.host.cancelDefinitionSupersession(transactionId),
-              (ownerPath, localId, replacedPath, replacementPath) => this.host.stageDefinitionOccurrenceMigration(ownerPath, localId, replacedPath, replacementPath),
-              (transactionId) => this.host.applyDefinitionOccurrenceMigration(transactionId),
-              (transactionId) => this.host.cancelDefinitionOccurrenceMigration(transactionId),
-              (ownerPath, field, replacedPath, replacementPath) => this.host.stageDefinitionNoteMigration(ownerPath, field, replacedPath, replacementPath),
-              (transactionId) => this.host.applyDefinitionNoteMigration(transactionId),
-              (transactionId) => this.host.cancelDefinitionNoteMigration(transactionId),
-              () => { void this.show(file, false); },
-            ).open();
-          };
-        }
+    const uid = typeof fm?.uid === "string" ? fm.uid : "";
+    if (modelType && uid) {
+      const retire = head.createEl("button", { text: "Retire definition…", cls: "mdse-detail-btn" });
+      retire.setAttr("title", "Review all current uses, then set only canonical lifecycle status to retired.");
+      retire.onclick = () => {
+        new DefinitionRetireModal(
+          this.app,
+          file.basename,
+          () => this.host.stageDefinitionRetirement(file.path, uid),
+          (transactionId) => this.host.applyDefinitionRetirement(transactionId),
+          (transactionId) => this.host.cancelDefinitionRetirement(transactionId),
+          () => { void this.show(file, false); },
+        ).open();
+      };
 
-        const remove = head.createEl("button", { text: "Delete definition…", cls: "mdse-detail-btn" });
-        remove.setAttr("title", "Review all active references before destructive definition deletion.");
-        remove.onclick = () => {
-          new DefinitionDeleteModal(
-            this.app,
-            file.basename,
-            () => this.host.stageDefinitionDeletion(file.path, uid),
-            (transactionId) => this.host.applyDefinitionDeletion(transactionId),
-            (transactionId) => this.host.cancelDefinitionDeletion(transactionId),
-            () => { void this.returnToOccurrence(); },
-          ).open();
-        };
-      }
+      const supersede = head.createEl("button", { text: "Supersede definition…", cls: "mdse-detail-btn" });
+      supersede.setAttr("title", "Choose a same-class replacement and review the complete guided migration inventory.");
+      supersede.onclick = () => {
+        const candidates = this.host.elements(file.path)
+          .filter((candidate) => candidate.type === modelType)
+          .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+        new DefinitionSupersedeModal(
+          this.app,
+          file.basename,
+          candidates,
+          (replacementPath) => this.host.stageDefinitionSupersession(file.path, uid, modelType, replacementPath),
+          (transactionId) => this.host.applyDefinitionSupersession(transactionId),
+          (transactionId) => this.host.cancelDefinitionSupersession(transactionId),
+          (ownerPath, localId, replacedPath, replacementPath) => this.host.stageDefinitionOccurrenceMigration(ownerPath, localId, replacedPath, replacementPath),
+          (transactionId) => this.host.applyDefinitionOccurrenceMigration(transactionId),
+          (transactionId) => this.host.cancelDefinitionOccurrenceMigration(transactionId),
+          (ownerPath, field, replacedPath, replacementPath) => this.host.stageDefinitionNoteMigration(ownerPath, field, replacedPath, replacementPath),
+          (transactionId) => this.host.applyDefinitionNoteMigration(transactionId),
+          (transactionId) => this.host.cancelDefinitionNoteMigration(transactionId),
+          () => { void this.show(file, false); },
+        ).open();
+      };
+
+      const remove = head.createEl("button", { text: "Delete definition…", cls: "mdse-detail-btn" });
+      remove.setAttr("title", "Review all active references before destructive definition deletion.");
+      remove.onclick = () => {
+        new DefinitionDeleteModal(
+          this.app,
+          file.basename,
+          () => this.host.stageDefinitionDeletion(file.path, uid),
+          (transactionId) => this.host.applyDefinitionDeletion(transactionId),
+          (transactionId) => this.host.cancelDefinitionDeletion(transactionId),
+          () => {
+            if (this.definitionReturn?.definitionPath === file.path) void this.returnToOccurrence();
+            else this.close();
+          },
+        ).open();
+      };
     }
     const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit definition", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
     if (!this.definitionReturn || this.definitionReturn.definitionPath !== file.path) {
