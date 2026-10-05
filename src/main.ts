@@ -12,6 +12,8 @@ import { CacheMutationGate } from "./core/cache-mutation";
 import { TransactionManager } from "./core/transaction";
 import { ModelEditService } from "./core/model-edit";
 import { DefinitionCreationService, nextAvailableDefinitionUid, normalizeAuthorSuffix, type StagedDefinitionCreation } from "./core/definition-create";
+import { DefinitionDeletionService } from "./core/definition-delete";
+import type { DefinitionDeletionImpact } from "./core/definition-lifecycle";
 import { canPublishCoreReady } from "./core/core-readiness";
 import { recoverWithColdBuild } from "./core/startup-recovery";
 import { formatCacheBytes } from "./core/cache-size";
@@ -99,10 +101,12 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, and deletion itself now uses structural Review/Apply/Cancel with impact rechecks, stale-content protection, and guarded undo/redo. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, and the deletion service is now bound to real vault storage plus a foreground impact provider that fully hydrates occurrence evidence before any destructive review. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
+  /** Destructive definition deletion is governed by complete impact evidence and shared history. */
+  definitionDeleter: DefinitionDeletionService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
   detail: NoteDetailPanel | null = null;
@@ -374,6 +378,32 @@ export default class MdseWorkbench extends Plugin {
     const editor = this.modelEditor;
     if (!editor) throw new Error("Workbench is still starting.");
     editor.cancelLocalPatch(transactionId);
+  }
+
+  private async definitionDeletionImpact(path: string): Promise<DefinitionDeletionImpact> {
+    const indexer = this.indexer;
+    if (!indexer || !this.isReady()) throw new Error("Workbench is still starting.");
+
+    // Destructive lifecycle decisions require complete evidence, never the bounded retained subset.
+    await indexer.whenSourceSettled();
+    await indexer.whenLocalSettled(true);
+
+    const normalized = normalizePath(path);
+    const noteUses = indexer.index.in(normalized).map((use) => ({
+      fromPath: use.from,
+      field: use.field,
+    }));
+    const occurrenceUses = indexer.local.occurrencesOf(
+      normalized,
+      (target, fromPath) => this.app.metadataCache.getFirstLinkpathDest(target, fromPath)?.path,
+    ).map(({ path: ownerPath, record }) => ({
+      ownerPath,
+      localId: record.localId,
+      kind: record.kind,
+      identifier: record.identifier,
+    }));
+
+    return { definitionPath: normalized, noteUses, occurrenceUses };
   }
 
   private async definitionImpact(path: string): Promise<{ rows: string[]; notes: number; occurrences: number }> {
@@ -999,6 +1029,25 @@ export default class MdseWorkbench extends Plugin {
           },
         },
         (uid) => this.definitionUidInUse(uid),
+        this.transactions,
+      );
+      this.definitionDeleter = new DefinitionDeletionService(
+        {
+          exists: async (path) => this.app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
+          read: async (path) => this.app.vault.read(localFile(normalizePath(path))),
+          remove: async (path) => {
+            const normalized = normalizePath(path);
+            const file = this.app.vault.getAbstractFileByPath(normalized);
+            if (!(file instanceof TFile)) throw new Error(normalized + " no longer exists.");
+            await this.app.vault.delete(file);
+          },
+          create: async (path, text) => {
+            const normalized = normalizePath(path);
+            if (this.app.vault.getAbstractFileByPath(normalized)) throw new Error(normalized + " already exists.");
+            await this.app.vault.create(normalized, text);
+          },
+        },
+        (path) => this.definitionDeletionImpact(path),
         this.transactions,
       );
       this.assurance = new AssuranceManager({
