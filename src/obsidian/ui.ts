@@ -129,6 +129,7 @@ export class LocalPartCreateModal extends Modal {
     app: App,
     private readonly ownerName: string,
     private readonly localId: string,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (input: NewLocalRecord) => Promise<StagedLocalCreate>,
     private readonly apply: (transactionId: string) => Promise<void>,
     private readonly cancel: (transactionId: string) => void,
@@ -168,7 +169,13 @@ export class LocalPartCreateModal extends Modal {
     };
 
     const heading = field("Occurrence name", "", "K1");
-    const definition = field("Reusable definition", "", "[[Main Contactor]]");
+    const definitionRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    definitionRow.createEl("label", { text: "Reusable definition" });
+    const definition = definitionRow.createEl("select", { cls: "mdse-detail-input" });
+    definition.createEl("option", { text: "Choose a model definition…", value: "" });
+    for (const option of this.definitions) {
+      definition.createEl("option", { text: `${option.name} — ${option.type ?? "model"}`, value: option.path });
+    }
     const usage = field("Usage", "standard", "standard");
     const multiplicity = field("Multiplicity", "", "optional");
 
@@ -182,8 +189,11 @@ export class LocalPartCreateModal extends Modal {
       void (async () => {
         review.disabled = true;
         try {
+          const selected = this.definitions.find((option) => option.path === definition.value);
+          if (!selected) throw new Error("Choose a reusable definition from the model.");
+          const definitionLink = `[[${selected.path.replace(/\.md$/i, "")}]]`;
           const fields: Record<string, string> = {
-            definition: definition.value.trim(),
+            definition: definitionLink,
           };
           if (usage.value.trim() && usage.value.trim() !== "standard") fields.usage = usage.value.trim();
           if (multiplicity.value.trim()) fields.multiplicity = multiplicity.value.trim();
@@ -197,7 +207,7 @@ export class LocalPartCreateModal extends Modal {
           this.staged = staged;
           this.renderReview(staged, {
             heading: heading.value.trim(),
-            definition: definition.value.trim(),
+            definition: definitionLink,
             usage: usage.value.trim() || "standard",
             multiplicity: multiplicity.value.trim(),
           });
@@ -1443,6 +1453,7 @@ export class LocalPartDefinitionEditModal extends Modal {
     app: App,
     private readonly ownerName: string,
     private readonly part: LocalRecord,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (definition: string) => Promise<StagedLocalPatch>,
     private readonly apply: (id: string) => Promise<void>,
     private readonly cancel: (id: string) => void,
@@ -1456,13 +1467,14 @@ export class LocalPartDefinitionEditModal extends Modal {
 
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Reusable definition" });
-    const input = row.createEl("input", {
-      type: "text",
-      cls: "mdse-detail-input",
-      value: this.part.definition?.text ?? "",
-    });
-    input.setAttr("placeholder", "[[Main Contactor]]");
-    input.onkeydown = (e) => e.stopPropagation();
+    const input = row.createEl("select", { cls: "mdse-detail-input" });
+    input.createEl("option", { text: "Choose a model definition…", value: "" });
+    const currentTarget = this.part.definition?.target ?? "";
+    for (const option of this.definitions) {
+      const item = input.createEl("option", { text: `${option.name} — ${option.type ?? "model"}`, value: option.path });
+      const stem = option.path.replace(/\.md$/i, "");
+      if (currentTarget === stem || currentTarget === option.name) item.selected = true;
+    }
 
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
@@ -1470,8 +1482,9 @@ export class LocalPartDefinitionEditModal extends Modal {
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
-        const value = input.value.trim();
-        if (!value) throw new Error("Part occurrences require a reusable definition.");
+        const selected = this.definitions.find((option) => option.path === input.value);
+        if (!selected) throw new Error("Choose a reusable definition from the model.");
+        const value = `[[${selected.path.replace(/\.md$/i, "")}]]`;
         const staged = await this.stage(value);
         this.staged = staged;
         this.renderReview(staged, value);
