@@ -7,6 +7,7 @@ import type { LocalRecord } from "../core/localmodel";
 import type { StagedLocalCreate, StagedLocalDelete, StagedLocalPatch } from "../core/model-edit";
 import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { StagedDefinitionDelete } from "../core/definition-delete";
+import type { StagedDefinitionRetirement } from "../core/definition-retire";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -2325,6 +2326,118 @@ export class DefinitionDeleteModal extends Modal {
         } catch (e) {
           new Notice(`Definition was not deleted: ${(e as Error).message}`, 15000);
           apply.disabled = !staged.impact.allowed;
+        }
+      })();
+    };
+  }
+}
+
+
+export class DefinitionRetireModal extends Modal {
+  private staged: StagedDefinitionRetirement | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly definitionName: string,
+    private readonly stage: () => Promise<StagedDefinitionRetirement>,
+    private readonly apply: (transactionId: string) => Promise<void>,
+    private readonly cancel: (transactionId: string) => void,
+    private readonly onApplied: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText("Review definition retirement");
+    void this.load();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try { this.cancel(staged.transaction.id); } catch { /* already closed */ }
+    }
+  }
+
+  private async load(): Promise<void> {
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Checking every current use of ${this.definitionName} before retirement…`,
+    });
+    try {
+      const staged = await this.stage();
+      this.staged = staged;
+      this.renderReview(staged);
+    } catch (e) {
+      this.contentEl.empty();
+      this.contentEl.createEl("p", { cls: "mdse-warn", text: `Cannot stage retirement: ${(e as Error).message}` });
+      const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+      buttons.createEl("button", { text: "Close" }).onclick = () => this.close();
+    }
+  }
+
+  private renderReview(staged: StagedDefinitionRetirement): void {
+    this.contentEl.empty();
+
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: Array<[string, string]> = [
+      ["Definition", this.definitionName],
+      ["Path", staged.path],
+      ["UID", staged.uid],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+      ["Current status", staged.plan.fromStatus ?? "unset"],
+      ["New status", staged.plan.toStatus],
+      ["Note-level uses", String(staged.plan.noteUseCount)],
+      ["Local Model occurrences", String(staged.plan.occurrenceUseCount)],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    if (staged.plan.impactRows.length) {
+      const impact = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      impact.createEl("strong", { text: "Preserved active uses" });
+      for (const row of staged.plan.impactRows) impact.createEl("p", { text: row });
+      impact.createEl("p", {
+        text: "Retirement preserves these references exactly as authored. Migration is a separate supersession workflow.",
+      });
+    } else {
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "No current note-level or Local Model occurrence uses were found. Retirement still changes only canonical lifecycle status.",
+      });
+    }
+
+    if (!staged.plan.changed) {
+      this.contentEl.createEl("p", { cls: "mdse-warn", text: "This definition is already retired. No additional retirement change is available." });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const apply = buttons.createEl("button", { text: "Retire definition", cls: "mod-warning" });
+    apply.disabled = !staged.plan.changed;
+    apply.setAttr("title", staged.plan.changed
+      ? "Set only the canonical definition status to retired. Existing references are preserved."
+      : "This definition is already retired.");
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied();
+          new Notice(`Retired reusable definition ${this.definitionName}. Existing references were preserved.`, 6000);
+        } catch (e) {
+          new Notice(`Definition was not retired: ${(e as Error).message}`, 15000);
+          apply.disabled = !staged.plan.changed;
         }
       })();
     };
