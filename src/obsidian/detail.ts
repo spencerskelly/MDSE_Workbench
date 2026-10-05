@@ -10,7 +10,7 @@ import { bodyOf, propertyRows, relationshipRows, type PropertyRow } from "../cor
 import { coerceValue, parseListInput, propertyEditor } from "../core/edit";
 import type { NoteRecord } from "../core/model";
 import { parseLocalModel, type LinkRef, type LocalRecord } from "../core/localmodel";
-import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
+import { nextAvailableLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
@@ -224,13 +224,13 @@ export class NoteDetailPanel extends Component {
     }
     if (this.editing) {
       const addPart = head.createEl("button", { text: "Add part occurrence…", cls: "mdse-detail-btn" });
-      addPart.onclick = () => this.createPartOccurrence(file);
+      addPart.onclick = () => { void this.createPartOccurrence(file); };
     }
     if (this.editing && record.kind === "part") {
       const definition = head.createEl("button", { text: "Change definition…", cls: "mdse-detail-btn" });
       definition.onclick = () => this.editPartDefinition(file, record);
       const addEndpoint = head.createEl("button", { text: "Add endpoint…", cls: "mdse-detail-btn" });
-      addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
+      addEndpoint.onclick = () => { void this.createEndpointOccurrence(file, record); };
     }
     if (this.editing && record.kind === "endpoint") {
       const definition = head.createEl("button", { text: "Change definition…", cls: "mdse-detail-btn" });
@@ -254,7 +254,7 @@ export class NoteDetailPanel extends Component {
       const rewireB = head.createEl("button", { text: "Change endpoint B…", cls: "mdse-detail-btn" });
       rewireB.onclick = () => { void this.rewireConnectionEndpoint(file, record, "endpointB"); };
       const addFlow = head.createEl("button", { text: "Add flow…", cls: "mdse-detail-btn" });
-      addFlow.onclick = () => this.createFlowOccurrence(file, record);
+      addFlow.onclick = () => { void this.createFlowOccurrence(file, record); };
     }
     if (this.editing && record.kind === "flow") {
       const definition = head.createEl("button", { text: "Change definition…", cls: "mdse-detail-btn" });
@@ -610,13 +610,16 @@ export class NoteDetailPanel extends Component {
     }
   }
 
-  private createFlowOccurrence(file: TFile, connection: LocalRecord): void {
+  private async createFlowOccurrence(file: TFile, connection: LocalRecord): Promise<void> {
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("flow", ownerUid);
+      const localId = nextAvailableLocalId("flow", ownerUid, region.records.map((record) => record.localId));
       new LocalFlowCreateModal(
         this.app,
         file.basename,
@@ -643,7 +646,7 @@ export class NoteDetailPanel extends Component {
       if (!options.length) throw new Error("This note has no second endpoint occurrence to connect.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("connection", ownerUid);
+      const localId = nextAvailableLocalId("connection", ownerUid, region.records.map((record) => record.localId));
       new LocalConnectionCreateModal(
         this.app,
         file.basename,
@@ -660,13 +663,16 @@ export class NoteDetailPanel extends Component {
     }
   }
 
-  private createEndpointOccurrence(file: TFile, part: LocalRecord): void {
+  private async createEndpointOccurrence(file: TFile, part: LocalRecord): Promise<void> {
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("endpoint", ownerUid);
+      const localId = nextAvailableLocalId("endpoint", ownerUid, region.records.map((record) => record.localId));
       new LocalEndpointCreateModal(
         this.app,
         file.basename,
@@ -703,13 +709,16 @@ export class NoteDetailPanel extends Component {
     }
   }
 
-  private createPartOccurrence(file: TFile): void {
+  private async createPartOccurrence(file: TFile): Promise<void> {
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextLocalId("part", ownerUid);
+      const localId = nextAvailableLocalId("part", ownerUid, region.records.map((record) => record.localId));
       new LocalPartCreateModal(
         this.app,
         file.basename,
