@@ -2448,7 +2448,9 @@ export class DefinitionRetireModal extends Modal {
 
 export class DefinitionSupersedeModal extends Modal {
   private staged: StagedDefinitionSupersession | null = null;
+  private stagedMigration: StagedLocalPatch | null = null;
   private applied = false;
+  private migrationApplied = false;
 
   constructor(
     app: App,
@@ -2457,6 +2459,9 @@ export class DefinitionSupersedeModal extends Modal {
     private readonly stage: (replacementPath: string) => Promise<StagedDefinitionSupersession>,
     private readonly apply: (transactionId: string) => Promise<void>,
     private readonly cancel: (transactionId: string) => void,
+    private readonly stageMigration: (ownerPath: string, localId: string, replacedPath: string, replacementPath: string) => Promise<StagedLocalPatch>,
+    private readonly applyMigration: (transactionId: string) => Promise<void>,
+    private readonly cancelMigration: (transactionId: string) => void,
     private readonly onApplied: () => void,
   ) {
     super(app);
@@ -2468,8 +2473,13 @@ export class DefinitionSupersedeModal extends Modal {
 
   onClose(): void {
     const staged = this.staged;
+    const migration = this.stagedMigration;
     this.staged = null;
+    this.stagedMigration = null;
     this.contentEl.empty();
+    if (migration && !this.migrationApplied) {
+      try { this.cancelMigration(migration.transaction.id); } catch { /* already closed */ }
+    }
     if (staged && !this.applied) {
       try { this.cancel(staged.transaction.id); } catch { /* already closed */ }
     }
@@ -2568,9 +2578,9 @@ export class DefinitionSupersedeModal extends Modal {
           await this.apply(staged.transaction.id);
           this.applied = true;
           this.staged = null;
-          this.close();
           this.onApplied();
           new Notice(`Recorded supersession for ${this.replacedName}. Dependent migration remains explicit.`, 7000);
+          this.renderMigration(staged);
         } catch (e) {
           new Notice(`Supersession was not applied: ${(e as Error).message}`, 15000);
           apply.disabled = false;
@@ -2578,4 +2588,116 @@ export class DefinitionSupersedeModal extends Modal {
       })();
     };
   }
+
+  private renderMigration(staged: StagedDefinitionSupersession): void {
+    this.titleEl.setText("Migrate one occurrence");
+    this.contentEl.empty();
+
+    const occurrenceCandidates = staged.plan.migrationCandidates.filter(
+      (candidate) => candidate.scope === "occurrence" && !!candidate.localId,
+    );
+
+    this.contentEl.createEl("p", {
+      text: "Supersession is recorded. You may now migrate one Local Model occurrence as a separate reviewed transaction. Workbench rechecks that the occurrence still uses the superseded definition before staging.",
+    });
+
+    if (!occurrenceCandidates.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "There are no Local Model occurrences to migrate." });
+      const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+      buttons.createEl("button", { text: "Done", cls: "mod-cta" }).onclick = () => this.close();
+      return;
+    }
+
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Occurrence" });
+    const pick = row.createEl("select", { cls: "mdse-detail-input" });
+    pick.createEl("option", { text: "Choose occurrence…", value: "" });
+    occurrenceCandidates.forEach((candidate, index) => {
+      pick.createEl("option", {
+        text: `${candidate.ownerPath} — ${candidate.kind} ${candidate.identifier} (^${candidate.localId})`,
+        value: String(index),
+      });
+    });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Done" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review migration", cls: "mod-cta" });
+    review.onclick = () => {
+      void (async () => {
+        review.disabled = true;
+        try {
+          const candidate = occurrenceCandidates[Number(pick.value)];
+          if (!candidate?.localId) throw new Error("Choose an occurrence.");
+          const migration = await this.stageMigration(
+            candidate.ownerPath,
+            candidate.localId,
+            staged.plan.replacedPath,
+            staged.plan.replacementPath,
+          );
+          this.stagedMigration = migration;
+          this.renderMigrationReview(staged, candidate, migration);
+        } catch (e) {
+          new Notice(`Cannot stage occurrence migration: ${(e as Error).message}`, 15000);
+          review.disabled = false;
+        }
+      })();
+    };
+  }
+
+  private renderMigrationReview(
+    supersession: StagedDefinitionSupersession,
+    candidate: StagedDefinitionSupersession["plan"]["migrationCandidates"][number],
+    migration: StagedLocalPatch,
+  ): void {
+    this.titleEl.setText("Review occurrence migration");
+    this.contentEl.empty();
+
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: Array<[string, string]> = [
+      ["Owner", candidate.ownerPath],
+      ["Occurrence", `${candidate.kind ?? "occurrence"} ${candidate.identifier ?? candidate.localId ?? ""}`],
+      ["From definition", supersession.plan.replacedPath],
+      ["To definition", supersession.plan.replacementPath],
+      ["Transaction", migration.transaction.label],
+      ["Scope", migration.transaction.scope],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+    for (const finding of migration.plan.findings) {
+      this.contentEl.createEl("p", {
+        text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+        cls: finding.severity === "error" ? "mdse-warn" : undefined,
+      });
+    }
+
+    const blocking = migration.plan.findings.some((finding) => finding.severity === "error");
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel migration" }).onclick = () => {
+      try { this.cancelMigration(migration.transaction.id); } finally {
+        this.stagedMigration = null;
+        this.renderMigration(supersession);
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply occurrence migration", cls: "mod-cta" });
+    apply.disabled = blocking;
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.applyMigration(migration.transaction.id);
+          this.migrationApplied = true;
+          this.stagedMigration = null;
+          new Notice(`Migrated occurrence ^${candidate.localId} to the replacement definition.`, 6000);
+          this.close();
+        } catch (e) {
+          new Notice(`Occurrence migration was not applied: ${(e as Error).message}`, 15000);
+          apply.disabled = blocking;
+        }
+      })();
+    };
+  }
 }
+
