@@ -722,3 +722,109 @@ test("endpoint part reassignment surfaces a missing target as blocking validatio
     finding.severity === "error"
   ));
 });
+
+
+test("plans endpoint parent reassignment without changing part or endpoint identity", () => {
+  const endpointId = "ep-20261005005000002skellyspencer";
+  const parentId = "ep-20261005005000003skellyspencer";
+  const partId = "part-20261005005000000skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Main Contactor]]",
+    "^" + partId,
+    "",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partId + "|K1]]",
+    "^" + endpointId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partId + "|K1]]",
+    "^" + parentId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    endpointId,
+    { fields: { parent: "[[#^" + parentId + "|J2]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
+  assert.equal(endpoint?.localId, endpointId);
+  assert.equal(endpoint?.part?.blockId, partId);
+  assert.equal(endpoint?.parent?.blockId, parentId);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("plans clearing an endpoint parent while preserving other endpoint topology", () => {
+  const endpointId = "ep-20261005005100002skellyspencer";
+  const parentId = "ep-20261005005100003skellyspencer";
+  const exposedId = "ep-20261005005100004skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "- parent: [[#^" + parentId + "|J2]]",
+    "- exposes: [[#^" + exposedId + "|J3]]",
+    "^" + endpointId,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + parentId,
+    "",
+    "#### J3",
+    "- definition: [[CAN Port]]",
+    "^" + exposedId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    endpointId,
+    { fields: { parent: null } },
+    { allowInvalidTarget: true },
+  );
+
+  const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
+  assert.equal(endpoint?.parent, null);
+  assert.equal(endpoint?.exposes[0]?.blockId, exposedId);
+});
+
+test("endpoint parent reassignment surfaces a missing target as blocking validation", () => {
+  const endpointId = "ep-" + tokenC;
+  const result = planLocalRecordPatch(
+    note(),
+    endpointId,
+    { fields: { parent: "[[#^ep-20261005005200099skellyspencer|Missing]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === endpointId &&
+    finding.code === "ref.local-missing" &&
+    finding.severity === "error"
+  ));
+});
