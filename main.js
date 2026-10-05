@@ -5844,6 +5844,114 @@ var LocalEndpointEqualsEditModal = class extends import_obsidian3.Modal {
     })();
   }
 };
+var LocalConnectionEndpointRewireModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, connection, end, options, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.connection = connection;
+    this.end = end;
+    this.options = options;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.titleEl.setText(`Rewire connection ${this.end}`);
+    this.contentEl.empty();
+    const other = this.end === "endpointA" ? this.connection.endpointB : this.connection.endpointA;
+    this.contentEl.createEl("p", { text: `Change only ${this.end} on ${this.connection.identifier}. The opposite endpoint and all child flows remain unchanged.` });
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "New endpoint" });
+    const pick = row.createEl("select", { cls: "mdse-detail-input" });
+    pick.createEl("option", { text: "Choose endpoint...", value: "" });
+    for (const option of this.options) pick.createEl("option", { text: `${option.identifier} - ^${option.localId}`, value: option.localId });
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Connection: ${this.connection.identifier} (#^${this.connection.localId})` });
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Other end: ${other?.text ?? "-"}` });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void this.stageReview(pick.value, review);
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  async stageReview(localId, review) {
+    review.disabled = true;
+    try {
+      const target = this.options.find((option) => option.localId === localId);
+      if (!target) throw new Error("Choose a replacement endpoint.");
+      const staged = await this.stage(target);
+      this.staged = staged;
+      this.renderReview(staged, target);
+    } catch (e) {
+      new import_obsidian3.Notice(`Cannot stage connection rewire: ${e.message}`, 12e3);
+      review.disabled = false;
+    }
+  }
+  renderReview(staged, target) {
+    this.titleEl.setText("Review connection endpoint rewire");
+    this.contentEl.empty();
+    const other = this.end === "endpointA" ? this.connection.endpointB : this.connection.endpointA;
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Connection", this.connection.identifier],
+      ["Changed end", this.end],
+      ["New endpoint", target.identifier],
+      ["Opposite endpoint", other?.text ?? "-"],
+      ["Child flows", "preserved"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope]
+    ];
+    for (const [key2, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: value });
+    }
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: `Validation passed. Apply will change only connection ${this.end}.` });
+    } else {
+      for (const finding of staged.plan.findings) {
+        this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : void 0 });
+      }
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new import_obsidian3.Notice(`Rewired ${this.connection.identifier} ${this.end} to ${target.identifier}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -6153,6 +6261,14 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       };
     }
     if (this.editing && record.kind === "connection") {
+      const rewireA = head.createEl("button", { text: "Change endpoint A\u2026", cls: "mdse-detail-btn" });
+      rewireA.onclick = () => {
+        void this.rewireConnectionEndpoint(file, record, "endpointA");
+      };
+      const rewireB = head.createEl("button", { text: "Change endpoint B\u2026", cls: "mdse-detail-btn" });
+      rewireB.onclick = () => {
+        void this.rewireConnectionEndpoint(file, record, "endpointB");
+      };
       const addFlow = head.createEl("button", { text: "Add flow\u2026", cls: "mdse-detail-btn" });
       addFlow.onclick = () => this.createFlowOccurrence(file, record);
     }
@@ -6380,6 +6496,37 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       ).open();
     } catch (e) {
       new import_obsidian4.Notice(`Cannot reassign endpoint part: ${e.message}`, 12e3);
+    }
+  }
+  async rewireConnectionEndpoint(file, connection, end) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const current = end === "endpointA" ? connection.endpointA?.blockId : connection.endpointB?.blockId;
+      const options = region.records.filter((record) => record.kind === "endpoint" && record.localId !== current);
+      if (!options.length) throw new Error("This note has no alternate endpoint occurrence.");
+      new LocalConnectionEndpointRewireModal(
+        this.app,
+        file.basename,
+        connection,
+        end,
+        options,
+        (target) => editor.stageLocalRecordPatch(file.path, connection.localId, {
+          fields: { [end]: `[[#^${target.localId}|${target.identifier}]]` }
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => {
+          editor.cancelLocalPatch(transactionId);
+        },
+        () => {
+          void this.refreshLocal(file, connection.localId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot rewire connection endpoint: ${e.message}`, 12e3);
     }
   }
   createFlowOccurrence(file, connection) {
