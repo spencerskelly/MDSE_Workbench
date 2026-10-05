@@ -17,6 +17,8 @@ export interface DefinitionNoteMigrationPlan {
   replacementPath: string;
   inverseField: string | null;
   symmetric: boolean;
+  /** True when owner.field is the inverse side of a paired relationship. */
+  authoredAsInverse: boolean;
   sourceMutation: { removeTarget: string; addTarget: string };
   inverseMutations: Array<{ path: string; field: string; removeTarget?: string; addTarget?: string }>;
 }
@@ -40,7 +42,15 @@ export function planDefinitionNoteMigration(request: DefinitionNoteMigrationRequ
   if (!field) throw new Error("Relationship field is required.");
   if (!replacedPath || !replacementPath) throw new Error("Both superseded and replacement definition paths are required.");
   if (replacedPath === replacementPath) throw new Error("Superseded and replacement definitions must be different.");
-  if (request.relationship.field !== field) throw new Error(`Relationship schema mismatch: expected ${request.relationship.field}, got ${field}.`);
+  const symmetric = request.relationship.kind === "symmetric";
+  const authoredAsForward = request.relationship.field === field;
+  const authoredAsInverse = !symmetric && !!request.relationship.inverse && request.relationship.inverse === field;
+  if (!authoredAsForward && !authoredAsInverse) {
+    const expected = request.relationship.inverse
+      ? `${request.relationship.field} or ${request.relationship.inverse}`
+      : request.relationship.field;
+    throw new Error(`Relationship schema mismatch: expected ${expected}, got ${field}.`);
+  }
   if (!currentTargets.includes(replacedPath)) {
     throw new Error(`Relationship changed from the superseded definition; ${field} no longer targets ${replacedPath}.`);
   }
@@ -48,8 +58,11 @@ export function planDefinitionNoteMigration(request: DefinitionNoteMigrationRequ
     throw new Error(`Relationship already targets replacement definition ${replacementPath}.`);
   }
 
-  const symmetric = request.relationship.kind === "symmetric";
-  const inverseField = symmetric ? field : request.relationship.inverse ?? null;
+  const inverseField = symmetric
+    ? field
+    : authoredAsInverse
+      ? request.relationship.field
+      : request.relationship.inverse ?? null;
   const inverseMutations: DefinitionNoteMigrationPlan["inverseMutations"] = [];
 
   if (inverseField) {
@@ -72,6 +85,7 @@ export function planDefinitionNoteMigration(request: DefinitionNoteMigrationRequ
     replacementPath,
     inverseField,
     symmetric,
+    authoredAsInverse,
     sourceMutation: { removeTarget: replacedPath, addTarget: replacementPath },
     inverseMutations,
   };
