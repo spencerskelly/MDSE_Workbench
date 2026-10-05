@@ -396,3 +396,55 @@ test("note migration refuses staging when indexed source UIDs no longer match ca
   );
   assert.equal(tx.history().length,0);
 });
+
+
+test("one-way note migration refuses Apply and Redo when replacement path keeps a different UID",async()=>{
+  const oneWay={
+    field:"participants",kind:"oneWay",from:"any",to:"any",sameClass:false,
+    excludePairs:[],provisional:false,temporary:false,order:0,
+  } as RelationshipDef;
+  const oneWayOwner="20_UseCases/Charge Identity.md";
+  const oneWayOwnerText="---\ntype: Use Case\nuid: 20261005061500013skellyspencer\nparticipants:\n  - \"[[30_Objects/Old Contactor]]\"\n---\n\n# Charge Identity\n";
+  const replacementUid="20261005061500002skellyspencer";
+  const replacementChangedUid="20261005061500099skellyspencer";
+  const swappedNewText=newText.replace(replacementUid,replacementChangedUid);
+
+  const store=new MemoryStore();
+  store.files.set(oneWayOwner,oneWayOwnerText);
+  store.files.set(oldPath,oldText);
+  store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
+
+  const staged=await service.stageAndReview({
+    ownerPath:oneWayOwner,
+    ownerUid:"20261005061500013skellyspencer",
+    field:"participants",
+    replacedPath:oldPath,
+    replacedUid:"20261005061500001skellyspencer",
+    replacementPath:newPath,
+    replacementUid,
+    relationship:oneWay,
+  });
+  store.files.set(newPath,swappedNewText);
+  await assert.rejects(service.apply(staged.transaction.id),/identity changed; expected uid .* found/);
+  assert.equal(await store.read(oneWayOwner),oneWayOwnerText);
+  service.cancel(staged.transaction.id);
+
+  store.files.set(newPath,newText);
+  const staged2=await service.stageAndReview({
+    ownerPath:oneWayOwner,
+    ownerUid:"20261005061500013skellyspencer",
+    field:"participants",
+    replacedPath:oldPath,
+    replacedUid:"20261005061500001skellyspencer",
+    replacementPath:newPath,
+    replacementUid,
+    relationship:oneWay,
+  });
+  await service.apply(staged2.transaction.id);
+  await tx.undo();
+  store.files.set(newPath,swappedNewText);
+  await assert.rejects(tx.redo(),/identity changed; expected uid .* found/);
+  assert.equal(await store.read(oneWayOwner),oneWayOwnerText);
+});
