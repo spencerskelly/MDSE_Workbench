@@ -16,6 +16,7 @@ import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { StagedDefinitionDelete } from "../core/definition-delete";
 import type { StagedDefinitionRetirement } from "../core/definition-retire";
 import type { StagedDefinitionSupersession } from "../core/definition-supersede-service";
+import type { DefinitionMigrationCandidate } from "../core/definition-supersede";
 import type { StagedDefinitionNoteMigration } from "../core/definition-note-migrate-service";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
@@ -54,6 +55,7 @@ export interface DetailHost {
   applyDefinitionOccurrenceMigration(transactionId: string): Promise<void>;
   cancelDefinitionOccurrenceMigration(transactionId: string): void;
   stageDefinitionNoteMigration(ownerPath: string, field: string, replacedPath: string, replacementPath: string): Promise<StagedDefinitionNoteMigration>;
+  definitionSupersessionMigrationCandidates(replacedPath: string): Promise<DefinitionMigrationCandidate[]>;
   applyDefinitionNoteMigration(transactionId: string): Promise<void>;
   cancelDefinitionNoteMigration(transactionId: string): void;
   stageOccurrenceDefinitionBinding(ownerPath: string, localId: string, definitionPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
@@ -206,6 +208,7 @@ export class NoteDetailPanel extends Component {
           (ownerPath, field, replacedPath, replacementPath) => this.host.stageDefinitionNoteMigration(ownerPath, field, replacedPath, replacementPath),
           (transactionId) => this.host.applyDefinitionNoteMigration(transactionId),
           (transactionId) => this.host.cancelDefinitionNoteMigration(transactionId),
+          (replacedPath) => this.host.definitionSupersessionMigrationCandidates(replacedPath),
           () => { void this.show(file, false); },
         ).open();
       };
