@@ -209,6 +209,16 @@ export class NoteDetailPanel extends Component {
           (transactionId) => this.host.applyDefinitionNoteMigration(transactionId),
           (transactionId) => this.host.cancelDefinitionNoteMigration(transactionId),
           (replacedPath) => this.host.definitionSupersessionMigrationCandidates(replacedPath),
+          () => {
+            new DefinitionRetireModal(
+              this.app,
+              file.basename,
+              () => this.host.stageDefinitionRetirement(file.path, uid),
+              (transactionId) => this.host.applyDefinitionRetirement(transactionId),
+              (transactionId) => this.host.cancelDefinitionRetirement(transactionId),
+              () => { void this.show(file, false); },
+            ).open();
+          },
           () => { void this.show(file, false); },
         ).open();
       };
