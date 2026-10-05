@@ -1,5 +1,5 @@
-schemaVersion: '1.17'
-date: '2026-10-02'
+schemaVersion: '1.18'
+date: '2026-10-05'
 basis: MDSE ruleset 1.23
 commonProperties: [type, subtype, id, uid, status, tags]   # order fixed by W-97
 optionalProperties:
@@ -13,31 +13,22 @@ translatedOnlyProperties: [eaType]   # written by the translator, between status
 classes:
 - name: Object
   prefix: OBJ
-  subtype: ["electrical", "circuit", "mechanical", "software", "firmware", "part"]
-- name: Port
-  prefix: PORT
-  subtype: ["proxy", "full"]
+  subtype: ["electrical", "circuit", "mechanical", "software", "firmware", "part", "interface"]
 - name: Item Flow
   prefix: IFLOW
   subtype: ["information", "energy", "material"]
-- name: Function
-  prefix: FUNC
-  subtype: []
+- name: Behavior
+  prefix: BEH
+  subtype: ["function", "activity", "action", "step"]
 - name: Functional Flow
   prefix: FFLOW
   subtype: []
-- name: State
-  prefix: STATE
-  subtype: []
-- name: State Machine
-  prefix: SM
-  subtype: []
+- name: Condition
+  prefix: COND
+  subtype: ["state", "state machine", "mode", "design"]
 - name: Requirement
   prefix: REQ
   subtype: ["functional", "design", "standard", "stakeholder", "engineering"]
-- name: Design
-  prefix: DES
-  subtype: []
 - name: Use Case
   prefix: UC
   subtype: ["what", "where", "why", "when", "who"]
@@ -52,9 +43,6 @@ classes:
   subtype: ["engineering issue", "lifecycle risk"]
 - name: Info
   prefix: INFO
-  subtype: []
-- name: Step
-  prefix: STEP
   subtype: []
 - name: Verification
   prefix: VER
@@ -80,7 +68,7 @@ classes:
 - name: modelCheck
   prefix: MC
   folder: null   # no folder of its own: translated notes stay in their EA package folders (W-117, W-181)
-  subtype: ["Action", "StateNode", "Change", "Boundary", "Decision", "ActivityPartition", "Trigger", "Synchronization", "Sequence", "ActionPin", "ProxyConnector", "Event", "ActivityParameter", "Package"]
+  subtype: ["StateNode", "Change", "Boundary", "Decision", "ActivityPartition", "Trigger", "Synchronization", "Sequence", "ActionPin", "ProxyConnector", "Event", "ActivityParameter", "Package"]
   note: 'Holding class for EA elements with no approved mapping; the subtype is the EA type (W-100, W-146, W-147). Sorted in stage 2 (Post-Import Task 7). Not meant to be created by hand (W-181).'
 - name: Diagram
   prefix: DIA
