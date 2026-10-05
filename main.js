@@ -1098,6 +1098,7 @@ var ModelEditService = class {
     this.externalLocalDeleteImpacts = externalLocalDeleteImpacts;
     this.sequence = 0;
     this.pendingCreates = /* @__PURE__ */ new Map();
+    this.pendingPatches = /* @__PURE__ */ new Map();
     this.pendingDeletes = /* @__PURE__ */ new Map();
   }
   async patchLocalRecord(path, localId, patch) {
@@ -1132,6 +1133,60 @@ var ModelEditService = class {
       throw error;
     }
     return { changed: true, plan };
+  }
+  async stageLocalRecordPatch(path, localId, patch) {
+    const before = await this.store.read(path);
+    const plan = planLocalRecordPatch(before, localId, patch, { allowInvalidTarget: true });
+    if (!plan.changed) throw new Error("This structural edit would not change the Local Model.");
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    const txId = `local-patch-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `reassign ${plan.kind} ${localId}`;
+    this.transactions.begin(txId, label, "structural");
+    const transaction = this.transactions.add(txId, {
+      id: txId + "-patch",
+      label,
+      changes: [{
+        kind: "local.patch",
+        summary: label,
+        refs: [localRef(uid, plan.kind, localId)],
+        metadata: { path, localId, localKind: plan.kind }
+      }]
+    });
+    this.pendingPatches.set(txId, { path, plan, label });
+    return { transaction, plan, path };
+  }
+  reviewLocalPatch(transactionId) {
+    const pending = this.requirePendingPatch(transactionId);
+    return {
+      transaction: this.transactions.review(transactionId),
+      plan: pending.plan,
+      path: pending.path
+    };
+  }
+  async applyLocalPatch(transactionId) {
+    const pending = this.requirePendingPatch(transactionId);
+    const blocking = pending.plan.findings.filter((finding) => finding.severity === "error");
+    if (blocking.length) {
+      throw new Error(
+        `Cannot apply ${pending.label}: ${blocking.length} blocking Local Model finding${blocking.length === 1 ? "" : "s"} \u2014 ${blocking.map((finding) => finding.message).join(" ")}`
+      );
+    }
+    await this.transactions.apply(transactionId, {
+      apply: async () => this.applyGuarded(pending.path, pending.plan.before, pending.plan.after, pending.label)
+    });
+    this.pendingPatches.delete(transactionId);
+  }
+  cancelLocalPatch(transactionId) {
+    this.requirePendingPatch(transactionId);
+    const cancelled = this.transactions.cancel(transactionId);
+    this.pendingPatches.delete(transactionId);
+    return cancelled;
+  }
+  requirePendingPatch(transactionId) {
+    const pending = this.pendingPatches.get(transactionId);
+    if (!pending) throw new Error(`Structural Local Model patch transaction ${transactionId} does not exist.`);
+    return pending;
   }
   /**
    * Stage creation of one Local Model record. Planning and validation happen now, but the vault is
@@ -5337,6 +5392,111 @@ var LocalFlowCreateModal = class extends import_obsidian3.Modal {
     })();
   }
 };
+var LocalEndpointPartReassignModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, endpoint2, parts, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.endpoint = endpoint2;
+    this.parts = parts;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.compose();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  compose() {
+    this.titleEl.setText("Reassign endpoint part");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Move endpoint ${this.endpoint.identifier} to another existing part occurrence in ${this.ownerName}.` });
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "New part" });
+    const pick = row.createEl("select", { cls: "mdse-detail-input" });
+    pick.createEl("option", { text: "Choose part\u2026", value: "" });
+    for (const part of this.parts) {
+      pick.createEl("option", { text: `${part.identifier} \u2014 ^${part.localId}`, value: part.localId });
+    }
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Endpoint: ${this.endpoint.identifier} (#^${this.endpoint.localId})` });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const target = this.parts.find((part) => part.localId === pick.value);
+        if (!target) throw new Error("Choose a target part.");
+        const staged = await this.stage(target);
+        this.staged = staged;
+        this.renderReview(staged, target);
+      } catch (e) {
+        new import_obsidian3.Notice(`Cannot stage part reassignment: ${e.message}`, 12e3);
+        review.disabled = false;
+      }
+    })();
+  }
+  renderReview(staged, target) {
+    this.titleEl.setText("Review endpoint part reassignment");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Endpoint", this.endpoint.identifier],
+      ["New part", target.identifier],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope]
+    ];
+    for (const [k, v] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: k });
+      tr.createEl("td", { text: v });
+    }
+    const blocking = staged.plan.findings.filter((f) => f.severity === "error");
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will change only the endpoint part assignment." });
+    } else {
+      for (const f of staged.plan.findings) {
+        this.contentEl.createEl("p", { text: `${f.severity.toUpperCase()}: ${f.message}`, cls: f.severity === "error" ? "mdse-warn" : void 0 });
+      }
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new import_obsidian3.Notice(`Reassigned endpoint ${this.endpoint.identifier} to ${target.identifier}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -5624,6 +5784,10 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
     }
     if (this.editing && record.kind === "endpoint") {
+      const reassignPart = head.createEl("button", { text: "Change part\u2026", cls: "mdse-detail-btn" });
+      reassignPart.onclick = () => {
+        void this.reassignEndpointPart(file, record);
+      };
       const connect = head.createEl("button", { text: "Connect to endpoint\u2026", cls: "mdse-detail-btn" });
       connect.onclick = () => {
         void this.createConnectionOccurrence(file, record);
@@ -5722,6 +5886,36 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       text: this.editing ? "Editing context only. Definition identity and structural/topology links remain separate and read-only here." : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data."
     });
     root.scrollTop = 0;
+  }
+  async reassignEndpointPart(file, endpoint2) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const currentPartId = endpoint2.part?.blockId ?? "";
+      const parts = region.records.filter((record) => record.kind === "part" && record.localId !== currentPartId);
+      if (!parts.length) throw new Error("This note has no alternate part occurrence.");
+      new LocalEndpointPartReassignModal(
+        this.app,
+        file.basename,
+        endpoint2,
+        parts,
+        (part) => editor.stageLocalRecordPatch(file.path, endpoint2.localId, {
+          fields: { part: `[[#^${part.localId}|${part.identifier}]]` }
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => {
+          editor.cancelLocalPatch(transactionId);
+        },
+        () => {
+          void this.refreshLocal(file, endpoint2.localId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot reassign endpoint part: ${e.message}`, 12e3);
+    }
   }
   createFlowOccurrence(file, connection) {
     try {
