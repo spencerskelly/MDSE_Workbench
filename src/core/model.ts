@@ -113,6 +113,22 @@ export class ModelIndex {
     return this.inEdges.get(path) ?? [];
   }
 
+  /**
+   * Every authored governed relationship that points at the target path, regardless of whether
+   * the field is the schema's forward or inverse spelling. Lifecycle impact must use this instead
+   * of in(), because inverse-authored relationships are intentionally not materialized as graph edges.
+   */
+  authoredUsesOf(path: string): Edge[] {
+    const uses: Edge[] = [];
+    for (const rec of this.notes.values()) {
+      for (const [field, targets] of rec.fields) {
+        if (!this.schema.byField.has(field) && !this.schema.byInverse.has(field)) continue;
+        if (targets.includes(path)) uses.push({ from: rec.path, to: path, field });
+      }
+    }
+    return uses.sort((a, b) => a.from.localeCompare(b.from) || a.field.localeCompare(b.field));
+  }
+
   edgeCount(): number {
     let n = 0;
     for (const list of this.outEdges.values()) n += list.length;
