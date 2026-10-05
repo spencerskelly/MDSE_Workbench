@@ -125,3 +125,20 @@ test("definition deletion redo is blocked when supersession provenance appears a
   await assert.rejects(tx.redo(),/active references/);
   assert.equal(await store.exists(path),true);
 });
+
+
+test("definition deletion undo refuses UID collision introduced after delete", async()=>{
+  const store=new MemoryDeleteStore(); store.files.set(path,text);
+  const tx=new TransactionManager();
+  let uidCollision=false;
+  const service=new DefinitionDeletionService(store,async()=>clearImpact(),tx,()=>uidCollision);
+
+  const staged=await service.stageAndReview(path,uid);
+  await service.apply(staged.transaction.id);
+  assert.equal(await store.exists(path),false);
+
+  uidCollision=true;
+  await assert.rejects(tx.undo(),/uid .* is now in use/);
+  assert.equal(await store.exists(path),false);
+  assert.equal(tx.history().length,1);
+});
