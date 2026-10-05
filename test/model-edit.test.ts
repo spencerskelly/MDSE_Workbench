@@ -796,3 +796,53 @@ test("staged flow creation stays unwritten until Apply and supports undo/redo", 
   await transactions.redo();
   assert.match(store.text, /##### Commands/);
 });
+
+
+test("staged flow creation with missing owner connection is rejected before transaction", async () => {
+  const original = noteWithCleanConnection(false);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  await assert.rejects(
+    service.stageLocalRecordCreate("Assembly.md", {
+      kind: "flow",
+      localId: "flow-20261005002400000skellyspencer",
+      connectionId: "conn-20261005002400099skellyspencer",
+      heading: "Commands",
+      fields: {
+        definition: "[[CAN Data]]",
+        endpointA: "transmit",
+        endpointB: "receive",
+      },
+    }),
+    /parent connection .* does not exist/,
+  );
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
+
+test("cancelled flow creation leaves source and history untouched", async () => {
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const original = noteWithCleanConnection(false);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "flow",
+    localId: "flow-20261005002500000skellyspencer",
+    connectionId,
+    heading: "Commands",
+    fields: {
+      definition: "[[CAN Data]]",
+      endpointA: "transmit",
+      endpointB: "receive",
+    },
+  });
+  service.cancelLocalCreate(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
