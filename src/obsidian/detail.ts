@@ -12,9 +12,10 @@ import type { NoteRecord } from "../core/model";
 import { parseLocalModel, type LinkRef, type LocalRecord } from "../core/localmodel";
 import { nextAvailableLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
+import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
+import { ConfirmModal, DefinitionCreateFromOccurrenceModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -32,6 +33,10 @@ export interface DetailHost {
   pickView(path: string): void;
   /** Where-used/occurrence evidence for definition impact review (WB-114). */
   definitionImpact(path: string): Promise<{ rows: string[]; notes: number; occurrences: number }>;
+  stageDefinitionCreation(kind: LocalRecord["kind"], name: string, path: string): StagedDefinitionCreation;
+  applyDefinitionCreation(transactionId: string): Promise<void>;
+  cancelDefinitionCreation(transactionId: string): void;
+  bindOccurrenceDefinition(ownerPath: string, localId: string, definitionPath: string): Promise<void>;
 }
 
 export class NoteDetailPanel extends Component {
@@ -352,6 +357,25 @@ export class NoteDetailPanel extends Component {
     else row("Occurrence name", record.identifier);
 
     row("Reusable definition", linkText(record.definition), open(record.definition));
+    if (record.kind !== "connection") {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: "Definition creation" });
+      const td = tr.createEl("td");
+      const createDefinition = td.createEl("button", { text: "Create reusable definition…", cls: "mdse-detail-btn" });
+      createDefinition.setAttr("title", "Create a compatible reusable definition through governed Review/Apply, then bind this occurrence.");
+      createDefinition.onclick = () => {
+        new DefinitionCreateFromOccurrenceModal(
+          this.app,
+          file.basename,
+          record,
+          (name, path) => this.host.stageDefinitionCreation(record.kind, name, path),
+          (transactionId) => this.host.applyDefinitionCreation(transactionId),
+          (transactionId) => this.host.cancelDefinitionCreation(transactionId),
+          (definitionPath) => this.host.bindOccurrenceDefinition(file.path, record.localId, definitionPath),
+          () => { void this.refreshLocal(file, record.localId, false); },
+        ).open();
+      };
+    }
     if (record.definition?.target) {
       const tr = table.createEl("tr");
       tr.createEl("td", { text: "Definition editing" });
