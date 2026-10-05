@@ -55,6 +55,9 @@ test("blocking validation may exist while staged but prevents Apply", async () =
 
   assert.equal(draft.issues.length, 1);
   assert.equal(manager.canApply("tx-2"), false);
+  const reviewed = manager.review("tx-2");
+  assert.equal(reviewed.status, "reviewed");
+  assert.equal(manager.canApply("tx-2"), false);
 
   const executor: EditExecutor = {
     async apply() {
@@ -95,6 +98,7 @@ test("a non-reversible semantic change is retained in history but cannot undo", 
     label: "Migrate",
     changes: [{ kind: "migration", summary: "External migration", refs: [ref], reversible: false }],
   });
+  manager.review("tx-4");
   await manager.apply("tx-4", { async apply() { return { async undo() {} }; } });
   assert.equal(manager.canUndo, false);
   await assert.rejects(manager.undo(), /non-reversible/);
@@ -119,4 +123,57 @@ test("an already-governed writer can join the same semantic history", async () =
   assert.equal(state,0);
   await manager.redo();
   assert.equal(state,1);
+});
+
+
+test("structural Apply is rejected until Review transitions the transaction", async () => {
+  let applied = 0;
+  const manager = new TransactionManager();
+  manager.begin("tx-review", "Move occurrence", "structural");
+  manager.add("tx-review", {
+    id: "op-review",
+    label: "Move occurrence",
+    changes: [{ kind: "structure.move", summary: "Move K1", refs: [ref] }],
+  });
+
+  assert.equal(manager.canApply("tx-review"), false);
+  await assert.rejects(
+    manager.apply("tx-review", {
+      async apply() {
+        applied++;
+        return { async undo() {} };
+      },
+    }),
+    /must be reviewed before Apply/,
+  );
+  assert.equal(applied, 0);
+
+  const reviewed = manager.review("tx-review");
+  assert.equal(reviewed.status, "reviewed");
+  assert.equal(manager.canApply("tx-review"), true);
+  await manager.apply("tx-review", {
+    async apply() {
+      applied++;
+      return { async undo() {} };
+    },
+  });
+  assert.equal(applied, 1);
+});
+
+test("reviewed structural transaction may be re-reviewed after a failed Apply", async () => {
+  const manager = new TransactionManager();
+  manager.begin("tx-rereview", "Structural edit", "structural");
+  manager.add("tx-rereview", {
+    id: "op-rereview",
+    label: "Structural edit",
+    changes: [{ kind: "structure.edit", summary: "Edit K1", refs: [ref] }],
+  });
+  manager.review("tx-rereview");
+
+  await assert.rejects(
+    manager.apply("tx-rereview", { async apply() { throw new Error("stale"); } }),
+    /stale/,
+  );
+  const reviewedAgain = manager.review("tx-rereview");
+  assert.equal(reviewedAgain.status, "reviewed");
 });
