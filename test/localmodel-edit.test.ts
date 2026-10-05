@@ -613,3 +613,84 @@ test("flow creation requires a definition and both endpoint roles", () => {
     /requires endpointA and endpointB roles/,
   );
 });
+
+
+test("clean flow deletion removes only the addressed flow and keeps its connection", () => {
+  const connectionId = "conn-20261005003000000skellyspencer";
+  const flowA = "flow-20261005003000001skellyspencer";
+  const flowB = "flow-20261005003000002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^ep-20261005003000010skellyspencer|J1]]",
+    "- endpointB: [[#^ep-20261005003000011skellyspencer|J2]]",
+    "^" + connectionId,
+    "##### Commands",
+    "- definition: [[CAN Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowA,
+    "",
+    "##### Status",
+    "- definition: [[CAN Data]]",
+    "- endpointA: receive",
+    "- endpointB: transmit",
+    "^" + flowB,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordDelete(text, flowA);
+  assert.equal(result.kind, "flow");
+  assert.equal(result.impacts.length, 0);
+  assert.doesNotMatch(result.after, /##### Commands/);
+  assert.match(result.after, /#### Harness/);
+  assert.match(result.after, /##### Status/);
+  assert.equal(parseLocalModel(result.after)?.records.find((record) => record.localId === flowB)?.connectionId, connectionId);
+});
+
+test("flow deletion still reports local block references when present", () => {
+  const flowId = "flow-20261005003100000skellyspencer";
+  const noteText = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^ep-20261005003100010skellyspencer|J1]]",
+    "- endpointB: [[#^ep-20261005003100011skellyspencer|J2]]",
+    "^conn-20261005003100020skellyspencer",
+    "##### Commands",
+    "- definition: [[CAN Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowId,
+    "",
+    "##### Derived",
+    "- definition: [[CAN Data]]",
+    "- endpointA: [[#^" + flowId + "|Commands]]",
+    "- endpointB: receive",
+    "^flow-20261005003100001skellyspencer",
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordDelete(noteText, flowId);
+  assert.ok(result.impacts.some((impact) =>
+    impact.sourceKind === "flow" &&
+    impact.field === "endpointA"
+  ));
+});
