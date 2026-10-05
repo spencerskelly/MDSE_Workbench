@@ -238,7 +238,7 @@ export class NoteDetailPanel extends Component {
       const addFlow = head.createEl("button", { text: "Add flow…", cls: "mdse-detail-btn" });
       addFlow.onclick = () => this.createFlowOccurrence(file, record);
     }
-    if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection")) {
+    if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
     }
@@ -412,7 +412,7 @@ export class NoteDetailPanel extends Component {
   }
 
   private deleteOccurrence(file: TFile, record: LocalRecord): void {
-    if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection") return;
+    if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection" && record.kind !== "flow") return;
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
