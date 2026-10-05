@@ -970,3 +970,127 @@ export class LocalEndpointParentReassignModal extends Modal {
     })();
   }
 }
+
+
+export class LocalEndpointExposureEditModal extends Modal {
+  private staged: StagedLocalPatch | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly endpoint: LocalRecord,
+    private readonly addOptions: LocalRecord[],
+    private readonly removeOptions: LocalRecord[],
+    private readonly stage: (mode: "add" | "remove", target: LocalRecord) => Promise<StagedLocalPatch>,
+    private readonly apply: (id: string) => Promise<void>,
+    private readonly cancel: (id: string) => void,
+    private readonly onApplied: () => void,
+  ) { super(app); }
+
+  onOpen(): void { this.compose(); }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try { this.cancel(staged.transaction.id); } catch {}
+  }
+
+  private compose(): void {
+    this.titleEl.setText("Edit endpoint exposures");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Add or remove one same-note endpoint exposure for ${this.endpoint.identifier}. Existing equals and connection topology are not changed.` });
+
+    const modeRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    modeRow.createEl("label", { text: "Change" });
+    const mode = modeRow.createEl("select", { cls: "mdse-detail-input" });
+    if (this.addOptions.length) mode.createEl("option", { text: "Add exposure", value: "add" });
+    if (this.removeOptions.length) mode.createEl("option", { text: "Remove exposure", value: "remove" });
+
+    const targetRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    targetRow.createEl("label", { text: "Endpoint" });
+    const target = targetRow.createEl("select", { cls: "mdse-detail-input" });
+
+    const refill = () => {
+      target.empty();
+      const options = mode.value === "remove" ? this.removeOptions : this.addOptions;
+      target.createEl("option", { text: "Choose endpoint…", value: "" });
+      for (const option of options) {
+        target.createEl("option", { text: `${option.identifier} — ^${option.localId}`, value: option.localId });
+      }
+    };
+    mode.onchange = refill;
+    refill();
+
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Endpoint: ${this.endpoint.identifier} (#^${this.endpoint.localId})` });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const editMode = mode.value === "remove" ? "remove" : "add";
+        const options = editMode === "remove" ? this.removeOptions : this.addOptions;
+        const selected = options.find((option) => option.localId === target.value);
+        if (!selected) throw new Error("Choose an endpoint.");
+        const staged = await this.stage(editMode, selected);
+        this.staged = staged;
+        this.renderReview(staged, editMode, selected);
+      } catch (e) {
+        new Notice(`Cannot stage exposure edit: ${(e as Error).message}`, 12000);
+        review.disabled = false;
+      }
+    })();
+  }
+
+  private renderReview(staged: StagedLocalPatch, mode: "add" | "remove", target: LocalRecord): void {
+    this.titleEl.setText("Review endpoint exposure edit");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: [string, string][] = [
+      ["Owner", this.ownerName],
+      ["Endpoint", this.endpoint.identifier],
+      ["Change", mode === "add" ? "add exposure" : "remove exposure"],
+      ["Target endpoint", target.identifier],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will change only the endpoint exposes field." });
+    } else {
+      for (const finding of staged.plan.findings) {
+        this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : undefined });
+      }
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally { this.staged = null; this.close(); }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new Notice(`${mode === "add" ? "Added" : "Removed"} exposure ${this.endpoint.identifier} → ${target.identifier}.`, 5000);
+      } catch (e) {
+        new Notice(`Not applied: ${(e as Error).message}`, 12000);
+        apply.disabled = false;
+      }
+    })();
+  }
+}
