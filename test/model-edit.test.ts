@@ -1141,3 +1141,114 @@ test("cancelled endpoint parent reassignment leaves source and history untouched
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithEditableExposures(): string {
+  const source = "ep-20261005008000000skellyspencer";
+  const exposedA = "ep-20261005008000001skellyspencer";
+  const exposedB = "ep-20261005008000002skellyspencer";
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### Boundary",
+    "- definition: [[CAN Port]]",
+    "- exposes: [[#^" + exposedA + "|J1]]",
+    "^" + source,
+    "",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + exposedA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + exposedB,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("staged endpoint exposure add stays unwritten until Apply and supports undo/redo", async () => {
+  const sourceId = "ep-20261005008000000skellyspencer";
+  const firstId = "ep-20261005008000001skellyspencer";
+  const secondId = "ep-20261005008000002skellyspencer";
+  const original = noteWithEditableExposures();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+    fields: { exposes: "[[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- exposes: [[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]"));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.ok(store.text.includes("- exposes: [[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]"));
+});
+
+test("staged endpoint exposure removal can clear the field entirely", async () => {
+  const sourceId = "ep-20261005008000000skellyspencer";
+  const original = noteWithEditableExposures();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+    fields: { exposes: null },
+  });
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.doesNotMatch(store.text, /- exposes:/);
+  await transactions.undo();
+  assert.equal(store.text, original);
+});
+
+test("staged endpoint exposure edit blocks missing target at Apply", async () => {
+  const sourceId = "ep-20261005008000000skellyspencer";
+  const original = noteWithEditableExposures();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+    fields: { exposes: "[[#^ep-20261005008100099skellyspencer|Missing]]" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled endpoint exposure edit leaves source and history untouched", async () => {
+  const sourceId = "ep-20261005008000000skellyspencer";
+  const secondId = "ep-20261005008000002skellyspencer";
+  const original = noteWithEditableExposures();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+    fields: { exposes: "[[#^" + secondId + "|J2]]" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
