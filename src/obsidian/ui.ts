@@ -560,3 +560,84 @@ export class LocalEndpointCreateModal extends Modal {
     };
   }
 }
+
+
+export class LocalConnectionCreateModal extends Modal {
+  private staged: StagedLocalCreate | null = null;
+  private applied = false;
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly source: LocalRecord,
+    private readonly options: LocalRecord[],
+    private readonly localId: string,
+    private readonly stage: (input: NewLocalRecord) => Promise<StagedLocalCreate>,
+    private readonly apply: (id: string) => Promise<void>,
+    private readonly cancel: (id: string) => void,
+    private readonly onApplied: (localId: string) => void,
+  ) { super(app); }
+
+  onOpen(): void { this.compose(); }
+  onClose(): void {
+    const staged=this.staged; this.staged=null; this.contentEl.empty();
+    if (staged && !this.applied) try { this.cancel(staged.transaction.id); } catch {}
+  }
+
+  private compose(): void {
+    this.titleEl.setText("Add connection");
+    this.contentEl.empty();
+    this.contentEl.createEl("p",{text:`Connect ${this.source.identifier} to another endpoint in ${this.ownerName}. Flows are not created here.`});
+    const input=(label:string, placeholder="")=>{
+      const row=this.contentEl.createDiv({cls:"mdse-create-field"});
+      row.createEl("label",{text:label});
+      const el=row.createEl("input",{type:"text",cls:"mdse-detail-input"});
+      if(placeholder) el.setAttr("placeholder",placeholder);
+      el.onkeydown=(e)=>e.stopPropagation();
+      return el;
+    };
+    const heading=input("Connection name","Harness");
+    const definition=input("Reusable definition","optional");
+    const pickRow=this.contentEl.createDiv({cls:"mdse-create-field"});
+    pickRow.createEl("label",{text:"Endpoint B"});
+    const pick=pickRow.createEl("select",{cls:"mdse-detail-input"});
+    pick.createEl("option",{text:"Choose endpoint…",value:""});
+    for(const ep of this.options) pick.createEl("option",{text:ep.identifier,value:ep.localId});
+    const buttons=this.contentEl.createDiv({cls:"modal-button-container"});
+    buttons.createEl("button",{text:"Cancel"}).onclick=()=>this.close();
+    const review=buttons.createEl("button",{text:"Review",cls:"mod-cta"});
+    review.onclick=()=>void(async()=>{
+      review.disabled=true;
+      try{
+        const target=this.options.find((ep)=>ep.localId===pick.value);
+        if(!target) throw new Error("Choose a second endpoint.");
+        const fields:Record<string,string>={
+          endpointA:`[[#^${this.source.localId}|${this.source.identifier}]]`,
+          endpointB:`[[#^${target.localId}|${target.identifier}]]`,
+        };
+        if(definition.value.trim()) fields.definition=definition.value.trim();
+        const staged=await this.stage({kind:"connection",localId:this.localId,heading:heading.value.trim(),fields});
+        this.staged=staged; this.review(staged,heading.value.trim(),definition.value.trim(),target);
+      }catch(e){ new Notice(`Cannot stage connection: ${(e as Error).message}`,12000); review.disabled=false; }
+    })();
+  }
+
+  private review(staged:StagedLocalCreate, heading:string, definition:string, target:LocalRecord): void {
+    this.titleEl.setText("Review new connection"); this.contentEl.empty();
+    const rows:[string,string][]=[
+      ["Owner",this.ownerName],["Connection",heading],["Endpoint A",this.source.identifier],
+      ["Endpoint B",target.identifier],["Reusable definition",definition],["Local ID",staged.plan.localId]
+    ];
+    const table=this.contentEl.createEl("table",{cls:"mdse-diagnostics"});
+    for(const [k,v] of rows){const tr=table.createEl("tr");tr.createEl("td",{text:k});tr.createEl("td",{text:v||"—"});}
+    const blocking=staged.plan.findings.filter((f)=>f.severity==="error");
+    for(const f of staged.plan.findings) this.contentEl.createEl("p",{text:`${f.severity.toUpperCase()}: ${f.message}`,cls:f.severity==="error"?"mdse-warn":undefined});
+    const buttons=this.contentEl.createDiv({cls:"modal-button-container"});
+    buttons.createEl("button",{text:"Cancel"}).onclick=()=>{try{this.cancel(staged.transaction.id);}finally{this.staged=null;this.close();}};
+    const apply=buttons.createEl("button",{text:"Apply",cls:"mod-cta"}); apply.disabled=blocking.length>0;
+    apply.onclick=()=>void(async()=>{
+      apply.disabled=true;
+      try{await this.apply(staged.transaction.id);this.applied=true;this.staged=null;this.close();this.onApplied(staged.plan.localId);new Notice(`Created connection ${heading}.`,5000);}
+      catch(e){new Notice(`Not applied: ${(e as Error).message}`,12000);apply.disabled=false;}
+    })();
+  }
+}
