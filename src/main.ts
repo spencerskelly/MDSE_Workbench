@@ -99,7 +99,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, and missing part/endpoint/flow definitions can now be created from occurrence context then bound only after successful definition creation. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, and missing part/endpoint/flow definition workflows now stage and visibly review both definition creation and occurrence binding before either Apply begins. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
@@ -167,7 +167,9 @@ export default class MdseWorkbench extends Plugin {
       stageDefinitionCreation: (kind, name, path) => this.stageDefinitionCreation(kind, name, path),
       applyDefinitionCreation: (transactionId) => this.applyDefinitionCreation(transactionId),
       cancelDefinitionCreation: (transactionId) => this.cancelDefinitionCreation(transactionId),
-      bindOccurrenceDefinition: (ownerPath, localId, definitionPath) => this.bindOccurrenceDefinition(ownerPath, localId, definitionPath),
+      stageOccurrenceDefinitionBinding: (ownerPath, localId, definitionPath) => this.stageOccurrenceDefinitionBinding(ownerPath, localId, definitionPath),
+      applyOccurrenceDefinitionBinding: (transactionId) => this.applyOccurrenceDefinitionBinding(transactionId),
+      cancelOccurrenceDefinitionBinding: (transactionId) => this.cancelOccurrenceDefinitionBinding(transactionId),
     });
     this.addChild(this.detail);
     this.registerDetailClicks();
@@ -341,22 +343,30 @@ export default class MdseWorkbench extends Plugin {
     creator.cancel(transactionId);
   }
 
-  private async bindOccurrenceDefinition(ownerPath: string, localId: string, definitionPath: string): Promise<void> {
+  private async stageOccurrenceDefinitionBinding(
+    ownerPath: string,
+    localId: string,
+    definitionPath: string,
+  ) {
     const editor = this.modelEditor;
     if (!editor) throw new Error("Workbench is still starting.");
     const normalized = normalizePath(definitionPath);
-    const file = this.app.vault.getAbstractFileByPath(normalized);
-    if (!(file instanceof TFile)) throw new Error(`Created definition ${normalized} is not available in the vault.`);
     const definitionLink = `[[${normalized.replace(/\.md$/i, "")}]]`;
-    const staged = await editor.stageAndReviewLocalRecordPatch(ownerPath, localId, {
+    return editor.stageAndReviewLocalRecordPatch(ownerPath, localId, {
       fields: { definition: definitionLink },
     });
-    try {
-      await editor.applyLocalPatch(staged.transaction.id);
-    } catch (error) {
-      try { editor.cancelLocalPatch(staged.transaction.id); } catch { /* already closed */ }
-      throw error;
-    }
+  }
+
+  private async applyOccurrenceDefinitionBinding(transactionId: string): Promise<void> {
+    const editor = this.modelEditor;
+    if (!editor) throw new Error("Workbench is still starting.");
+    await editor.applyLocalPatch(transactionId);
+  }
+
+  private cancelOccurrenceDefinitionBinding(transactionId: string): void {
+    const editor = this.modelEditor;
+    if (!editor) throw new Error("Workbench is still starting.");
+    editor.cancelLocalPatch(transactionId);
   }
 
   private async definitionImpact(path: string): Promise<{ rows: string[]; notes: number; occurrences: number }> {
