@@ -11,6 +11,7 @@ import { CACHE_PERSIST_QUIET_MS, cachePersistenceDelayMs } from "./core/cache-pe
 import { CacheMutationGate } from "./core/cache-mutation";
 import { TransactionManager } from "./core/transaction";
 import { ModelEditService } from "./core/model-edit";
+import { DefinitionCreationService } from "./core/definition-create";
 import { canPublishCoreReady } from "./core/core-readiness";
 import { recoverWithColdBuild } from "./core/startup-recovery";
 import { formatCacheBytes } from "./core/cache-size";
@@ -100,6 +101,8 @@ export default class MdseWorkbench extends Plugin {
   writer: RelationshipWriter | null = null;
   /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, and creator identity is explicit so new definition UIDs never borrow attribution from an existing model note. */
   modelEditor: ModelEditService | null = null;
+  /** Canonical reusable-definition creation shares the same semantic transaction history. */
+  definitionCreator: DefinitionCreationService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
   detail: NoteDetailPanel | null = null;
@@ -903,6 +906,30 @@ export default class MdseWorkbench extends Plugin {
           }
           return impacts;
         },
+      );
+      this.definitionCreator = new DefinitionCreationService(
+        {
+          exists: async (path) => this.app.vault.getAbstractFileByPath(normalizePath(path)) !== null,
+          read: async (path) => this.app.vault.read(localFile(normalizePath(path))),
+          create: async (path, text) => {
+            const normalized = normalizePath(path);
+            if (this.app.vault.getAbstractFileByPath(normalized)) throw new Error(normalized + " already exists.");
+            await this.app.vault.create(normalized, text);
+          },
+          remove: async (path) => {
+            const normalized = normalizePath(path);
+            const file = this.app.vault.getAbstractFileByPath(normalized);
+            if (!(file instanceof TFile)) throw new Error(normalized + " no longer exists.");
+            await this.app.vault.delete(file);
+          },
+        },
+        (uid) => {
+          for (const note of (this.indexer as Indexer).index.notes.values()) {
+            if (note.uid === uid) return true;
+          }
+          return false;
+        },
+        this.transactions,
       );
       this.assurance = new AssuranceManager({
         revision: () => (this.indexer as Indexer).revision,
