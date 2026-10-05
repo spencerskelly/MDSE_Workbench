@@ -56,6 +56,18 @@ interface PendingLocalDelete {
   ownerUid: string;
 }
 
+function assertIndexedOwnerUidMatchesSource(path: string, before: string, indexedUid: string): void {
+  const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(before);
+  const sourceUid = frontmatterMatch
+    ? /^uid:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/m.exec(frontmatterMatch[1])?.[1]?.trim() ?? ""
+    : "";
+  if (!sourceUid || sourceUid !== indexedUid) {
+    throw new Error(
+      `Cannot stage structural Local Model edit for ${path}: indexed uid ${indexedUid} does not match source uid ${sourceUid || "none"}.`,
+    );
+  }
+}
+
 /**
  * WB-114 atomic Local Model editor.
  *
@@ -125,13 +137,7 @@ export class ModelEditService {
 
     const uid = this.ownerUid(path);
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
-    const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(before);
-    const sourceUid = frontmatterMatch
-      ? /^uid:\s*["']?([^"'\n#]+)["']?\s*(?:#.*)?$/m.exec(frontmatterMatch[1])?.[1]?.trim() ?? ""
-      : "";
-    if (!sourceUid || sourceUid !== uid) {
-      throw new Error(`Cannot stage structural Local Model edit for ${path}: indexed uid ${uid} does not match source uid ${sourceUid || "none"}.`);
-    }
+    assertIndexedOwnerUidMatchesSource(path, before, uid);
 
     const txId = `local-patch-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `reassign ${plan.kind} ${localId}`;
@@ -165,6 +171,7 @@ export class ModelEditService {
     const plan = planLocalFlowMove(before, flowId, connectionId);
     const uid = this.ownerUid(path);
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    assertIndexedOwnerUidMatchesSource(path, before, uid);
 
     const txId = `local-move-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `move flow ${flowId} to ${connectionId}`;
@@ -238,6 +245,7 @@ export class ModelEditService {
     const plan = planLocalRecordCreate(before, input);
     const uid = this.ownerUid(path);
     if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    assertIndexedOwnerUidMatchesSource(path, before, uid);
 
     const txId = `local-struct-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `create ${input.kind} ${input.heading.trim()}`;
