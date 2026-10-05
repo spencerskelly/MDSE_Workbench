@@ -14,7 +14,7 @@ import { nextAvailableLocalId, type LocalRecordPatch } from "../core/localmodel-
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -268,6 +268,8 @@ export class NoteDetailPanel extends Component {
     if (this.editing && record.kind === "flow") {
       const definition = head.createEl("button", { text: "Change definition…", cls: "mdse-detail-btn" });
       definition.onclick = () => this.editFlowDefinition(file, record);
+      const roles = head.createEl("button", { text: "Change endpoint roles…", cls: "mdse-detail-btn" });
+      roles.onclick = () => this.editFlowRoles(file, record);
     }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
@@ -351,13 +353,8 @@ export class NoteDetailPanel extends Component {
     row("Connection", record.connectionId ?? "");
 
     if (record.kind === "flow") {
-      if (this.editing) {
-        editRow("Endpoint A role", record.roleA ?? "", (value) => ({ fields: { endpointA: value } }));
-        editRow("Endpoint B role", record.roleB ?? "", (value) => ({ fields: { endpointB: value } }));
-      } else {
-        row("Endpoint A role", record.roleA ?? "");
-        row("Endpoint B role", record.roleB ?? "");
-      }
+      row("Endpoint A role", record.roleA ?? "");
+      row("Endpoint B role", record.roleB ?? "");
     }
 
     root.createEl("p", {
@@ -505,6 +502,29 @@ export class NoteDetailPanel extends Component {
       ).open();
     } catch (e) {
       new Notice(`Cannot reassign endpoint part: ${(e as Error).message}`, 12000);
+    }
+  }
+
+  private editFlowRoles(file: TFile, flow: LocalRecord): void {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalFlowRolesEditModal(
+        this.app,
+        file.basename,
+        flow,
+        (roleA, roleB) => editor.stageAndReviewLocalRecordPatch(file.path, flow.localId, {
+          fields: {
+            endpointA: roleA,
+            endpointB: roleB,
+          },
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, flow.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot edit flow endpoint roles: ${(e as Error).message}`, 12000);
     }
   }
 
