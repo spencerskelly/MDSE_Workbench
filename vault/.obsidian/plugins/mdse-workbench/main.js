@@ -904,8 +904,8 @@ function planLocalRecordDelete(text, localId) {
   const editable = editableLocalRegion(text);
   const record = editable.region.records.find((candidate) => candidate.localId === localId);
   if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
-  if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection") {
-    throw new Error("This deletion slice supports part, endpoint and connection occurrences only.");
+  if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection" && record.kind !== "flow") {
+    throw new Error("This deletion slice supports part, endpoint, connection and flow occurrences only.");
   }
   const impacts = [];
   for (const source of editable.region.records) {
@@ -5633,7 +5633,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const addFlow = head.createEl("button", { text: "Add flow\u2026", cls: "mdse-detail-btn" });
       addFlow.onclick = () => this.createFlowOccurrence(file, record);
     }
-    if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection")) {
+    if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
     }
@@ -5806,7 +5806,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     }
   }
   deleteOccurrence(file, record) {
-    if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection") return;
+    if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection" && record.kind !== "flow") return;
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
