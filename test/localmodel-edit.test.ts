@@ -1036,3 +1036,96 @@ test("endpoint equals edit surfaces a missing same-note target as blocking valid
     finding.severity === "error"
   ));
 });
+
+
+test("plans rewiring one connection endpoint while preserving the opposite end and child flow", () => {
+  const endpointA = "ep-20261005011000000skellyspencer";
+  const endpointB = "ep-20261005011000001skellyspencer";
+  const endpointC = "ep-20261005011000002skellyspencer";
+  const connectionId = "conn-20261005011000003skellyspencer";
+  const flowId = "flow-20261005011000004skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "",
+    "#### J3",
+    "- definition: [[CAN Port]]",
+    "^" + endpointC,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "^" + connectionId,
+    "##### Commands",
+    "- definition: [[CAN Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    connectionId,
+    { fields: { endpointA: "[[#^" + endpointC + "|J3]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const region = parseLocalModel(result.after);
+  const connection = region?.records.find((record) => record.localId === connectionId);
+  const flow = region?.records.find((record) => record.localId === flowId);
+  assert.equal(connection?.endpointA?.blockId, endpointC);
+  assert.equal(connection?.endpointB?.blockId, endpointB);
+  assert.equal(flow?.connectionId, connectionId);
+  assert.equal(flow?.roleA, "transmit");
+  assert.equal(flow?.roleB, "receive");
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("connection endpoint rewire surfaces a missing endpoint as blocking validation", () => {
+  const connectionId = "conn-" + tokenD;
+  const result = planLocalRecordPatch(
+    note(),
+    connectionId,
+    { fields: { endpointA: "[[#^ep-20261005011100099skellyspencer|Missing]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === connectionId &&
+    finding.code === "ref.local-missing" &&
+    finding.severity === "error"
+  ));
+});
+
+test("connection endpoint rewire rejects a non-endpoint local target", () => {
+  const connectionId = "conn-" + tokenD;
+  const result = planLocalRecordPatch(
+    note(),
+    connectionId,
+    { fields: { endpointA: "[[#^part-" + tokenA + "|P1]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === connectionId &&
+    finding.code === "ref.local-kind" &&
+    finding.severity === "error"
+  ));
+});
