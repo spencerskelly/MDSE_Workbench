@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalEndpointCreateModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -243,6 +243,10 @@ export class NoteDetailPanel extends Component {
       connect.onclick = () => { void this.createConnectionOccurrence(file, record); };
     }
     if (this.editing && record.kind === "connection") {
+      const rewireA = head.createEl("button", { text: "Change endpoint A…", cls: "mdse-detail-btn" });
+      rewireA.onclick = () => { void this.rewireConnectionEndpoint(file, record, "endpointA"); };
+      const rewireB = head.createEl("button", { text: "Change endpoint B…", cls: "mdse-detail-btn" });
+      rewireB.onclick = () => { void this.rewireConnectionEndpoint(file, record, "endpointB"); };
       const addFlow = head.createEl("button", { text: "Add flow…", cls: "mdse-detail-btn" });
       addFlow.onclick = () => this.createFlowOccurrence(file, record);
     }
@@ -479,6 +483,40 @@ export class NoteDetailPanel extends Component {
       ).open();
     } catch (e) {
       new Notice(`Cannot reassign endpoint part: ${(e as Error).message}`, 12000);
+    }
+  }
+
+  private async rewireConnectionEndpoint(
+    file: TFile,
+    connection: LocalRecord,
+    end: "endpointA" | "endpointB",
+  ): Promise<void> {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+
+      const current = end === "endpointA" ? connection.endpointA?.blockId : connection.endpointB?.blockId;
+      const options = region.records.filter((record) => record.kind === "endpoint" && record.localId !== current);
+      if (!options.length) throw new Error("This note has no alternate endpoint occurrence.");
+
+      new LocalConnectionEndpointRewireModal(
+        this.app,
+        file.basename,
+        connection,
+        end,
+        options,
+        (target) => editor.stageLocalRecordPatch(file.path, connection.localId, {
+          fields: { [end]: `[[#^${target.localId}|${target.identifier}]]` },
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, connection.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot rewire connection endpoint: ${(e as Error).message}`, 12000);
     }
   }
 
