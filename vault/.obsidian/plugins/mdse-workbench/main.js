@@ -5604,6 +5604,126 @@ var LocalEndpointParentReassignModal = class extends import_obsidian3.Modal {
     })();
   }
 };
+var LocalEndpointExposureEditModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, endpoint2, addOptions, removeOptions, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.endpoint = endpoint2;
+    this.addOptions = addOptions;
+    this.removeOptions = removeOptions;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.compose();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  compose() {
+    this.titleEl.setText("Edit endpoint exposures");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Add or remove one same-note endpoint exposure for ${this.endpoint.identifier}. Existing equals and connection topology are not changed.` });
+    const modeRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    modeRow.createEl("label", { text: "Change" });
+    const mode = modeRow.createEl("select", { cls: "mdse-detail-input" });
+    if (this.addOptions.length) mode.createEl("option", { text: "Add exposure", value: "add" });
+    if (this.removeOptions.length) mode.createEl("option", { text: "Remove exposure", value: "remove" });
+    const targetRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    targetRow.createEl("label", { text: "Endpoint" });
+    const target = targetRow.createEl("select", { cls: "mdse-detail-input" });
+    const refill = () => {
+      target.empty();
+      const options = mode.value === "remove" ? this.removeOptions : this.addOptions;
+      target.createEl("option", { text: "Choose endpoint\u2026", value: "" });
+      for (const option of options) {
+        target.createEl("option", { text: `${option.identifier} \u2014 ^${option.localId}`, value: option.localId });
+      }
+    };
+    mode.onchange = refill;
+    refill();
+    this.contentEl.createEl("p", { cls: "mdse-muted", text: `Endpoint: ${this.endpoint.identifier} (#^${this.endpoint.localId})` });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const editMode = mode.value === "remove" ? "remove" : "add";
+        const options = editMode === "remove" ? this.removeOptions : this.addOptions;
+        const selected = options.find((option) => option.localId === target.value);
+        if (!selected) throw new Error("Choose an endpoint.");
+        const staged = await this.stage(editMode, selected);
+        this.staged = staged;
+        this.renderReview(staged, editMode, selected);
+      } catch (e) {
+        new import_obsidian3.Notice(`Cannot stage exposure edit: ${e.message}`, 12e3);
+        review.disabled = false;
+      }
+    })();
+  }
+  renderReview(staged, mode, target) {
+    this.titleEl.setText("Review endpoint exposure edit");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Endpoint", this.endpoint.identifier],
+      ["Change", mode === "add" ? "add exposure" : "remove exposure"],
+      ["Target endpoint", target.identifier],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope]
+    ];
+    for (const [key2, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: value });
+    }
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will change only the endpoint exposes field." });
+    } else {
+      for (const finding of staged.plan.findings) {
+        this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : void 0 });
+      }
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new import_obsidian3.Notice(`${mode === "add" ? "Added" : "Removed"} exposure ${this.endpoint.identifier} \u2192 ${target.identifier}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -5899,6 +6019,10 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       reassignParent.onclick = () => {
         void this.reassignEndpointParent(file, record);
       };
+      const exposures = head.createEl("button", { text: "Edit exposures\u2026", cls: "mdse-detail-btn" });
+      exposures.onclick = () => {
+        void this.editEndpointExposures(file, record);
+      };
       const connect = head.createEl("button", { text: "Connect to endpoint\u2026", cls: "mdse-detail-btn" });
       connect.onclick = () => {
         void this.createConnectionOccurrence(file, record);
@@ -5997,6 +6121,43 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       text: this.editing ? "Editing context only. Definition identity and structural/topology links remain separate and read-only here." : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data."
     });
     root.scrollTop = 0;
+  }
+  async editEndpointExposures(file, endpoint2) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const endpoints = region.records.filter((record) => record.kind === "endpoint" && record.localId !== endpoint2.localId);
+      const exposedIds = new Set(endpoint2.exposes.filter((link) => !link.target && link.blockId).map((link) => link.blockId));
+      const addOptions = endpoints.filter((candidate) => !exposedIds.has(candidate.localId));
+      const removeOptions = endpoints.filter((candidate) => exposedIds.has(candidate.localId));
+      if (!addOptions.length && !removeOptions.length) throw new Error("This endpoint has no same-note exposure edit available.");
+      new LocalEndpointExposureEditModal(
+        this.app,
+        file.basename,
+        endpoint2,
+        addOptions,
+        removeOptions,
+        (mode, target) => {
+          const remaining = endpoint2.exposes.filter((link) => !(mode === "remove" && !link.target && link.blockId === target.localId)).map((link) => link.text);
+          if (mode === "add") remaining.push(`[[#^${target.localId}|${target.identifier}]]`);
+          return editor.stageLocalRecordPatch(file.path, endpoint2.localId, {
+            fields: { exposes: remaining.length ? remaining.join(" ") : null }
+          });
+        },
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => {
+          editor.cancelLocalPatch(transactionId);
+        },
+        () => {
+          void this.refreshLocal(file, endpoint2.localId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot edit endpoint exposures: ${e.message}`, 12e3);
+    }
   }
   async reassignEndpointParent(file, endpoint2) {
     try {
