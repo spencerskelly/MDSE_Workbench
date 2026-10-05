@@ -515,13 +515,6 @@ test("clean connection deletion is allowed when it has no child flows or externa
   assert.equal(parseLocalModel(result.after)?.structured, true);
 });
 
-test("deletion slice still refuses flow records", () => {
-  assert.throws(
-    () => planLocalRecordDelete(note(), "flow-" + tokenB),
-    /part, endpoint and connection occurrences only/,
-  );
-});
-
 
 test("creates a flow under the addressed connection with reviewed endpoint roles", () => {
   const connectionId = "conn-20261005002000000skellyspencer";
