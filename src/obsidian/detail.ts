@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -256,6 +256,10 @@ export class NoteDetailPanel extends Component {
       const addFlow = head.createEl("button", { text: "Add flow…", cls: "mdse-detail-btn" });
       addFlow.onclick = () => this.createFlowOccurrence(file, record);
     }
+    if (this.editing && record.kind === "flow") {
+      const definition = head.createEl("button", { text: "Change definition…", cls: "mdse-detail-btn" });
+      definition.onclick = () => this.editFlowDefinition(file, record);
+    }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
@@ -489,6 +493,26 @@ export class NoteDetailPanel extends Component {
       ).open();
     } catch (e) {
       new Notice(`Cannot reassign endpoint part: ${(e as Error).message}`, 12000);
+    }
+  }
+
+  private editFlowDefinition(file: TFile, flow: LocalRecord): void {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalFlowDefinitionEditModal(
+        this.app,
+        file.basename,
+        flow,
+        (definition) => editor.stageLocalRecordPatch(file.path, flow.localId, {
+          fields: { definition },
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, flow.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot edit flow definition: ${(e as Error).message}`, 12000);
     }
   }
 
