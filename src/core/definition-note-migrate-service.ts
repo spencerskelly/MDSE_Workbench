@@ -33,6 +33,7 @@ interface PendingDefinitionNoteMigration {
   plan: DefinitionNoteMigrationPlan;
   label: string;
   files: FileState[];
+  replacementUid?: string;
 }
 
 function frontmatter(text: string): { doc: ReturnType<typeof parseDocument>; yaml: string; body: string } {
@@ -189,6 +190,21 @@ export class DefinitionNoteMigrationService {
     validateUid(replacedBefore, request.replacedPath, request.replacedUid);
     validateUid(replacementBefore, request.replacementPath, request.replacementUid);
 
+    const assertReplacementIdentity = async (): Promise<void> => {
+      if (!request.replacementUid) return;
+      if (!(await this.store.exists(request.replacementPath))) {
+        throw new Error(`${request.replacementPath} no longer exists; reopen supersession migration review.`);
+      }
+      const current = await this.store.read(request.replacementPath);
+      const parsed = frontmatter(current);
+      const storedUid = String(parsed.doc.get("uid") ?? "").trim();
+      if (!storedUid || storedUid !== request.replacementUid) {
+        throw new Error(
+          `${request.replacementPath} identity changed; expected uid ${request.replacementUid}, found ${storedUid || "none"}. Reopen supersession migration review.`,
+        );
+      }
+    };
+
     const parsedOwner = frontmatter(ownerBefore);
     const currentTargets = list(parsedOwner.doc.get(request.field))
       .map((value) => linkTarget(value))
@@ -267,7 +283,7 @@ export class DefinitionNoteMigrationService {
         },
       }],
     });
-    this.pending.set(id,{plan,label,files});
+    this.pending.set(id,{plan,label,files,replacementUid:request.replacementUid});
     return {transaction,plan,affectedPaths:files.map((file)=>file.path)};
   }
 
@@ -287,6 +303,16 @@ export class DefinitionNoteMigrationService {
       apply:async()=>{
         if (!(await this.store.exists(pending.plan.replacementPath))) {
           throw new Error(`${pending.plan.replacementPath} no longer exists; reopen supersession migration review.`);
+        }
+        if (pending.replacementUid) {
+          const currentReplacement = await this.store.read(pending.plan.replacementPath);
+          const parsedReplacement = frontmatter(currentReplacement);
+          const currentUid = String(parsedReplacement.doc.get("uid") ?? "").trim();
+          if (!currentUid || currentUid !== pending.replacementUid) {
+            throw new Error(
+              `${pending.plan.replacementPath} identity changed; expected uid ${pending.replacementUid}, found ${currentUid || "none"}. Reopen supersession migration review.`,
+            );
+          }
         }
         for(const file of pending.files){
           const current=await this.store.read(file.path);
@@ -321,6 +347,16 @@ export class DefinitionNoteMigrationService {
           redo:async()=>{
             if (!(await this.store.exists(pending.plan.replacementPath))) {
               throw new Error(`${pending.plan.replacementPath} no longer exists; reopen supersession migration review.`);
+            }
+            if (pending.replacementUid) {
+              const currentReplacement = await this.store.read(pending.plan.replacementPath);
+              const parsedReplacement = frontmatter(currentReplacement);
+              const currentUid = String(parsedReplacement.doc.get("uid") ?? "").trim();
+              if (!currentUid || currentUid !== pending.replacementUid) {
+                throw new Error(
+                  `${pending.plan.replacementPath} identity changed; expected uid ${pending.replacementUid}, found ${currentUid || "none"}. Reopen supersession migration review.`,
+                );
+              }
             }
             for(const file of pending.files){
               if(await this.store.read(file.path)!==file.before) throw new Error(`${file.path} changed after undoing ${pending.label}.`);
