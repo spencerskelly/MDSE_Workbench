@@ -37,7 +37,7 @@ test("note migration stages source and inverse moves without writing",async()=>{
 test("note migration Apply moves paired relationship and supports undo redo",async()=>{
   const store=new MemoryStore(); store.files.set(owner,ownerText); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
   const tx=new TransactionManager();
-  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,()=>[oldPath],tx);
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
   const staged=await service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel});
   await service.apply(staged.transaction.id);
   assert.match(await store.read(owner),/New Contactor/);
@@ -57,7 +57,7 @@ test("note migration Apply moves paired relationship and supports undo redo",asy
 test("note migration Apply refuses any affected file changed after Review",async()=>{
   const store=new MemoryStore(); store.files.set(owner,ownerText); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
   const tx=new TransactionManager();
-  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,()=>[oldPath],tx);
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
   const staged=await service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel});
   store.files.set(oldPath,oldText+"external\n");
   await assert.rejects(service.apply(staged.transaction.id),/changed after Review/);
