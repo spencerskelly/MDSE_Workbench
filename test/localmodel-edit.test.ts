@@ -724,7 +724,7 @@ test("endpoint part reassignment surfaces a missing target as blocking validatio
 });
 
 
-test("plans endpoint parent reassignment without changing part or endpoint identity", () => {
+test("plans endpoint parent reassignment by clearing direct part ownership", () => {
   const endpointId = "ep-20261005005000002skellyspencer";
   const parentId = "ep-20261005005000003skellyspencer";
   const partId = "part-20261005005000000skellyspencer";
@@ -759,13 +759,13 @@ test("plans endpoint parent reassignment without changing part or endpoint ident
   const result = planLocalRecordPatch(
     text,
     endpointId,
-    { fields: { parent: "[[#^" + parentId + "|J2]]" } },
+    { fields: { part: null, parent: "[[#^" + parentId + "|J2]]" } },
     { allowInvalidTarget: true },
   );
 
   const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
   assert.equal(endpoint?.localId, endpointId);
-  assert.equal(endpoint?.part?.blockId, partId);
+  assert.equal(endpoint?.part, null);
   assert.equal(endpoint?.parent?.blockId, parentId);
   assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
 });
