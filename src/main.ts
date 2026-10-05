@@ -505,8 +505,8 @@ export default class MdseWorkbench extends Plugin {
       throw new Error("Definition relationship migration is unavailable while Workbench is starting.");
     }
 
-    const relationship = schema.byField.get(field);
-    if (!relationship) throw new Error(`${field} is not an authored governed relationship field.`);
+    const relationship = schema.byField.get(field) ?? schema.byInverse.get(field);
+    if (!relationship) throw new Error(`${field} is not a governed relationship field.`);
 
     const normalizedOwner = normalizePath(ownerPath);
     const normalizedReplaced = normalizePath(replacedPath);
