@@ -125,7 +125,7 @@ test("structural Local Model creation is staged until Apply and can be cancelled
   const before = store.text;
   const newId = "part-20261004232000000skellyspencer";
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "part",
     localId: newId,
     heading: "K2",
@@ -153,7 +153,7 @@ test("structural Local Model creation applies only after Review and enters share
   const service = new ModelEditService(store, () => ownerUid, transactions);
   const newId = "part-20261004232100000skellyspencer";
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "part",
     localId: newId,
     heading: "K2",
@@ -179,7 +179,7 @@ test("stale structural Apply is blocked and leaves the proposal staged", async (
   const service = new ModelEditService(store, () => ownerUid, transactions);
   const newId = "part-20261004232200000skellyspencer";
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "part",
     localId: newId,
     heading: "K2",
@@ -201,7 +201,7 @@ test("invalid structural creation is rejected before a transaction can write any
   const before = store.text;
 
   await assert.rejects(
-    service.stageLocalRecordCreate("Assembly.md", {
+    service.stageAndReviewLocalRecordCreate("Assembly.md", {
       kind: "part",
       localId: "part-20261004232300000skellyspencer",
       heading: "K2",
@@ -220,7 +220,7 @@ test("structural Apply is blocked when staged Local Model findings contain error
   const service = new ModelEditService(store, () => ownerUid, transactions);
   const newId = "part-20261004233100000skellyspencer";
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "part",
     localId: newId,
     heading: "K2",
@@ -265,7 +265,7 @@ test("clean part deletion is staged, applied, and joins shared undo/redo history
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", localId);
   assert.equal(staged.transaction.scope, "structural");
   assert.equal(staged.plan.impacts.length, 0);
   assert.equal(staged.externalImpacts.length, 0);
@@ -286,7 +286,7 @@ test("same-note Local Model dependency blocks part deletion", async () => {
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", localId);
   assert.ok(staged.plan.impacts.some((impact) => impact.sourceKind === "endpoint" && impact.field === "part"));
   await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
   assert.match(store.text, /#### K1/);
@@ -304,7 +304,7 @@ test("indexed note-level local reference blocks part deletion", async () => {
     () => [{ path: "Requirements/REQ-1.md", field: "appliesTo" }],
   );
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", localId);
   assert.deepEqual(staged.externalImpacts, [{ path: "Requirements/REQ-1.md", field: "appliesTo" }]);
   await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
   assert.match(store.text, /#### K1/);
@@ -317,7 +317,7 @@ test("Apply rechecks cross-note dependencies added after delete Review", async (
   let external: Array<{ path: string; field: string }> = [];
   const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", localId);
   assert.equal(staged.externalImpacts.length, 0);
   external = [{ path: "Requirements/REQ-2.md", field: "appliesTo" }];
 
@@ -333,7 +333,7 @@ test("cancelled part deletion leaves source and semantic history untouched", asy
   const service = new ModelEditService(store, () => ownerUid, transactions);
   const before = store.text;
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", localId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", localId);
   const cancelled = service.cancelLocalDelete(staged.transaction.id);
   assert.equal(cancelled.status, "cancelled");
   assert.equal(store.text, before);
@@ -348,7 +348,7 @@ test("staged endpoint creation stays unwritten until Apply and preserves part bi
   const endpointId = "ep-20261004234800000skellyspencer";
   const before = store.text;
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "endpoint",
     localId: endpointId,
     heading: "J1",
@@ -380,7 +380,7 @@ test("staged endpoint creation with a missing part is blocked at Apply", async (
   const service = new ModelEditService(store, () => ownerUid, transactions);
   const endpointId = "ep-20261004234800001skellyspencer";
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "endpoint",
     localId: endpointId,
     heading: "JX",
@@ -402,7 +402,7 @@ test("cancelled endpoint creation leaves source and semantic history untouched",
   const service = new ModelEditService(store, () => ownerUid, transactions);
   const before = store.text;
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "endpoint",
     localId: "ep-20261004234800002skellyspencer",
     heading: "J2",
@@ -445,7 +445,7 @@ test("clean endpoint deletion stages, applies, and joins shared undo/redo histor
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", endpointId);
   assert.equal(staged.plan.kind, "endpoint");
   assert.equal(staged.plan.impacts.length, 0);
   assert.equal(staged.externalImpacts.length, 0);
@@ -496,7 +496,7 @@ test("same-note connection dependency blocks endpoint deletion", async () => {
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", endpointId);
   assert.ok(staged.plan.impacts.some((impact) => impact.sourceKind === "connection" && impact.field === "endpointA"));
   await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
   assert.match(store.text, /#### J1/);
@@ -511,7 +511,7 @@ test("indexed external reference blocks endpoint deletion and is rechecked at Ap
   let external: Array<{ path: string; field: string }> = [];
   const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", endpointId);
   assert.equal(staged.externalImpacts.length, 0);
   external = [{ path: "Requirements/REQ-ENDPOINT.md", field: "appliesTo" }];
 
@@ -529,7 +529,7 @@ test("cancelled endpoint deletion leaves source and history untouched", async ()
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", endpointId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", endpointId);
   service.cancelLocalDelete(staged.transaction.id);
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
@@ -570,7 +570,7 @@ test("staged connection creation stays unwritten until Apply and supports undo/r
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "connection",
     localId: connectionId,
     heading: "Harness",
@@ -603,7 +603,7 @@ test("staged connection creation with a missing endpoint is blocked at Apply", a
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "connection",
     localId: connectionId,
     heading: "Broken Harness",
@@ -627,7 +627,7 @@ test("cancelled connection creation leaves source and history untouched", async 
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "connection",
     localId: "conn-20261005000400000skellyspencer",
     heading: "Harness",
@@ -691,7 +691,7 @@ test("clean connection deletion stages, applies, and joins shared undo/redo hist
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", connectionId);
   assert.equal(staged.plan.kind, "connection");
   assert.equal(staged.plan.impacts.length, 0);
   assert.equal(staged.externalImpacts.length, 0);
@@ -714,7 +714,7 @@ test("child flow blocks connection deletion", async () => {
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", connectionId);
   assert.ok(staged.plan.impacts.some((impact) =>
     impact.sourceKind === "flow" &&
     impact.sourceLocalId === flowId &&
@@ -734,7 +734,7 @@ test("indexed external reference blocks connection deletion and is rechecked at 
   let external: Array<{ path: string; field: string }> = [];
   const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", connectionId);
   assert.equal(staged.externalImpacts.length, 0);
   external = [{ path: "Requirements/REQ-CONNECTION.md", field: "appliesTo" }];
 
@@ -754,7 +754,7 @@ test("cancelled connection deletion leaves source and history untouched", async 
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", connectionId);
   service.cancelLocalDelete(staged.transaction.id);
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
@@ -769,7 +769,7 @@ test("staged flow creation stays unwritten until Apply and supports undo/redo", 
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "flow",
     localId: flowId,
     connectionId,
@@ -805,7 +805,7 @@ test("staged flow creation with missing owner connection is rejected before tran
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
   await assert.rejects(
-    service.stageLocalRecordCreate("Assembly.md", {
+    service.stageAndReviewLocalRecordCreate("Assembly.md", {
       kind: "flow",
       localId: "flow-20261005002400000skellyspencer",
       connectionId: "conn-20261005002400099skellyspencer",
@@ -830,7 +830,7 @@ test("cancelled flow creation leaves source and history untouched", async () => 
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+  const staged = await service.stageAndReviewLocalRecordCreate("Assembly.md", {
     kind: "flow",
     localId: "flow-20261005002500000skellyspencer",
     connectionId,
@@ -856,7 +856,7 @@ test("clean flow deletion stages, applies, and joins shared undo/redo history", 
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", flowId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", flowId);
   assert.equal(staged.plan.kind, "flow");
   assert.equal(staged.plan.impacts.length, 0);
   assert.equal(staged.externalImpacts.length, 0);
@@ -882,7 +882,7 @@ test("indexed external reference blocks flow deletion and is rechecked at Apply"
   let external: Array<{ path: string; field: string }> = [];
   const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", flowId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", flowId);
   assert.equal(staged.externalImpacts.length, 0);
   external = [{ path: "Requirements/REQ-FLOW.md", field: "appliesTo" }];
 
@@ -903,7 +903,7 @@ test("cancelled flow deletion leaves source and history untouched", async () => 
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordDelete("Assembly.md", flowId);
+  const staged = await service.stageAndReviewLocalRecordDelete("Assembly.md", flowId);
   service.cancelLocalDelete(staged.transaction.id);
 
   assert.equal(store.text, original);
@@ -952,7 +952,7 @@ test("staged endpoint part reassignment stays unwritten until Apply and supports
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { part: "[[#^" + targetPartId + "|K2]]" },
   });
 
@@ -977,7 +977,7 @@ test("staged endpoint part reassignment blocks missing target at Apply", async (
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { part: "[[#^part-20261005004100099skellyspencer|Missing]]" },
   });
 
@@ -995,7 +995,7 @@ test("stale staged endpoint part reassignment is blocked and remains cancellable
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { part: "[[#^" + targetPartId + "|K2]]" },
   });
   store.text += "\nexternal change";
@@ -1014,7 +1014,7 @@ test("cancelled endpoint part reassignment leaves source and history untouched",
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { part: "[[#^" + targetPartId + "|K2]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1071,7 +1071,7 @@ test("staged endpoint parent reassignment stays unwritten until Apply and suppor
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { parent: "[[#^" + newParentId + "|J3]]" },
   });
 
@@ -1096,7 +1096,7 @@ test("staged endpoint parent clear removes only the parent field", async () => {
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { parent: null },
   });
 
@@ -1114,7 +1114,7 @@ test("staged endpoint parent reassignment blocks missing target at Apply", async
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { parent: "[[#^ep-20261005006100099skellyspencer|Missing]]" },
   });
 
@@ -1133,7 +1133,7 @@ test("cancelled endpoint parent reassignment leaves source and history untouched
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { parent: "[[#^" + newParentId + "|J3]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1183,7 +1183,7 @@ test("staged endpoint exposure add stays unwritten until Apply and supports undo
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { exposes: "[[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]" },
   });
 
@@ -1208,7 +1208,7 @@ test("staged endpoint exposure removal can clear the field entirely", async () =
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { exposes: null },
   });
 
@@ -1225,7 +1225,7 @@ test("staged endpoint exposure edit blocks missing target at Apply", async () =>
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { exposes: "[[#^ep-20261005008100099skellyspencer|Missing]]" },
   });
 
@@ -1244,7 +1244,7 @@ test("cancelled endpoint exposure edit leaves source and history untouched", asy
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { exposes: "[[#^" + secondId + "|J2]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1294,7 +1294,7 @@ test("staged endpoint equals add stays unwritten until Apply and supports undo/r
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { equals: "[[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]" },
   });
 
@@ -1319,7 +1319,7 @@ test("staged endpoint equals removal can clear the field entirely", async () => 
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { equals: null },
   });
 
@@ -1336,7 +1336,7 @@ test("staged endpoint equals edit blocks missing target at Apply", async () => {
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { equals: "[[#^ep-20261005010100099skellyspencer|Missing]]" },
   });
 
@@ -1355,7 +1355,7 @@ test("cancelled endpoint equals edit leaves source and history untouched", async
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
     fields: { equals: "[[#^" + secondId + "|J2]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1417,7 +1417,7 @@ test("staged connection endpoint rewire stays unwritten until Apply and preserve
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { endpointA: "[[#^" + endpointC + "|J3]]" },
   });
 
@@ -1446,7 +1446,7 @@ test("staged connection endpoint B rewire preserves endpoint A", async () => {
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { endpointB: "[[#^" + endpointC + "|J3]]" },
   });
 
@@ -1463,7 +1463,7 @@ test("staged connection endpoint rewire blocks missing target at Apply", async (
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { endpointA: "[[#^ep-20261005012100099skellyspencer|Missing]]" },
   });
 
@@ -1482,7 +1482,7 @@ test("cancelled connection endpoint rewire leaves source and history untouched",
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { endpointA: "[[#^" + endpointC + "|J3]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1501,7 +1501,7 @@ test("staged connection definition change stays unwritten until Apply and preser
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { definition: "[[CAN Bus]]" },
   });
 
@@ -1535,7 +1535,7 @@ test("staged connection definition can be cleared without changing topology", as
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { definition: null },
   });
 
@@ -1553,7 +1553,7 @@ test("staged connection definition edit blocks block-fragment definitions at App
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { definition: "[[CAN Bus#^ep-20261005012000000skellyspencer|Bad]]" },
   });
 
@@ -1571,7 +1571,7 @@ test("cancelled connection definition edit leaves source and history untouched",
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { definition: "[[CAN Bus]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1618,7 +1618,7 @@ test("staged part definition change stays unwritten until Apply and preserves at
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", partId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", partId, {
     fields: { definition: "[[New Contactor]]" },
   });
 
@@ -1648,7 +1648,7 @@ test("staged part definition edit blocks clearing required definition at Apply",
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", partId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", partId, {
     fields: { definition: null },
   });
 
@@ -1666,7 +1666,7 @@ test("staged part definition edit blocks block-fragment definitions at Apply", a
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", partId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", partId, {
     fields: { definition: "[[New Contactor#^ep-20261005015000001skellyspencer|Bad]]" },
   });
 
@@ -1683,7 +1683,7 @@ test("cancelled part definition edit leaves source and history untouched", async
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", partId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", partId, {
     fields: { definition: "[[New Contactor]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1755,7 +1755,7 @@ test("staged endpoint definition change stays unwritten until Apply and preserve
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { definition: "[[New Port]]" },
   });
 
@@ -1787,7 +1787,7 @@ test("staged endpoint definition edit blocks clearing required definition at App
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { definition: null },
   });
 
@@ -1805,7 +1805,7 @@ test("staged endpoint definition edit blocks block-fragment definitions at Apply
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { definition: "[[New Port#^ep-20261005017000002skellyspencer|Bad]]" },
   });
 
@@ -1822,7 +1822,7 @@ test("cancelled endpoint definition edit leaves source and history untouched", a
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", endpointId, {
     fields: { definition: "[[New Port]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
@@ -1840,7 +1840,7 @@ test("staged flow definition change stays unwritten until Apply and preserves co
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", flowId, {
     fields: { definition: "[[New Data]]" },
   });
 
@@ -1870,7 +1870,7 @@ test("staged flow definition edit blocks clearing required definition at Apply",
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", flowId, {
     fields: { definition: null },
   });
 
@@ -1888,7 +1888,7 @@ test("staged flow definition edit blocks block-fragment definitions at Apply", a
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", flowId, {
     fields: { definition: "[[New Data#^ep-20261005012000000skellyspencer|Bad]]" },
   });
 
@@ -1905,11 +1905,75 @@ test("cancelled flow definition edit leaves source and history untouched", async
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageLocalRecordPatch("Assembly.md", flowId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", flowId, {
     fields: { definition: "[[New Data]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
 
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
+});
+
+
+test("structural Local Model patch cannot Apply before Review", async () => {
+  const endpointId = "ep-20261005004000002skellyspencer";
+  const targetPartId = "part-20261005004000001skellyspencer";
+  const original = noteWithReassignableEndpoint();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", endpointId, {
+    fields: { part: "[[#^" + targetPartId + "|K2]]" },
+  });
+  assert.equal(staged.transaction.status, "draft");
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /must be reviewed before Apply/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+
+  const reviewed = service.reviewLocalPatch(staged.transaction.id);
+  assert.equal(reviewed.transaction.status, "reviewed");
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.notEqual(store.text, original);
+});
+
+test("structural Local Model create cannot Apply before Review", async () => {
+  const original = note();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const input = {
+    kind: "part" as const,
+    localId: "part-20261005020000000skellyspencer",
+    heading: "K Review",
+    fields: { definition: "[[Contactor]]" },
+  };
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", input);
+  assert.equal(staged.transaction.status, "draft");
+  await assert.rejects(service.applyLocalCreate(staged.transaction.id), /must be reviewed before Apply/);
+  assert.equal(store.text, original);
+
+  const reviewed = service.reviewLocalCreate(staged.transaction.id);
+  assert.equal(reviewed.transaction.status, "reviewed");
+  await service.applyLocalCreate(staged.transaction.id);
+  assert.notEqual(store.text, original);
+});
+
+test("structural Local Model delete cannot Apply before Review", async () => {
+  const original = noteWithCleanConnection(false);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const connectionId = "conn-20261003133512744skellyspencer";
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", connectionId);
+  assert.equal(staged.transaction.status, "draft");
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /must be reviewed before Apply/);
+  assert.equal(store.text, original);
+
+  const reviewed = service.reviewLocalDelete(staged.transaction.id);
+  assert.equal(reviewed.transaction.status, "reviewed");
+  await service.applyLocalDelete(staged.transaction.id);
+  assert.notEqual(store.text, original);
 });
