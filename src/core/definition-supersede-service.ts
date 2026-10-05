@@ -1,4 +1,5 @@
 import { isSeq, parseDocument } from "yaml";
+import { linkTarget } from "./frontmatter";
 import { noteRef } from "./localmodel";
 import type { DefinitionDeletionImpact } from "./definition-lifecycle";
 import { planDefinitionSupersession, type DefinitionSupersessionPlan } from "./definition-supersede";
@@ -47,12 +48,19 @@ function frontmatter(text: string): { yaml: string; body: string; prefixLength: 
  * structural edit; comments, property order, scalar quoting, blank lines and the note body must
  * remain byte-for-byte unchanged outside the relationship value being changed.
  */
-function withRelationship(text: string, field: string, targetPath: string): string {
+function withRelationship(
+  text: string,
+  sourcePath: string,
+  field: string,
+  targetPath: string,
+  resolve: (target: string, fromPath: string) => string | null,
+  linkText: (targetPath: string, fromPath: string) => string,
+): string {
   const parsed = frontmatter(text);
   const doc = parseDocument(parsed.yaml);
   if (doc.errors.length) throw new Error(`Definition frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
 
-  const link = `[[${targetPath.replace(/\.md$/i, "")}]]`;
+  const link = `[[${linkText(targetPath, sourcePath)}]]`;
   const node = doc.get(field, true);
   if (node === undefined || node === null) {
     const addition = `${parsed.yaml.endsWith("\n") || parsed.yaml.length === 0 ? "" : "\n"}${field}:\n  - "${link}"`;
@@ -69,7 +77,10 @@ function withRelationship(text: string, field: string, targetPath: string): stri
   const values = isSeq(node)
     ? node.items.map((item) => String(nodeValue(item) ?? ""))
     : [String(nodeValue(node) ?? "")];
-  if (values.includes(link)) return text;
+  if (values.some((value) => {
+    const target = linkTarget(value);
+    return !!target && resolve(target, sourcePath) === targetPath;
+  })) return text;
   values.push(link);
   values.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 
@@ -108,6 +119,8 @@ export class DefinitionSupersessionService {
   constructor(
     private readonly store: DefinitionSupersessionStore,
     private readonly impactFor: (path: string) => Promise<DefinitionDeletionImpact>,
+    private readonly resolve: (target: string, fromPath: string) => string | null,
+    private readonly linkText: (targetPath: string, fromPath: string) => string,
     private readonly transactions: TransactionManager,
   ) {}
 
@@ -128,8 +141,12 @@ export class DefinitionSupersessionService {
 
     const replacedBefore = await this.store.read(request.replacedPath);
     const replacementBefore = await this.store.read(request.replacementPath);
-    const replacementAfter = withRelationship(replacementBefore, "supersedes", request.replacedPath);
-    const replacedAfter = withRelationship(replacedBefore, "supersededBy", request.replacementPath);
+    const replacementAfter = withRelationship(
+      replacementBefore, request.replacementPath, "supersedes", request.replacedPath, this.resolve, this.linkText,
+    );
+    const replacedAfter = withRelationship(
+      replacedBefore, request.replacedPath, "supersededBy", request.replacementPath, this.resolve, this.linkText,
+    );
 
     const id = `definition-supersede-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
     const label = `supersede ${request.replacedPath} with ${request.replacementPath}`;
