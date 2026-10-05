@@ -1184,3 +1184,13 @@ This slice adds a reusable pure-core source-UID reader/assertion in `src/core/id
 Focused regression coverage in `test/identity.test.ts` proves matching source/index identity passes while stale or missing source identity is rejected. GitHub Actions run `37339741587` passed `npm test`, the 60k semantic-cache scale smoke, paired cold/warm startup benchmark, 60k relationship re-resolution benchmark, and `npm run build`; the workflow also synchronized the checked-in 0.1.17 artifact.
 
 Implementation/test commits: `65b6cf9f`, `84963992`, `109ded46` (with the normal artifact build commit between source/test pushes).
+
+
+### WB-126 — 2026-10-05 fresh-source identity guard for missing-target relationship removal
+**Status:** Implemented on standalone main; release promotion unchanged.
+
+WB-125 deliberately left the legacy undefined-target removal path for a separate symmetry check. That path is now fail-closed too: `RelationshipWriter.removeMissing()` reads the current Markdown source and proves its durable `uid` still matches the indexed note identity before any frontmatter mutation.
+
+This closes the stale-index redirect risk for relationship removal when the target note no longer exists. The operation remains single-file because there is no target note/inverse to update. The existing pure source/index UID assertion remains the common guard used by relationship add, normal remove, and missing-target remove.
+
+Ordinary property and body edits remain separate identity-hardening slices; they are not pulled into WB-126.
