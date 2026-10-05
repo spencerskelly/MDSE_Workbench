@@ -1,6 +1,6 @@
 {
   "name": "mdse-workbench",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Everyday engineer interface to the MDSE model vault (Create / Explore / Review). Phase 0 spike.",
   "main": "main.js",
   "private": true,
