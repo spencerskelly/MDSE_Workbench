@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fixtureSchema, indexOf, note } from "./helpers";
+import { currentFixtureSchema, fixtureSchema, indexOf, note } from "./helpers";
 import {
   LocalModelIndex, localModelSourceFingerprint, parseLinks, parseLocalModel, refForLink, refKey, renderFindingsReport, specializationCandidates, validateLocalModels, localRef, noteRef,
 } from "../src/core/localmodel";
@@ -435,4 +435,13 @@ test("0.4 Interface definitions require Object/interface; definitionless Interfa
   assert.ok(vcodes(bad).includes("definition.incompatible"));
   const none = vault({}, [], { "Control Assembly.md": body.replace("- definition: [[CAN Interface]]\n", "") });
   assert.ok(!vcodes(none).includes("record.missing-definition"));
+});
+
+
+test("the current W-384 schema fixtures parse without warnings", () => {
+  const current = currentFixtureSchema();
+  assert.deepEqual(current.warnings, []);
+  assert.ok(current.byField.get("performs"));
+  assert.ok(!current.byField.get("hasPort"));
+  assert.ok(!current.byField.get("interfaces"));
 });
