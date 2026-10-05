@@ -5216,12 +5216,13 @@ var LocalEndpointCreateModal = class extends import_obsidian3.Modal {
   }
 };
 var LocalConnectionCreateModal = class extends import_obsidian3.Modal {
-  constructor(app, ownerName, source, options, localId, stage, apply, cancel, onApplied) {
+  constructor(app, ownerName, source, options, localId, definitions, stage, apply, cancel, onApplied) {
     super(app);
     this.ownerName = ownerName;
     this.source = source;
     this.options = options;
     this.localId = localId;
+    this.definitions = definitions;
     this.stage = stage;
     this.apply = apply;
     this.cancel = cancel;
@@ -5254,7 +5255,11 @@ var LocalConnectionCreateModal = class extends import_obsidian3.Modal {
       return el;
     };
     const heading = input("Connection name", "Harness");
-    const definition = input("Reusable definition", "optional");
+    const definitionRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    definitionRow.createEl("label", { text: "Reusable definition" });
+    const definition = definitionRow.createEl("select", { cls: "mdse-detail-input" });
+    definition.createEl("option", { text: "No reusable definition", value: "" });
+    for (const option of this.definitions) definition.createEl("option", { text: `${option.name} \u2014 ${option.type ?? "model"}`, value: option.path });
     const pickRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
     pickRow.createEl("label", { text: "Endpoint B" });
     const pick = pickRow.createEl("select", { cls: "mdse-detail-input" });
@@ -5272,10 +5277,12 @@ var LocalConnectionCreateModal = class extends import_obsidian3.Modal {
           endpointA: `[[#^${this.source.localId}|${this.source.identifier}]]`,
           endpointB: `[[#^${target.localId}|${target.identifier}]]`
         };
-        if (definition.value.trim()) fields.definition = definition.value.trim();
+        const selected = this.definitions.find((option) => option.path === definition.value);
+        const definitionLink = selected ? `[[${selected.path.replace(/\.md$/i, "")}]]` : "";
+        if (definitionLink) fields.definition = definitionLink;
         const staged = await this.stage({ kind: "connection", localId: this.localId, heading: heading.value.trim(), fields });
         this.staged = staged;
-        this.review(staged, heading.value.trim(), definition.value.trim(), target);
+        this.review(staged, heading.value.trim(), definitionLink, target);
       } catch (e) {
         new import_obsidian3.Notice(`Cannot stage connection: ${e.message}`, 12e3);
         review.disabled = false;
@@ -6006,10 +6013,11 @@ var LocalConnectionEndpointRewireModal = class extends import_obsidian3.Modal {
   }
 };
 var LocalConnectionDefinitionEditModal = class extends import_obsidian3.Modal {
-  constructor(app, ownerName, connection, stage, apply, cancel, onApplied) {
+  constructor(app, ownerName, connection, definitions, stage, apply, cancel, onApplied) {
     super(app);
     this.ownerName = ownerName;
     this.connection = connection;
+    this.definitions = definitions;
     this.stage = stage;
     this.apply = apply;
     this.cancel = cancel;
@@ -6023,20 +6031,22 @@ var LocalConnectionDefinitionEditModal = class extends import_obsidian3.Modal {
     this.contentEl.createEl("p", { text: `Change only the reusable definition link for ${this.connection.identifier}. Connection identity, endpoints, and child flows remain unchanged.` });
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Reusable definition" });
-    const input = row.createEl("input", {
-      type: "text",
-      cls: "mdse-detail-input",
-      value: this.connection.definition?.text ?? ""
-    });
-    input.setAttr("placeholder", "[[CAN Bus]]");
-    input.onkeydown = (e) => e.stopPropagation();
+    const input = row.createEl("select", { cls: "mdse-detail-input" });
+    input.createEl("option", { text: "No reusable definition", value: "" });
+    const currentTarget = this.connection.definition?.target ?? "";
+    for (const option of this.definitions) {
+      const item = input.createEl("option", { text: `${option.name} \u2014 ${option.type ?? "model"}`, value: option.path });
+      const stem = option.path.replace(/\.md$/i, "");
+      if (currentTarget === stem || currentTarget === option.name) item.selected = true;
+    }
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
     const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
-        const value = input.value.trim();
+        const selected = this.definitions.find((option) => option.path === input.value);
+        const value = selected ? `[[${selected.path.replace(/\.md$/i, "")}]]` : "";
         const staged = await this.stage(value || null);
         this.staged = staged;
         this.renderReview(staged, value);
@@ -7073,6 +7083,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         connection,
+        this.host.elements(file.path),
         (definition) => editor.stageAndReviewLocalRecordPatch(file.path, connection.localId, {
           fields: { definition }
         }),
@@ -7159,12 +7170,14 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
       const localId = nextAvailableLocalId("connection", ownerUid, region.records.map((record) => record.localId));
+      const definitions = this.host.elements(file.path);
       new LocalConnectionCreateModal(
         this.app,
         file.basename,
         source,
         options,
         localId,
+        definitions,
         (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => {
