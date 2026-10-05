@@ -6602,6 +6602,14 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const undo = head.createEl("button", { text: "Undo", cls: "mdse-detail-btn", attr: { title: "Undo the last Workbench edit" } });
       undo.disabled = !this.host.writer()?.canUndo;
       undo.onclick = () => void this.host.undo();
+      const local = parseLocalModel(text);
+      const canCreateFirstPart = fm?.type === "Object" && (!local || local.structured && local.records.length === 0);
+      if (canCreateFirstPart) {
+        const addPart = head.createEl("button", { text: "Add first part occurrence\u2026", cls: "mdse-detail-btn" });
+        addPart.onclick = () => {
+          void this.createPartOccurrence(file);
+        };
+      }
     }
     const view = head.createEl("button", { text: "View\u2026", cls: "mdse-detail-btn", attr: { title: "Open a view of this note: Structure, Functional, Where Used and more" } });
     view.onclick = () => this.host.pickView(file.path);
@@ -7200,10 +7208,11 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       if (!editor) throw new Error("Workbench is still starting.");
       const text = await this.app.vault.read(file);
       const region = parseLocalModel(text);
-      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      if (region && !region.structured) throw new Error("The owner note has no usable Local Model.");
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (fm?.type !== "Object") throw new Error("Part occurrences can only be created in an Object owner.");
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
-      const localId = nextAvailableLocalId("part", ownerUid, region.records.map((record) => record.localId));
+      const localId = nextAvailableLocalId("part", ownerUid, region?.records.map((record) => record.localId) ?? []);
       new LocalPartCreateModal(
         this.app,
         file.basename,
