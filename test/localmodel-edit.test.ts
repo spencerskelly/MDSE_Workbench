@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextAvailableLocalId, nextLocalId, planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch } from "../src/core/localmodel-edit";
+import { nextAvailableLocalId, nextLocalId, planLocalFlowMove, planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch } from "../src/core/localmodel-edit";
 import { parseLocalModel } from "../src/core/localmodel";
 
 const tokenA = "20261003133512742skellyspencer";
@@ -1643,4 +1643,42 @@ test("flow endpoint-role edit rejects values outside the governed role set", () 
     finding.code === "ref.flow-role-invalid" &&
     finding.severity === "error"
   ));
+});
+
+
+test("moves a flow between existing connections while preserving flow identity and fields", () => {
+  const endpointA = "ep-20261005024000000skellyspencer";
+  const endpointB = "ep-20261005024000001skellyspencer";
+  const connectionA = "conn-20261005024000002skellyspencer";
+  const connectionB = "conn-20261005024000003skellyspencer";
+  const flowId = "flow-20261005024000004skellyspencer";
+  const text = [
+    "---", "type: Object", "uid: 20261003130000000skellyspencer", "---", "", "# Assembly", "",
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1", "- definition: [[CAN Port]]", "^" + endpointA, "",
+    "#### J2", "- definition: [[CAN Port]]", "^" + endpointB, "",
+    "### Connections",
+    "#### Primary", "- endpointA: [[#^" + endpointA + "|J1]]", "- endpointB: [[#^" + endpointB + "|J2]]", "^" + connectionA,
+    "##### Commands", "- definition: [[CAN Data]]", "- endpointA: transmit", "- endpointB: receive", "^" + flowId, "",
+    "#### Backup", "- endpointA: [[#^" + endpointA + "|J1]]", "- endpointB: [[#^" + endpointB + "|J2]]", "^" + connectionB,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalFlowMove(text, flowId, connectionB);
+  const moved = parseLocalModel(result.after)?.records.find((record) => record.localId === flowId);
+  assert.equal(moved?.connectionId, connectionB);
+  assert.equal(moved?.definition?.target, "CAN Data");
+  assert.equal(moved?.roleA, "transmit");
+  assert.equal(moved?.roleB, "receive");
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+  assert.ok(result.after.indexOf("^" + connectionB) < result.after.indexOf("^" + flowId));
+});
+
+test("flow move refuses a missing target connection", () => {
+  const flowId = "flow-" + tokenB;
+  assert.throws(
+    () => planLocalFlowMove(note(), flowId, "conn-20261005024000099skellyspencer"),
+    /Target connection .* does not exist/,
+  );
 });
