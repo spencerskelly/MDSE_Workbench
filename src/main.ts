@@ -101,7 +101,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, and the deletion service is now bound to real vault storage plus a foreground impact provider that fully hydrates occurrence evidence before any destructive review. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, and definition mode now exposes a deletion review that lists every blocker and disables Apply until the complete impact assessment is clear. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
@@ -172,6 +172,9 @@ export default class MdseWorkbench extends Plugin {
       applyDefinitionCreation: (transactionId) => this.applyDefinitionCreation(transactionId),
       cancelDefinitionCreation: (transactionId) => this.cancelDefinitionCreation(transactionId),
       rollbackDefinitionCreation: (transactionId) => this.rollbackDefinitionCreation(transactionId),
+      stageDefinitionDeletion: (path, uid) => this.stageDefinitionDeletion(path, uid),
+      applyDefinitionDeletion: (transactionId) => this.applyDefinitionDeletion(transactionId),
+      cancelDefinitionDeletion: (transactionId) => this.cancelDefinitionDeletion(transactionId),
       stageOccurrenceDefinitionBinding: (ownerPath, localId, definitionPath) => this.stageOccurrenceDefinitionBinding(ownerPath, localId, definitionPath),
       applyOccurrenceDefinitionBinding: (transactionId) => this.applyOccurrenceDefinitionBinding(transactionId),
       cancelOccurrenceDefinitionBinding: (transactionId) => this.cancelOccurrenceDefinitionBinding(transactionId),
@@ -352,6 +355,24 @@ export default class MdseWorkbench extends Plugin {
     const creator = this.definitionCreator;
     if (!creator) throw new Error("Definition creation is unavailable.");
     await creator.rollbackApplied(transactionId);
+  }
+
+  private async stageDefinitionDeletion(path: string, uid: string) {
+    const deleter = this.definitionDeleter;
+    if (!deleter || !this.isReady()) throw new Error("Definition deletion is unavailable while Workbench is starting.");
+    return deleter.stageAndReview(normalizePath(path), uid);
+  }
+
+  private async applyDefinitionDeletion(transactionId: string): Promise<void> {
+    const deleter = this.definitionDeleter;
+    if (!deleter) throw new Error("Definition deletion is unavailable.");
+    await deleter.apply(transactionId);
+  }
+
+  private cancelDefinitionDeletion(transactionId: string): void {
+    const deleter = this.definitionDeleter;
+    if (!deleter) throw new Error("Definition deletion is unavailable.");
+    deleter.cancel(transactionId);
   }
 
   private async stageOccurrenceDefinitionBinding(
