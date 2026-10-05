@@ -889,7 +889,7 @@ export class LocalEndpointParentReassignModal extends Modal {
   private compose(): void {
     this.titleEl.setText("Change endpoint parent");
     this.contentEl.empty();
-    this.contentEl.createEl("p", { text: `Select another endpoint in ${this.ownerName} as the parent of ${this.endpoint.identifier}, or clear the parent relationship.` });
+    this.contentEl.createEl("p", { text: `Select another endpoint in ${this.ownerName} as the parent of ${this.endpoint.identifier}, or clear the parent relationship. Assigning a parent clears any direct part assignment because part and parent are mutually exclusive.` });
 
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Parent endpoint" });
@@ -927,6 +927,7 @@ export class LocalEndpointParentReassignModal extends Modal {
       ["Owner", this.ownerName],
       ["Endpoint", this.endpoint.identifier],
       ["New parent", target?.identifier ?? "none"],
+      ["Direct part", target && this.endpoint.part ? "cleared" : (this.endpoint.part?.alias ?? this.endpoint.part?.text ?? "none")],
       ["Transaction", staged.transaction.label],
       ["Scope", staged.transaction.scope],
     ];
