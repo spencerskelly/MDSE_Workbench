@@ -73,7 +73,7 @@ export function planDefinitionSupersession(request: DefinitionSupersessionReques
     a.ownerPath.localeCompare(b.ownerPath) ||
     a.scope.localeCompare(b.scope) ||
     a.field.localeCompare(b.field) ||
-    (a.localId ?? "").localeCompare(b.localId ?? "")
+    (a.scope === "occurrence" ? a.localId : "").localeCompare(b.scope === "occurrence" ? b.localId : "")
   );
 
   return {
