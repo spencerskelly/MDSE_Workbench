@@ -292,9 +292,9 @@ test("addLink matches by the note a link resolves to, not by its text; removeLin
   assert.ok((fm.hasChild as string[]).includes("[[B/Same Name]]"));
 });
 
-test("the 0.2 schema fixture agrees with the parser's constants", () => {
+test("the current 0.3 schema fixture agrees with the parser's constants", () => {
   const yaml = readFileSync(new URL("./fixtures/local-model.yaml", import.meta.url), "utf8");
-  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->"/);
+  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.3 -->"/);
   for (const k of ["part-", "ep-", "conn-", "flow-"]) assert.ok(yaml.includes(`prefix: "${k}"`));
 });
 
