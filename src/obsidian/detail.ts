@@ -611,7 +611,9 @@ export class NoteDetailPanel extends Component {
       new ReportModal(
         this.app,
         `Definition impact — ${file.basename}`,
-        impact.rows.length ? impact.rows : ["No current note-level or occurrence-level uses were found."],
+        impact.rows.length
+          ? impact.rows.map((row) => ["Use", row] as [string, string])
+          : [["Use", "No current note-level or occurrence-level uses were found."]],
         [
           `${impact.notes} note-level use${impact.notes === 1 ? "" : "s"}; ${impact.occurrences} Local Model occurrence${impact.occurrences === 1 ? "" : "s"}.`,
           "This is read-only impact evidence. It does not change the definition or any occurrence.",
