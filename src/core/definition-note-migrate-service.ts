@@ -278,7 +278,16 @@ export class DefinitionNoteMigrationService {
             for(const file of pending.files){
               if(await this.store.read(file.path)!==file.after) throw new Error(`${file.path} changed after ${pending.label}.`);
             }
-            for(const file of pending.files) await this.store.write(file.path,file.before);
+            const reverted:FileState[]=[];
+            try{
+              for(const file of pending.files){
+                await this.store.write(file.path,file.before);
+                reverted.push(file);
+              }
+            }catch(error){
+              for(const file of reverted.reverse()) await this.store.write(file.path,file.after);
+              throw error;
+            }
           },
           redo:async()=>{
             for(const file of pending.files){
