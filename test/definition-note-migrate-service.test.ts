@@ -24,7 +24,7 @@ test("note migration stages source and inverse moves without writing",async()=>{
   const store=new MemoryStore(); store.files.set(owner,ownerText); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
   const tx=new TransactionManager();
   const service=new DefinitionNoteMigrationService(
-    store,(target)=>resolve(target),linkText,()=>[oldPath],tx,
+    store,(target)=>resolve(target),linkText,tx,
   );
   const staged=await service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel});
   assert.equal(staged.transaction.status,"reviewed");
@@ -70,6 +70,6 @@ test("note migration Apply refuses any affected file changed after Review",async
 test("note migration refuses staging when fresh targets no longer include superseded definition",async()=>{
   const store=new MemoryStore(); store.files.set(owner,ownerText); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
   const tx=new TransactionManager();
-  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,()=>[newPath],tx);
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
   await assert.rejects(service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel}),/no longer targets/);
 });
