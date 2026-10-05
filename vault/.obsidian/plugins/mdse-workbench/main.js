@@ -970,6 +970,39 @@ function planLocalRecordDelete(text, localId) {
     identifier: record.identifier
   };
 }
+function planLocalFlowMove(text, flowId, connectionId) {
+  const editable = editableLocalRegion(text);
+  const flow = editable.region.records.find((record) => record.localId === flowId);
+  if (!flow || flow.kind !== "flow") throw new Error("Local Model flow ^" + flowId + " does not exist in this note.");
+  const target = editable.region.records.find((record) => record.localId === connectionId);
+  if (!target || target.kind !== "connection") throw new Error("Target connection ^" + connectionId + " does not exist in this note.");
+  if (flow.connectionId === connectionId) throw new Error("This flow already belongs to the selected connection.");
+  const range = recordLineRange(editable, flow);
+  let removeEnd = range.end;
+  while (removeEnd < editable.lines.length && editable.lines[removeEnd].trim() === "") removeEnd++;
+  const withoutFlow = [...editable.lines.slice(0, range.start), ...editable.lines.slice(removeEnd)].join(editable.eol);
+  const interim = editableLocalRegion(withoutFlow);
+  const reparsedTarget = interim.region.records.find((record) => record.localId === connectionId);
+  if (!reparsedTarget || reparsedTarget.kind !== "connection") throw new Error("Target connection disappeared while planning the flow move.");
+  const rendered = renderRecord("flow", flow.identifier, flow.localId, new Map(flow.fields));
+  const nextLines = interim.lines.slice();
+  const insertAt = endOfConnection(nextLines, interim.region, reparsedTarget);
+  nextLines.splice(insertAt, 0, ...rendered, "");
+  const after = nextLines.join(interim.eol);
+  const parsed = parseLocalModel(after);
+  if (!parsed?.structured) throw new Error("Planned flow move would make the Local Model region structurally unreadable.");
+  const moved = parsed.records.find((record) => record.localId === flowId);
+  if (!moved || moved.kind !== "flow") throw new Error("Planned flow move lost Local Model flow ^" + flowId + ".");
+  if (moved.connectionId !== connectionId) throw new Error("Planned flow move did not bind ^" + flowId + " to ^" + connectionId + ".");
+  return {
+    before: text,
+    after,
+    changed: after !== text,
+    localId: flowId,
+    kind: "flow",
+    findings: parsed.findings.slice()
+  };
+}
 var SECTION_TITLE = {
   part: "Part Occurrences",
   endpoint: "Local Interfaces",
@@ -1180,6 +1213,31 @@ var ModelEditService = class {
   async stageAndReviewLocalRecordPatch(path, localId, patch) {
     const staged = await this.stageLocalRecordPatch(path, localId, patch);
     return this.reviewLocalPatch(staged.transaction.id);
+  }
+  async stageAndReviewLocalFlowMove(path, flowId, connectionId) {
+    const before = await this.store.read(path);
+    const plan = planLocalFlowMove(before, flowId, connectionId);
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+    const txId = `local-move-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `move flow ${flowId} to ${connectionId}`;
+    this.transactions.begin(txId, label, "structural");
+    this.transactions.add(txId, {
+      id: txId + "-move",
+      label,
+      changes: [{
+        kind: "local.move",
+        summary: label,
+        refs: [localRef(uid, "flow", flowId), localRef(uid, "connection", connectionId)],
+        metadata: { path, localId: flowId, localKind: "flow", connectionId }
+      }]
+    });
+    this.pendingPatches.set(txId, { path, plan, label });
+    return {
+      transaction: this.transactions.review(txId),
+      plan,
+      path
+    };
   }
   reviewLocalPatch(transactionId) {
     const pending = this.requirePendingPatch(transactionId);
@@ -6560,6 +6618,117 @@ var _LocalFlowRolesEditModal = class _LocalFlowRolesEditModal extends import_obs
 };
 _LocalFlowRolesEditModal.roles = ["transmit", "receive", "exchange", "unspecified"];
 var LocalFlowRolesEditModal = _LocalFlowRolesEditModal;
+var LocalFlowConnectionMoveModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, flow, connections, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.flow = flow;
+    this.connections = connections;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.titleEl.setText("Move flow to connection");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Move ${this.flow.identifier} to another connection in this Local Model. Flow identity, definition, and endpoint roles remain unchanged.`
+    });
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Owning connection" });
+    const select = row.createEl("select", { cls: "mdse-detail-input" });
+    select.createEl("option", { text: "Choose a connection\u2026", value: "" });
+    for (const connection of this.connections) {
+      select.createEl("option", { text: connection.identifier, value: connection.localId });
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const connection = this.connections.find((candidate) => candidate.localId === select.value);
+        if (!connection) throw new Error("Choose a target connection.");
+        const staged = await this.stage(connection);
+        this.staged = staged;
+        this.renderReview(staged, connection);
+      } catch (e) {
+        new import_obsidian3.Notice(`Cannot stage flow move: ${e.message}`, 12e3);
+        review.disabled = false;
+      }
+    })();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  renderReview(staged, connection) {
+    this.titleEl.setText("Review flow connection move");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Flow", this.flow.identifier],
+      ["Reusable definition", this.flow.definition?.text ?? "none"],
+      ["Connection", `${this.flow.connectionId ?? "none"} \u2192 ${connection.localId}`],
+      ["Endpoint A role", this.flow.roleA ?? "none"],
+      ["Endpoint B role", this.flow.roleB ?? "none"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope]
+    ];
+    for (const [key2, val] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key2 });
+      tr.createEl("td", { text: val });
+    }
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    for (const finding of staged.plan.findings) {
+      this.contentEl.createEl("p", {
+        text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+        cls: finding.severity === "error" ? "mdse-warn" : void 0
+      });
+    }
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "Validation passed. Apply will move this flow under the selected connection without changing its identity or flow fields."
+      });
+    }
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new import_obsidian3.Notice(`Moved flow ${this.flow.identifier} to ${connection.identifier}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -6907,6 +7076,10 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       definition.onclick = () => this.editFlowDefinition(file, record);
       const roles = head.createEl("button", { text: "Change endpoint roles\u2026", cls: "mdse-detail-btn" });
       roles.onclick = () => this.editFlowRoles(file, record);
+      const move = head.createEl("button", { text: "Move to connection\u2026", cls: "mdse-detail-btn" });
+      move.onclick = () => {
+        void this.moveFlowConnection(file, record);
+      };
     }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
@@ -7130,6 +7303,33 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       ).open();
     } catch (e) {
       new import_obsidian4.Notice(`Cannot reassign endpoint part: ${e.message}`, 12e3);
+    }
+  }
+  async moveFlowConnection(file, flow) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const connections = region.records.filter((record) => record.kind === "connection" && record.localId !== flow.connectionId);
+      if (!connections.length) throw new Error("This note has no alternate connection occurrence.");
+      new LocalFlowConnectionMoveModal(
+        this.app,
+        file.basename,
+        flow,
+        connections,
+        (connection) => editor.stageAndReviewLocalFlowMove(file.path, flow.localId, connection.localId),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => {
+          editor.cancelLocalPatch(transactionId);
+        },
+        () => {
+          void this.refreshLocal(file, flow.localId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot move flow: ${e.message}`, 12e3);
     }
   }
   editFlowRoles(file, flow) {
