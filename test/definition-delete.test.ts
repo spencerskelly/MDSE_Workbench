@@ -142,3 +142,17 @@ test("definition deletion undo refuses UID collision introduced after delete", a
   assert.equal(await store.exists(path),false);
   assert.equal(tx.history().length,1);
 });
+
+
+test("definition deletion refuses staging when caller UID does not match source definition", async()=>{
+  const store=new MemoryDeleteStore(); store.files.set(path,text);
+  const tx=new TransactionManager();
+  const service=new DefinitionDeletionService(store,async()=>clearImpact(),tx);
+
+  await assert.rejects(
+    service.stageAndReview(path,"20261005060000001skellyspencer"),
+    /expected uid .* found/,
+  );
+  assert.equal(await store.exists(path),true);
+  assert.equal(tx.history().length,0);
+});
