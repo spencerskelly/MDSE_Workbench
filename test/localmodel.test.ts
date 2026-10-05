@@ -370,3 +370,69 @@ test("removing a quarantined region leaves unrelated occurrence identity intact"
   assert.equal(local.find(goodId).length, 1);
   assert.deepEqual(local.quarantinedPaths(), []);
 });
+
+test("0.3 remains readable with legacy headings and definitionless endpoints", () => {
+  const text = [
+    "## Local Model", START3,
+    "### Part Occurrences",
+    "#### Board", "- definition: [[Control Board]]", "^" + P1, "",
+    "### Local Interfaces",
+    "#### Service", "- part: [[#^" + P1 + "]]", "^" + E1, "",
+    "#### Boundary", "- exposes: [[#^" + E1 + "|Service]]", "^" + E3, "",
+    END,
+  ].join("\n");
+  const region = parseLocalModel(text)!;
+  assert.equal(region.schemaVersion, "0.3");
+  assert.equal(region.structured, true);
+  assert.ok(!region.findings.some((f) => f.code === "record.missing-definition"));
+  assert.equal(region.records.find((x) => x.localId === E3)?.exposes[0]?.blockId, E1);
+});
+
+test("0.4 uses Parts/Interfaces and Connection-owned exposes", () => {
+  const text = [
+    "## Local Model", START4,
+    "### Parts",
+    "#### Board", "- definition: [[Control Board]]", "^" + P1, "",
+    "### Interfaces",
+    "#### Internal", "- part: [[#^" + P1 + "]]", "^" + E1, "",
+    "#### Peer", "- part: [[#^" + P1 + "]]", "^" + E2, "",
+    "#### Boundary", "- definition: [[CAN Interface]]", "^" + E3, "",
+    "### Connections",
+    "#### Internal CAN", "- endpointA: [[#^" + E1 + "|Internal]]", "- endpointB: [[#^" + E2 + "|Peer]]", "- exposes: [[#^" + E3 + "|Boundary]]", "^" + C1, "",
+    END,
+  ].join("\n");
+  const region = parseLocalModel(text)!;
+  assert.equal(region.schemaVersion, "0.4");
+  assert.equal(region.structured, true);
+  assert.deepEqual(region.findings, []);
+  const connection = region.records.find((x) => x.localId === C1)!;
+  assert.equal(connection.exposes[0]?.blockId, E3);
+});
+
+test("0.4 rejects endpoint-owned exposure and exposure to a non-boundary Interface", () => {
+  const endpointOwned = [
+    "## Local Model", START4, "### Interfaces",
+    "#### Inner", "^" + E1, "",
+    "#### Boundary", "- exposes: [[#^" + E1 + "|Inner]]", "^" + E3, END,
+  ].join("\n");
+  assert.ok(codes(endpointOwned).includes("exposure.owner-invalid"));
+  const nonBoundary = [
+    "## Local Model", START4, "### Parts", "#### Board", "- definition: [[Control Board]]", "^" + P1, "",
+    "### Interfaces",
+    "#### A", "- part: [[#^" + P1 + "]]", "^" + E1, "",
+    "#### B", "- part: [[#^" + P1 + "]]", "^" + E2, "",
+    "### Connections",
+    "#### Link", "- endpointA: [[#^" + E1 + "]]", "- endpointB: [[#^" + E2 + "]]", "- exposes: [[#^" + E2 + "]]", "^" + C1, END,
+  ].join("\n");
+  assert.ok(codes(nonBoundary).includes("exposure.not-boundary"));
+});
+
+test("0.4 Interface definitions require Object/interface; definitionless Interfaces remain valid", () => {
+  const body = ["## Local Model", START4, "### Interfaces", "#### Boundary", "- definition: [[CAN Interface]]", "^" + E3, END].join("\n");
+  const good = vault({ "CAN Interface.md": { type: "Object", subtype: "interface" } }, [], { "Control Assembly.md": body });
+  assert.ok(!vcodes(good).includes("definition.incompatible"));
+  const bad = vault({ "CAN Interface.md": { type: "Object", subtype: "electrical" } }, [], { "Control Assembly.md": body });
+  assert.ok(vcodes(bad).includes("definition.incompatible"));
+  const none = vault({}, [], { "Control Assembly.md": body.replace("- definition: [[CAN Interface]]\n", "") });
+  assert.ok(!vcodes(none).includes("record.missing-definition"));
+});
