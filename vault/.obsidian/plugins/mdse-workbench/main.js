@@ -5336,11 +5336,12 @@ var LocalConnectionCreateModal = class extends import_obsidian3.Modal {
   }
 };
 var LocalFlowCreateModal = class extends import_obsidian3.Modal {
-  constructor(app, ownerName, connection, localId, stage, apply, cancel, onApplied) {
+  constructor(app, ownerName, connection, localId, definitions, stage, apply, cancel, onApplied) {
     super(app);
     this.ownerName = ownerName;
     this.connection = connection;
     this.localId = localId;
+    this.definitions = definitions;
     this.stage = stage;
     this.apply = apply;
     this.cancel = cancel;
@@ -5373,7 +5374,11 @@ var LocalFlowCreateModal = class extends import_obsidian3.Modal {
       return el;
     };
     const heading = input("Flow name", "Commands");
-    const definition = input("Reusable definition", "[[CAN Data]]");
+    const definitionRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    definitionRow.createEl("label", { text: "Reusable definition" });
+    const definition = definitionRow.createEl("select", { cls: "mdse-detail-input" });
+    definition.createEl("option", { text: "Choose a model definition\u2026", value: "" });
+    for (const option of this.definitions) definition.createEl("option", { text: `${option.name} \u2014 ${option.type ?? "model"}`, value: option.path });
     const roleA = input("Endpoint A role", "transmit");
     const roleB = input("Endpoint B role", "receive");
     this.contentEl.createEl("p", { cls: "mdse-muted", text: `Owning connection: ${this.connection.identifier} (#^${this.connection.localId})` });
@@ -5384,19 +5389,22 @@ var LocalFlowCreateModal = class extends import_obsidian3.Modal {
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
+        const selected = this.definitions.find((option) => option.path === definition.value);
+        if (!selected) throw new Error("Choose a reusable definition from the model.");
+        const definitionLink = `[[${selected.path.replace(/\.md$/i, "")}]]`;
         const staged = await this.stage({
           kind: "flow",
           localId: this.localId,
           connectionId: this.connection.localId,
           heading: heading.value.trim(),
           fields: {
-            definition: definition.value.trim(),
+            definition: definitionLink,
             endpointA: roleA.value.trim(),
             endpointB: roleB.value.trim()
           }
         });
         this.staged = staged;
-        this.review(staged, heading.value.trim(), definition.value.trim(), roleA.value.trim(), roleB.value.trim());
+        this.review(staged, heading.value.trim(), definitionLink, roleA.value.trim(), roleB.value.trim());
       } catch (e) {
         new import_obsidian3.Notice(`Cannot stage flow: ${e.message}`, 12e3);
         review.disabled = false;
@@ -6331,10 +6339,11 @@ var LocalEndpointDefinitionEditModal = class extends import_obsidian3.Modal {
   }
 };
 var LocalFlowDefinitionEditModal = class extends import_obsidian3.Modal {
-  constructor(app, ownerName, flow, stage, apply, cancel, onApplied) {
+  constructor(app, ownerName, flow, definitions, stage, apply, cancel, onApplied) {
     super(app);
     this.ownerName = ownerName;
     this.flow = flow;
+    this.definitions = definitions;
     this.stage = stage;
     this.apply = apply;
     this.cancel = cancel;
@@ -6348,21 +6357,23 @@ var LocalFlowDefinitionEditModal = class extends import_obsidian3.Modal {
     this.contentEl.createEl("p", { text: `Change only the reusable definition link for ${this.flow.identifier}. Flow identity, owning connection, and both endpoint roles remain unchanged.` });
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Reusable definition" });
-    const input = row.createEl("input", {
-      type: "text",
-      cls: "mdse-detail-input",
-      value: this.flow.definition?.text ?? ""
-    });
-    input.setAttr("placeholder", "[[CAN Data]]");
-    input.onkeydown = (e) => e.stopPropagation();
+    const input = row.createEl("select", { cls: "mdse-detail-input" });
+    input.createEl("option", { text: "Choose a model definition\u2026", value: "" });
+    const currentTarget = this.flow.definition?.target ?? "";
+    for (const option of this.definitions) {
+      const item = input.createEl("option", { text: `${option.name} \u2014 ${option.type ?? "model"}`, value: option.path });
+      const stem = option.path.replace(/\.md$/i, "");
+      if (currentTarget === stem || currentTarget === option.name) item.selected = true;
+    }
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
     const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
-        const value = input.value.trim();
-        if (!value) throw new Error("Flow occurrences require a reusable definition.");
+        const selected = this.definitions.find((option) => option.path === input.value);
+        if (!selected) throw new Error("Choose a reusable definition from the model.");
+        const value = `[[${selected.path.replace(/\.md$/i, "")}]]`;
         const staged = await this.stage(value);
         this.staged = staged;
         this.renderReview(staged, value);
@@ -7012,6 +7023,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         flow,
+        this.host.elements(file.path),
         (definition) => editor.stageAndReviewLocalRecordPatch(file.path, flow.localId, {
           fields: { definition }
         }),
@@ -7140,11 +7152,14 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
       const localId = nextAvailableLocalId("flow", ownerUid, region.records.map((record) => record.localId));
+      const definitions = this.host.elements(file.path);
+      if (!definitions.length) throw new Error("No reusable model definitions are available.");
       new LocalFlowCreateModal(
         this.app,
         file.basename,
         connection,
         localId,
+        definitions,
         (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => {
