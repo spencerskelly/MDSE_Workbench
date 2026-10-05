@@ -237,6 +237,45 @@ export function planLocalRecordDelete(text: string, localId: string): PlannedLoc
   };
 }
 
+export function planLocalFlowMove(text: string, flowId: string, connectionId: string): PlannedLocalEdit {
+  const editable = editableLocalRegion(text);
+  const flow = editable.region.records.find((record) => record.localId === flowId);
+  if (!flow || flow.kind !== "flow") throw new Error("Local Model flow ^" + flowId + " does not exist in this note.");
+  const target = editable.region.records.find((record) => record.localId === connectionId);
+  if (!target || target.kind !== "connection") throw new Error("Target connection ^" + connectionId + " does not exist in this note.");
+  if (flow.connectionId === connectionId) throw new Error("This flow already belongs to the selected connection.");
+
+  const range = recordLineRange(editable, flow);
+  let removeEnd = range.end;
+  while (removeEnd < editable.lines.length && editable.lines[removeEnd].trim() === "") removeEnd++;
+  const withoutFlow = [...editable.lines.slice(0, range.start), ...editable.lines.slice(removeEnd)].join(editable.eol);
+
+  const interim = editableLocalRegion(withoutFlow);
+  const reparsedTarget = interim.region.records.find((record) => record.localId === connectionId);
+  if (!reparsedTarget || reparsedTarget.kind !== "connection") throw new Error("Target connection disappeared while planning the flow move.");
+
+  const rendered = renderRecord("flow", flow.identifier, flow.localId, new Map(flow.fields));
+  const nextLines = interim.lines.slice();
+  const insertAt = endOfConnection(nextLines, interim.region, reparsedTarget);
+  nextLines.splice(insertAt, 0, ...rendered, "");
+  const after = nextLines.join(interim.eol);
+
+  const parsed = parseLocalModel(after);
+  if (!parsed?.structured) throw new Error("Planned flow move would make the Local Model region structurally unreadable.");
+  const moved = parsed.records.find((record) => record.localId === flowId);
+  if (!moved || moved.kind !== "flow") throw new Error("Planned flow move lost Local Model flow ^" + flowId + ".");
+  if (moved.connectionId !== connectionId) throw new Error("Planned flow move did not bind ^" + flowId + " to ^" + connectionId + ".");
+
+  return {
+    before: text,
+    after,
+    changed: after !== text,
+    localId: flowId,
+    kind: "flow",
+    findings: parsed.findings.slice(),
+  };
+}
+
 export interface NewLocalRecord {
   kind: LocalKind;
   localId: string;
