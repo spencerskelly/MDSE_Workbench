@@ -19,6 +19,8 @@ export interface NoteRecord {
   /** File name without extension: the note name engineers see. */
   name: string;
   type?: string;
+  /** Governed semantic subtype when present (for example Object / interface). */
+  subtype?: string;
   id?: string;
   uid?: string;
   /** Raw relationship-link evidence retained so cached notes can be safely re-resolved after path-set changes. */
