@@ -1490,3 +1490,92 @@ test("cancelled connection endpoint rewire leaves source and history untouched",
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged connection definition change stays unwritten until Apply and preserves topology", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const endpointA = "ep-20261005012000000skellyspencer";
+  const endpointB = "ep-20261005012000001skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { definition: "[[CAN Bus]]" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- definition: [[CAN Bus]]"));
+  assert.ok(store.text.includes("- endpointA: [[#^" + endpointA + "|J1]]"));
+  assert.ok(store.text.includes("- endpointB: [[#^" + endpointB + "|J2]]"));
+  assert.match(store.text, /##### Commands/);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.ok(store.text.includes("- definition: [[CAN Bus]]"));
+  assert.match(store.text, /##### Commands/);
+});
+
+test("staged connection definition can be cleared without changing topology", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const endpointA = "ep-20261005012000000skellyspencer";
+  const endpointB = "ep-20261005012000001skellyspencer";
+  const original = noteWithRewirableConnection().replace(
+    "^" + connectionId,
+    "- definition: [[CAN Bus]]\n^" + connectionId,
+  );
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { definition: null },
+  });
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.doesNotMatch(store.text, /- definition: \[\[CAN Bus\]\]/);
+  assert.ok(store.text.includes("- endpointA: [[#^" + endpointA + "|J1]]"));
+  assert.ok(store.text.includes("- endpointB: [[#^" + endpointB + "|J2]]"));
+  assert.match(store.text, /##### Commands/);
+});
+
+test("staged connection definition edit blocks block-fragment definitions at Apply", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { definition: "[[CAN Bus#^ep-20261005012000000skellyspencer|Bad]]" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.code === "definition.incompatible" && finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled connection definition edit leaves source and history untouched", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { definition: "[[CAN Bus]]" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
