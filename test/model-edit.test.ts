@@ -873,3 +873,24 @@ test("clean flow deletion stages, applies, and joins shared undo/redo history", 
   assert.doesNotMatch(store.text, /##### Commands/);
   assert.ok(store.text.includes("^" + connectionId));
 });
+
+
+test("indexed external reference blocks flow deletion and is rechecked at Apply", async () => {
+  const flowId = "flow-20261005001200003skellyspencer";
+  const store = new MemoryStore(noteWithCleanConnection(true));
+  const transactions = new TransactionManager();
+  let external: Array<{ path: string; field: string }> = [];
+  const service = new ModelEditService(store, () => ownerUid, transactions, () => external);
+
+  const staged = await service.stageLocalRecordDelete("Assembly.md", flowId);
+  assert.equal(staged.externalImpacts.length, 0);
+  external = [{ path: "Requirements/REQ-FLOW.md", field: "appliesTo" }];
+
+  await assert.rejects(service.applyLocalDelete(staged.transaction.id), /dependent model reference/);
+  assert.deepEqual(
+    service.reviewLocalDelete(staged.transaction.id).externalImpacts,
+    [{ path: "Requirements/REQ-FLOW.md", field: "appliesTo" }],
+  );
+  assert.match(store.text, /##### Commands/);
+  service.cancelLocalDelete(staged.transaction.id);
+});
