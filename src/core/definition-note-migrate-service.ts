@@ -91,22 +91,30 @@ export class DefinitionNoteMigrationService {
     private readonly store: DefinitionNoteMigrationStore,
     private readonly resolve: (target: string, fromPath: string) => string | null,
     private readonly linkText: (targetPath: string, fromPath: string) => string,
-    private readonly currentTargets: (ownerPath: string, field: string) => string[],
     private readonly transactions: TransactionManager,
   ) {}
 
   async stage(request: DefinitionNoteMigrationServiceRequest): Promise<StagedDefinitionNoteMigration> {
+    const ownerBefore = await this.store.read(request.ownerPath);
+    const parsedOwner = frontmatter(ownerBefore);
+    const currentTargets = list(parsedOwner.doc.get(request.field))
+      .map((value) => linkTarget(value))
+      .filter((target): target is string => !!target)
+      .map((target) => this.resolve(target, request.ownerPath))
+      .filter((target): target is string => !!target);
+
     const plan = planDefinitionNoteMigration({
       ownerPath: request.ownerPath,
       field: request.field,
       replacedPath: request.replacedPath,
       replacementPath: request.replacementPath,
       relationship: request.relationship,
-      currentTargets: this.currentTargets(request.ownerPath, request.field),
+      currentTargets,
     });
 
     const beforeByPath = new Map<string,string>();
-    const need = [request.ownerPath, ...plan.inverseMutations.map((mutation) => mutation.path)];
+    beforeByPath.set(request.ownerPath, ownerBefore);
+    const need = plan.inverseMutations.map((mutation) => mutation.path);
     for (const path of [...new Set(need)]) beforeByPath.set(path, await this.store.read(path));
 
     const afterByPath = new Map(beforeByPath);
