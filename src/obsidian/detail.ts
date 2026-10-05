@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalEndpointCreateModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalEndpointCreateModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -235,6 +235,8 @@ export class NoteDetailPanel extends Component {
       reassignPart.onclick = () => { void this.reassignEndpointPart(file, record); };
       const reassignParent = head.createEl("button", { text: "Change parent…", cls: "mdse-detail-btn" });
       reassignParent.onclick = () => { void this.reassignEndpointParent(file, record); };
+      const exposures = head.createEl("button", { text: "Edit exposures…", cls: "mdse-detail-btn" });
+      exposures.onclick = () => { void this.editEndpointExposures(file, record); };
       const connect = head.createEl("button", { text: "Connect to endpoint…", cls: "mdse-detail-btn" });
       connect.onclick = () => { void this.createConnectionOccurrence(file, record); };
     }
@@ -340,6 +342,44 @@ export class NoteDetailPanel extends Component {
         : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data.",
     });
     root.scrollTop = 0;
+  }
+
+  private async editEndpointExposures(file: TFile, endpoint: LocalRecord): Promise<void> {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+
+      const endpoints = region.records.filter((record) => record.kind === "endpoint" && record.localId !== endpoint.localId);
+      const exposedIds = new Set(endpoint.exposes.filter((link) => !link.target && link.blockId).map((link) => link.blockId));
+      const addOptions = endpoints.filter((candidate) => !exposedIds.has(candidate.localId));
+      const removeOptions = endpoints.filter((candidate) => exposedIds.has(candidate.localId));
+      if (!addOptions.length && !removeOptions.length) throw new Error("This endpoint has no same-note exposure edit available.");
+
+      new LocalEndpointExposureEditModal(
+        this.app,
+        file.basename,
+        endpoint,
+        addOptions,
+        removeOptions,
+        (mode, target) => {
+          const remaining = endpoint.exposes
+            .filter((link) => !(mode === "remove" && !link.target && link.blockId === target.localId))
+            .map((link) => link.text);
+          if (mode === "add") remaining.push(`[[#^${target.localId}|${target.identifier}]]`);
+          return editor.stageLocalRecordPatch(file.path, endpoint.localId, {
+            fields: { exposes: remaining.length ? remaining.join(" ") : null },
+          });
+        },
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, endpoint.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot edit endpoint exposures: ${(e as Error).message}`, 12000);
+    }
   }
 
   private async reassignEndpointParent(file: TFile, endpoint: LocalRecord): Promise<void> {
