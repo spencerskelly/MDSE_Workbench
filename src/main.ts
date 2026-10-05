@@ -15,7 +15,7 @@ import { DefinitionCreationService, nextAvailableDefinitionUid, normalizeAuthorS
 import { DefinitionDeletionService } from "./core/definition-delete";
 import { DefinitionRetirementService } from "./core/definition-retire";
 import { DefinitionSupersessionService } from "./core/definition-supersede-service";
-import type { DefinitionMigrationCandidate } from "./core/definition-supersede";
+import { definitionMigrationCandidates, type DefinitionMigrationCandidate } from "./core/definition-supersede";
 import { DefinitionNoteMigrationService } from "./core/definition-note-migrate-service";
 import { planDefinitionOccurrenceMigration } from "./core/definition-migrate";
 import type { DefinitionDeletionImpact } from "./core/definition-lifecycle";
@@ -496,26 +496,7 @@ export default class MdseWorkbench extends Plugin {
 
   private async definitionSupersessionMigrationCandidates(replacedPath: string): Promise<DefinitionMigrationCandidate[]> {
     const impact = await this.definitionDeletionImpact(normalizePath(replacedPath));
-    return [
-      ...impact.noteUses.map((use) => ({
-        scope: "note" as const,
-        ownerPath: use.fromPath,
-        field: use.field,
-      })),
-      ...impact.occurrenceUses.map((use) => ({
-        scope: "occurrence" as const,
-        ownerPath: use.ownerPath,
-        field: "definition",
-        localId: use.localId,
-        kind: use.kind,
-        identifier: use.identifier,
-      })),
-    ].sort((a, b) =>
-      a.ownerPath.localeCompare(b.ownerPath) ||
-      a.scope.localeCompare(b.scope) ||
-      a.field.localeCompare(b.field) ||
-      (a.scope === "occurrence" ? a.localId : "").localeCompare(b.scope === "occurrence" ? b.localId : "")
-    );
+    return definitionMigrationCandidates(impact);
   }
 
   private async stageDefinitionNoteMigration(
