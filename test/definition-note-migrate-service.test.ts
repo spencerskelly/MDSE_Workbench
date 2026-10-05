@@ -284,3 +284,44 @@ test("note migration undo rolls back earlier files if a later paired-file write 
   assert.equal(await store.read(newPath),newAfter);
   assert.equal(tx.history().length,1);
 });
+
+
+test("note migration redo rolls back earlier files if a later paired-file write fails",async()=>{
+  class FailingRedoStore extends MemoryStore {
+    failPath:string|null=null;
+    failText:string|null=null;
+    async write(path:string,text:string){
+      if(path===this.failPath && text===this.failText) throw new Error("injected redo write failure");
+      return super.write(path,text);
+    }
+  }
+  const store=new FailingRedoStore();
+  store.files.set(owner,ownerText); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  const service=new DefinitionNoteMigrationService(store,(target)=>resolve(target),linkText,tx);
+  const staged=await service.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel});
+  await service.apply(staged.transaction.id);
+  await tx.undo();
+
+  store.failPath=oldPath;
+  store.failText=oldText.replace("Old Contactor","Old Contactor"); // set below to actual migrated text
+  const migratedOwner=staged.plan.sourceMutation ? ownerText.replace("Old Contactor","New Contactor") : ownerText;
+  const beforeOwner=await store.read(owner);
+  const beforeOld=await store.read(oldPath);
+  const beforeNew=await store.read(newPath);
+
+  // Capture actual migrated old file text by performing a guarded redo once on a separate store.
+  const probe=new MemoryStore(); probe.files.set(owner,ownerText); probe.files.set(oldPath,oldText); probe.files.set(newPath,newText);
+  const probeTx=new TransactionManager();
+  const probeService=new DefinitionNoteMigrationService(probe,(target)=>resolve(target),linkText,probeTx);
+  const probeStaged=await probeService.stageAndReview({ownerPath:owner,field:"hasPart",replacedPath:oldPath,replacementPath:newPath,relationship:rel});
+  await probeService.apply(probeStaged.transaction.id);
+  store.failText=await probe.read(oldPath);
+
+  await assert.rejects(tx.redo(),/injected redo write failure/);
+  assert.equal(await store.read(owner),beforeOwner);
+  assert.equal(await store.read(oldPath),beforeOld);
+  assert.equal(await store.read(newPath),beforeNew);
+  assert.equal(tx.history().length,0);
+  void migratedOwner;
+});
