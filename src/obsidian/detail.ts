@@ -357,7 +357,7 @@ export class NoteDetailPanel extends Component {
     else row("Occurrence name", record.identifier);
 
     row("Reusable definition", linkText(record.definition), open(record.definition));
-    if (record.kind !== "connection") {
+    if (!record.definition?.target && record.kind !== "connection") {
       const tr = table.createEl("tr");
       tr.createEl("td", { text: "Definition creation" });
       const td = tr.createEl("td");
