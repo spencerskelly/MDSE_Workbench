@@ -1575,3 +1575,72 @@ test("plans endpoint part assignment by clearing an existing parent in the same 
   assert.equal(endpoint?.parent, null);
   assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
 });
+
+
+test("plans flow endpoint-role change while preserving definition and owning connection", () => {
+  const endpointA = "ep-20261005023000000skellyspencer";
+  const endpointB = "ep-20261005023000001skellyspencer";
+  const connectionId = "conn-20261005023000002skellyspencer";
+  const flowId = "flow-20261005023000003skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "^" + connectionId,
+    "##### Commands",
+    "- definition: [[CAN Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    flowId,
+    { fields: { endpointA: "exchange", endpointB: "unspecified" } },
+    { allowInvalidTarget: true },
+  );
+
+  const flow = parseLocalModel(result.after)?.records.find((record) => record.localId === flowId);
+  assert.equal(flow?.roleA, "exchange");
+  assert.equal(flow?.roleB, "unspecified");
+  assert.equal(flow?.definition?.target, "CAN Data");
+  assert.equal(flow?.connectionId, connectionId);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("flow endpoint-role edit rejects values outside the governed role set", () => {
+  const flowId = "flow-" + tokenB;
+  const result = planLocalRecordPatch(
+    note(),
+    flowId,
+    { fields: { endpointA: "source", endpointB: "receive" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === flowId &&
+    finding.code === "ref.flow-role-invalid" &&
+    finding.severity === "error"
+  ));
+});
