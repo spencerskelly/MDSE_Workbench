@@ -14,7 +14,7 @@ import { nextAvailableLocalId, type LocalRecordPatch } from "../core/localmodel-
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -270,6 +270,8 @@ export class NoteDetailPanel extends Component {
       definition.onclick = () => this.editFlowDefinition(file, record);
       const roles = head.createEl("button", { text: "Change endpoint roles…", cls: "mdse-detail-btn" });
       roles.onclick = () => this.editFlowRoles(file, record);
+      const move = head.createEl("button", { text: "Move to connection…", cls: "mdse-detail-btn" });
+      move.onclick = () => { void this.moveFlowConnection(file, record); };
     }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection" || record.kind === "flow")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
@@ -502,6 +504,31 @@ export class NoteDetailPanel extends Component {
       ).open();
     } catch (e) {
       new Notice(`Cannot reassign endpoint part: ${(e as Error).message}`, 12000);
+    }
+  }
+
+  private async moveFlowConnection(file: TFile, flow: LocalRecord): Promise<void> {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const connections = region.records.filter((record) => record.kind === "connection" && record.localId !== flow.connectionId);
+      if (!connections.length) throw new Error("This note has no alternate connection occurrence.");
+
+      new LocalFlowConnectionMoveModal(
+        this.app,
+        file.basename,
+        flow,
+        connections,
+        (connection) => editor.stageAndReviewLocalFlowMove(file.path, flow.localId, connection.localId),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, flow.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot move flow: ${(e as Error).message}`, 12000);
     }
   }
 
