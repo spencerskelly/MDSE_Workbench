@@ -107,9 +107,11 @@ For v0.8 keepability (WB-106), this is no longer optional architecture debt: the
 
 W-306 makes Obsidian-native-first a Workbench architecture constraint: core Obsidian/standard Markdown/YAML first, broad plugin compatibility second, custom Workbench-only representation last. Workbench adds semantics and safety on top of native model content.
 
-W-313/W-319 make `99_System/03_Schemas/local-model.yaml` the shared machine-readable contract. New writing is schema 0.2; Workbench must read 0.1 and 0.2 rather than maintaining a private body syntax.
+W-313/W-319 make `99_System/03_Schemas/local-model.yaml` the shared machine-readable contract. W-377 advances current writing to schema 0.3; Workbench must read 0.1, 0.2 and 0.3 rather than maintaining a private body syntax. Existing 0.2 retains its original endpoint-definition requirement.
 
-Local Model records remain structured, human-readable Markdown in the owning note body. They are a governed region separate from ordinary narrative text. W-302/W-319 define exactly one managed region per note. Canonical new output begins `<!-- MDSE:LOCAL-MODEL START schema=0.2 -->` beneath `## Local Model` and ends `<!-- MDSE:LOCAL-MODEL END -->`; historical 0.1 regions remain readable. The Workbench popup presents the records in a separate **Local Model** section. The parser owns only content inside those markers. Missing/duplicate/nested/mismatched markers become findings and disable structured edits. The general text editor must never rewrite the governed region.
+Local Model records remain structured, human-readable Markdown in the owning note body. They are a governed region separate from ordinary narrative text. W-302/W-319 define exactly one managed region per note. Canonical new output begins `<!-- MDSE:LOCAL-MODEL START schema=0.3 -->` beneath `## Local Model` and ends `<!-- MDSE:LOCAL-MODEL END -->`; historical 0.1 and 0.2 regions remain readable. The Workbench popup presents the records in a separate **Local Model** section. The parser owns only content inside those markers. Missing/duplicate/nested/mismatched markers become findings and disable structured edits. The general text editor must never rewrite the governed region.
+
+Under W-377, a schema 0.3 contextual endpoint is addressable even when no reusable Port definition is known. Its local identity, owner/parent placement, identifier, kind and topology remain authoritative contextual data; `definition` is present only when a reusable Port concept is deterministically supported. A definitionless endpoint cannot carry `usage` because variant/option semantics require a reusable definition.
 
 Each materialized local record exposes a native Obsidian block ID equal to its stable local ID (`^part-*`, `^ep-*`, `^conn-*`, `^flow-*`). Standard links such as `[[Owner Note#^ep-42bd90|J4]]` therefore navigate directly to the record without Workbench, while Workbench interprets the address semantically. Core Graph still treats the owner note as the graph node; that limitation is accepted.
 
@@ -270,7 +272,7 @@ Configured views are derived presentations over the same authoritative notes and
 
 Workbench validation must reject or flag abstract effective definitions, out-of-family selections and selections invalidated by later hierarchy changes. It must never silently repair a saved configuration by choosing a different subtype.
 
-W-319 implements the schema advance: `local-model.yaml` 0.2 and `element-types.yaml` 1.17 are now the executable write/configuration contracts. Workbench still implements WB-106 first, with read compatibility for Local Model 0.1 and 0.2, before adding W-314 variation UI.
+W-319 established Local Model 0.2 and element-types 1.17; W-377 advances `local-model.yaml` to 0.3 while freezing 0.2 semantics. Workbench reads 0.1, 0.2 and 0.3; new Local Model regions target 0.3. W-314 variation UI remains separate follow-on work.
 
 
 ## 2026-10-02 standalone implementation note
@@ -312,7 +314,7 @@ Markdown/YAML + governed Local Model region
 2. Semantic operations address notes/local records by ModelRef and governed identity, not display path/name.
 3. The core transaction layer has no Obsidian imports.
 4. Storage adapters may change without changing view semantics.
-5. Local Model 0.1 is read-compatible/read-only; structured writes target 0.2.
+5. Local Model 0.1 is read-compatible/read-only; existing 0.2 is editable in place under 0.2 semantics; new governed regions target 0.3.
 6. Immediate atomic edits and staged structural transactions use the same operation model.
 7. Temporary invalid state may exist only inside an unapplied staged transaction.
 8. Required integrity errors block Apply.
