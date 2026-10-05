@@ -258,3 +258,36 @@ test("supersession redo refuses changed migration inventory after undo",async()=
   assert.equal(await store.read(oldPath),oldText);
   assert.equal(await store.read(newPath),newText);
 });
+
+
+test("semantic history requires newer migration-like edits to undo before supersession",async()=>{
+  const store=new MemorySupersessionStore(); store.files.set(oldPath,oldText); store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  const service=new DefinitionSupersessionService(store,async()=>clearImpact(),resolve,linkText,tx);
+  const staged=await service.stageAndReview({
+    replacedPath:oldPath,replacedUid:oldUid,replacedType:"Object",
+    replacementPath:newPath,replacementUid:newUid,replacementType:"Object",replacementStatus:"active",
+  });
+  await service.apply(staged.transaction.id);
+
+  let newerApplied=true;
+  tx.recordApplied(
+    "migration-after-supersession",
+    "migrate dependent after supersession",
+    "structural",
+    [{kind:"definition.note-migrate",summary:"migrate dependent",refs:[]}],
+    {
+      undo:async()=>{ newerApplied=false; },
+      redo:async()=>{ newerApplied=true; },
+    },
+  );
+
+  await tx.undo();
+  assert.equal(newerApplied,false);
+  assert.match(await store.read(newPath),/supersedes:/);
+  assert.match(await store.read(oldPath),/supersededBy:/);
+
+  await tx.undo();
+  assert.equal(await store.read(oldPath),oldText);
+  assert.equal(await store.read(newPath),newText);
+});
