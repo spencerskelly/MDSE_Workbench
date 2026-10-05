@@ -269,6 +269,23 @@ This follow-on does not require new relationship types or a second persistence d
 For the next standalone plugin implementation, use `WB106_IMPLEMENTATION_CONTRACT.md` in `spencerskelly/MDSE_Workbench`. The schema advance is complete; WB-106 remains first. Do not combine persisted configuration editing with the parser/index rewrite.
 
 
+## High-priority compatibility work — WB-128 / Local Model 0.4
+
+**Priority: HIGH — complete before accepting importer output that writes Local Model 0.4.**
+
+Workbench must be updated as one bounded compatibility change:
+
+1. read Local Model 0.4 while preserving 0.1/0.2/0.3 behavior exactly;
+2. recognize 0.4 headings `Parts`, `Interfaces`, and `Connections` by schema version rather than by loose heading matching;
+3. resolve Interface definitions to first-class `Object / interface` notes; do not require or manufacture Port notes;
+4. move 0.4 exposure semantics to Connection-owned `exposes`, targeting an assembly-boundary Interface occurrence;
+5. update Internal and Interfaces views so exposure is drawn from the internal/context Connection to the boundary Interface;
+6. update Local Model validation and Review findings for invalid exposure ownership/targets;
+7. update structured Local Model writer/editor so new writes use 0.4 and never silently upgrade older regions;
+8. add fixtures/regression tests covering 0.3 backward compatibility and 0.4 parse/write/reload round trips.
+
+This work outranks further Workbench feature expansion because importer and Workbench must agree on the persisted model before a new whole-model import can be considered keepable.
+
 ## WB-106 editor expansion — 2026-10-03 (WB-114)
 
 Workbench 0.1.17 completed the original occurrence-aware read/navigation gate. WB-114 expands WB-106 into the everyday structured editor.
