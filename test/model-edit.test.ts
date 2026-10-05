@@ -2296,3 +2296,49 @@ test("staged Local Model patch semantic guard runs at Apply and Redo", async () 
   assert.equal(store.text,original);
   assert.equal(checks,2);
 });
+
+
+test("staged Local Model create refuses stale indexed owner UID", async () => {
+  const original = note();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(
+    store,
+    () => "20261005004000999skellyspencer",
+    transactions,
+  );
+
+  await assert.rejects(
+    service.stageAndReviewLocalRecordCreate("Assembly.md", {
+      kind: "part",
+      localId: "part-20261005040000000skellyspencer",
+      heading: "K Identity",
+      fields: { definition: "[[Contactor]]" },
+    }),
+    /indexed uid .* does not match source uid/,
+  );
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
+
+test("staged Local Model flow move refuses stale indexed owner UID", async () => {
+  const original = noteWithMovableFlow();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(
+    store,
+    () => "20261005004000999skellyspencer",
+    transactions,
+  );
+
+  await assert.rejects(
+    service.stageAndReviewLocalFlowMove(
+      "Assembly.md",
+      "flow-20261005025000004skellyspencer",
+      "conn-20261005025000003skellyspencer",
+    ),
+    /indexed uid .* does not match source uid/,
+  );
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
