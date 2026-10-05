@@ -80,11 +80,11 @@ export const INTERNAL_PROFILE: ViewProfile = {
 export const FUNCTIONAL_PROFILE: ViewProfile = {
   name: "Functional",
   description: "Functions of an Object, or a Function with its performer, parent, sub-functions and order.",
-  startTypes: ["Object", "Behavior", "Function"],
+  startTypes: ["Object", "Behavior"],
   steps: [
-    { field: "performs", direction: "out", from: ["Object"], to: ["Behavior", "Function"], atStartOnly: true, undefinedOk: true },
-    { field: "performs", direction: "in", from: ["Behavior", "Function"], to: ["Object"] },
-    { field: "hasChild", direction: "in", from: ["Behavior", "Function"], to: ["Behavior", "Function"], atStartOnly: true },
+    { field: "performs", direction: "out", from: ["Object"], to: ["Behavior"], atStartOnly: true, undefinedOk: true },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] },
+    { field: "hasChild", direction: "in", from: ["Behavior"], to: ["Behavior"], atStartOnly: true },
     { field: "hasChild", direction: "out", from: ["Behavior"], to: ["Behavior"] },
     { field: "precedes", direction: "in", from: ["Behavior"], to: ["Behavior"], undefinedOk: false },
     { field: "precedes", direction: "out", from: ["Behavior"], to: ["Behavior"], undefinedOk: true },
@@ -94,7 +94,7 @@ export const FUNCTIONAL_PROFILE: ViewProfile = {
   perParent: 12,
 };
 
-const REQ_HOLDERS = ["Object", "Behavior", "Condition", "Function", "Design", "State", "Use Case", "Verification"];
+const REQ_HOLDERS = ["Object", "Behavior", "Condition", "Use Case", "Verification"];
 
 /**
  * Requirements view (WB-098): from a Requirement, where it sits (owner element, parent requirement), its
@@ -108,16 +108,16 @@ export const REQUIREMENTS_PROFILE: ViewProfile = {
   description: "A requirement with its parents, children, derivation, satisfiers and verifiers; or an element with its requirements.",
   startTypes: ["Requirement", ...REQ_HOLDERS],
   steps: [
-    { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Behavior", "Condition", "Function", "Design"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Behavior", "Condition"], atStartOnly: true },
     { field: "hasChild", direction: "out", from: ["Requirement"], to: ["Requirement"] },
-    { field: "hasChild", direction: "out", from: ["Object", "Behavior", "Condition", "Function", "Design"], to: ["Requirement"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Object", "Behavior", "Condition"], to: ["Requirement"], atStartOnly: true },
     { field: "derivedFrom", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "derivedFrom", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "refines", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "refines", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "references", direction: "out", from: ["Requirement"], to: ["Requirement", "Document"] },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Behavior", "Condition", "Function", "Design"] },
-    { field: "satisfies", direction: "out", from: ["Behavior", "Condition", "Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Behavior", "Condition"] },
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "appliesTo", direction: "out", from: ["Requirement"] },
@@ -168,7 +168,7 @@ export const INTERFACES_PROFILE: ViewProfile = {
 export const VERIFICATION_PROFILE: ViewProfile = {
   name: "Verification",
   description: "What verifies a requirement, what else a verification covers, and what satisfies those requirements.",
-  startTypes: ["Requirement", "Verification", "Behavior", "Condition", "Function", "Design", "State"],
+  startTypes: ["Requirement", "Verification", "Behavior", "Condition"],
   steps: [
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], undefinedOk: true },
@@ -185,11 +185,11 @@ export const VERIFICATION_PROFILE: ViewProfile = {
 export const DESIGN_PROFILE: ViewProfile = {
   name: "Design",
   description: "The designs of an Object or Document, sub-designs, and the requirements each satisfies.",
-  startTypes: ["Object", "Document", "Condition", "Design"],
+  startTypes: ["Object", "Document", "Condition"],
   steps: [
-    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Condition", "Design"], undefinedOk: true },
-    { field: "hasDesign", direction: "in", from: ["Condition", "Design"], to: ["Object", "Document"], atStartOnly: true },
-    { field: "hasChild", direction: "in", from: ["Condition", "Design"], to: ["Condition", "Design"], atStartOnly: true },
+    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Condition"], undefinedOk: true },
+    { field: "hasDesign", direction: "in", from: ["Condition"], to: ["Object", "Document"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Condition"], to: ["Condition"], atStartOnly: true },
     { field: "hasChild", direction: "out", from: ["Condition"], to: ["Condition"] },
     { field: "satisfies", direction: "out", from: ["Condition"], to: ["Requirement"], undefinedOk: true },
   ],
@@ -204,8 +204,8 @@ export const SCENARIO_PROFILE: ViewProfile = {
   description: "A use case: participants, the functions and designs that realize it, included and optional use cases, the order of its steps.",
   startTypes: ["Use Case"],
   steps: [
-    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Behavior", "Function", "Port", "Document"], undefinedOk: true },
-    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Behavior", "Condition", "Function", "Design"], undefinedOk: true },
+    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Behavior", "Document"], undefinedOk: true },
+    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Behavior", "Condition"], undefinedOk: true },
     { field: "hasChild", direction: "out", from: ["Use Case"], to: ["Use Case"] },
     { field: "hasChild", direction: "in", from: ["Use Case"], to: ["Use Case"], atStartOnly: true },
     { field: "optionOf", direction: "out", from: ["Use Case"], to: ["Use Case"], undefinedOk: true },
@@ -223,18 +223,18 @@ export const SCENARIO_PROFILE: ViewProfile = {
 export const BEHAVIOR_PROFILE: ViewProfile = {
   name: "Behavior",
   description: "State machines and states: who has them, initial and final states, order, nesting, what triggers them.",
-  startTypes: ["Condition", "State", "State Machine", "Object"],
+  startTypes: ["Condition", "Object"],
   steps: [
-    { field: "hasState", direction: "out", from: ["Object", "Condition", "State Machine"], to: ["Condition", "State", "State Machine"], undefinedOk: true },
-    { field: "hasState", direction: "in", from: ["Condition", "State", "State Machine"], to: ["Object", "Condition", "State Machine"], atStartOnly: true },
-    { field: "initialState", direction: "out", from: ["Condition", "State Machine"], to: ["Condition", "State"], undefinedOk: true },
+    { field: "hasState", direction: "out", from: ["Object", "Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "hasState", direction: "in", from: ["Condition"], to: ["Object", "Condition"], atStartOnly: true },
+    { field: "initialState", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
     { field: "finalState", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
     { field: "hasChild", direction: "out", from: ["Condition"], to: ["Condition"] },
     { field: "hasChild", direction: "in", from: ["Condition"], to: ["Condition"], atStartOnly: true },
     { field: "precedes", direction: "in", from: ["Condition"], to: ["Condition"] },
     { field: "precedes", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
-    { field: "triggeredBy", direction: "out", from: ["Condition", "State"], to: ["Behavior", "Condition", "Function", "Design", "State", "Item Flow"] },
-    { field: "triggeredBy", direction: "in", from: ["Condition", "State"], to: ["Behavior", "Condition", "Function", "Design", "State"] },
+    { field: "triggeredBy", direction: "out", from: ["Condition"], to: ["Behavior", "Condition", "Item Flow"] },
+    { field: "triggeredBy", direction: "in", from: ["Condition"], to: ["Behavior", "Condition"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -289,8 +289,21 @@ export const PROFILES: Record<string, ViewProfile> = {
   [EVIDENCE_PROFILE.name]: EVIDENCE_PROFILE,
 };
 
+/**
+ * Read-side compatibility only. Older vaults may still contain pre-W-384
+ * first-class behavior/condition types. Treat them as their W-384 semantic
+ * class for view filtering without changing or rewriting the source note.
+ */
+export function semanticViewType(type: string | undefined): string | undefined {
+  if (type === "Function" || type === "Step" || type === "Action") return "Behavior";
+  if (type === "Design" || type === "State" || type === "State Machine" || type === "Mode") return "Condition";
+  return type;
+}
+
 /** Does a step apply to a note of type `cur` reaching a note of type `nbr`? */
 function stepAllows(step: ViewStep, cur: string | undefined, nbr: string | undefined): boolean {
+  cur = semanticViewType(cur);
+  nbr = semanticViewType(nbr);
   if (step.from && !(cur && step.from.includes(cur))) return false;
   if (step.to && !(nbr && step.to.includes(nbr))) return false;
   return true;
@@ -350,7 +363,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
   for (const s of frontier) depthOf.set(s, 0);
 
   type Nb = { node: string; field: string; direction: Direction; count?: number };
-  const typeOf = (p: string) => index.notes.get(p)?.type;
+  const typeOf = (p: string) => semanticViewType(index.notes.get(p)?.type);
   const neighbours = (p: string, dist: number): Nb[] => {
     const seen = new Set<string>();
     const out: Nb[] = [];
