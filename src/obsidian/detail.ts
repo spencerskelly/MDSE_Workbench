@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -243,6 +243,8 @@ export class NoteDetailPanel extends Component {
       connect.onclick = () => { void this.createConnectionOccurrence(file, record); };
     }
     if (this.editing && record.kind === "connection") {
+      const definition = head.createEl("button", { text: "Change definition…", cls: "mdse-detail-btn" });
+      definition.onclick = () => { void this.editConnectionDefinition(file, record); };
       const rewireA = head.createEl("button", { text: "Change endpoint A…", cls: "mdse-detail-btn" });
       rewireA.onclick = () => { void this.rewireConnectionEndpoint(file, record, "endpointA"); };
       const rewireB = head.createEl("button", { text: "Change endpoint B…", cls: "mdse-detail-btn" });
@@ -483,6 +485,26 @@ export class NoteDetailPanel extends Component {
       ).open();
     } catch (e) {
       new Notice(`Cannot reassign endpoint part: ${(e as Error).message}`, 12000);
+    }
+  }
+
+  private editConnectionDefinition(file: TFile, connection: LocalRecord): void {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      new LocalConnectionDefinitionEditModal(
+        this.app,
+        file.basename,
+        connection,
+        (definition) => editor.stageLocalRecordPatch(file.path, connection.localId, {
+          fields: { definition },
+        }),
+        (transactionId) => editor.applyLocalPatch(transactionId),
+        (transactionId) => { editor.cancelLocalPatch(transactionId); },
+        () => { void this.refreshLocal(file, connection.localId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot edit connection definition: ${(e as Error).message}`, 12000);
     }
   }
 
