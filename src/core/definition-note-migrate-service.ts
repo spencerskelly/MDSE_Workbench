@@ -1,4 +1,4 @@
-import { parseDocument, stringify } from "yaml";
+import { parseDocument } from "yaml";
 import { linkTarget } from "./frontmatter";
 import { noteRef, type ModelRef } from "./localmodel";
 import { planDefinitionNoteMigration, type DefinitionNoteMigrationPlan } from "./definition-note-migrate";
@@ -34,10 +34,13 @@ interface PendingDefinitionNoteMigration {
   files: FileState[];
 }
 
-function frontmatter(text: string): { doc: ReturnType<typeof parseDocument>; body: string } {
+function frontmatter(text: string): { doc: ReturnType<typeof parseDocument>; yaml: string; body: string } {
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (!match) throw new Error("Model note must begin with YAML frontmatter.");
-  return { doc: parseDocument(match[1]), body: text.slice(match[0].length) };
+  const yaml = match[1];
+  const doc = parseDocument(yaml);
+  if (doc.errors.length) throw new Error(`Model note frontmatter is invalid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
+  return { doc, yaml, body: text.slice(match[0].length) };
 }
 
 function list(value: unknown): unknown[] {
@@ -63,7 +66,7 @@ function mutateRelationship(
   resolve: (target: string, fromPath: string) => string | null,
   linkText: (targetPath: string, fromPath: string) => string,
 ): string {
-  const { doc, body } = frontmatter(text);
+  const { doc, yaml, body } = frontmatter(text);
   const values = list(doc.get(field));
   const kept = removePath
     ? values.filter((value) => {
@@ -81,9 +84,21 @@ function mutateRelationship(
   }
 
   const sorted = kept.sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" }));
-  doc.set(field, sorted);
-  const yaml = stringify(doc.toJS()).trimEnd();
-  return `---\n${yaml}\n---\n${body}`;
+  const encoded = sorted.length
+    ? "\n" + sorted.map((value) => `  - ${JSON.stringify(String(value))}`).join("\n")
+    : " []";
+
+  const node = doc.get(field, true);
+  let nextYaml: string;
+  if (node === undefined || node === null) {
+    const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}${field}:${encoded}`;
+    nextYaml = yaml + addition;
+  } else {
+    const range = (node as { range?: [number, number, number?] }).range;
+    if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
+    nextYaml = yaml.slice(0, range[0]) + encoded.trimStart() + yaml.slice(range[1]);
+  }
+  return `---\n${nextYaml}\n---\n${body}`;
 }
 
 /**
