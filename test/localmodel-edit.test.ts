@@ -1218,3 +1218,81 @@ test("connection definition edit rejects a block-fragment definition", () => {
     finding.severity === "error"
   ));
 });
+
+
+test("plans part definition change while preserving attached endpoint topology", () => {
+  const partId = "part-20261005014000000skellyspencer";
+  const endpointId = "ep-20261005014000001skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Part Occurrences",
+    "#### K1",
+    "- definition: [[Old Contactor]]",
+    "- usage: spare",
+    "- multiplicity: 2",
+    "^" + partId,
+    "",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "- part: [[#^" + partId + "|K1]]",
+    "^" + endpointId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    partId,
+    { fields: { definition: "[[New Contactor]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const region = parseLocalModel(result.after);
+  const part = region?.records.find((record) => record.localId === partId);
+  const endpoint = region?.records.find((record) => record.localId === endpointId);
+  assert.equal(part?.definition?.target, "New Contactor");
+  assert.equal(part?.usage, "spare");
+  assert.equal(part?.multiplicity, "2");
+  assert.equal(endpoint?.part?.blockId, partId);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("part definition cannot be cleared because the definition is required", () => {
+  const partId = "part-" + tokenA;
+  const result = planLocalRecordPatch(
+    note(),
+    partId,
+    { fields: { definition: null } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === partId &&
+    finding.code === "definition.required" &&
+    finding.severity === "error"
+  ));
+});
+
+test("part definition edit rejects a block-fragment definition", () => {
+  const partId = "part-" + tokenA;
+  const result = planLocalRecordPatch(
+    note(),
+    partId,
+    { fields: { definition: "[[Some Note#^ep-" + tokenC + "|Bad]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === partId &&
+    finding.code === "definition.incompatible" &&
+    finding.severity === "error"
+  ));
+});
