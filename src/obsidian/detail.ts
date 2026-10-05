@@ -14,7 +14,7 @@ import { nextAvailableLocalId, type LocalRecordPatch } from "../core/localmodel-
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -30,6 +30,8 @@ export interface DetailHost {
   undo(): Promise<void>;
   /** Opens the view picker for a note (WB-104). */
   pickView(path: string): void;
+  /** Where-used/occurrence evidence for definition impact review (WB-114). */
+  definitionImpact(path: string): Promise<{ rows: string[]; notes: number; occurrences: number }>;
 }
 
 export class NoteDetailPanel extends Component {
@@ -127,6 +129,9 @@ export class NoteDetailPanel extends Component {
     };
     head.createDiv({ cls: "mdse-detail-title", text: file.basename }).setAttr("title", file.path);
     if (this.definitionReturn?.definitionPath === file.path) {
+      const impact = head.createEl("button", { text: "Review impact", cls: "mdse-detail-btn" });
+      impact.setAttr("title", "Review note-level and occurrence-level uses of this reusable definition before changing it.");
+      impact.onclick = () => { void this.reviewDefinitionImpact(file); };
       const returnToOccurrence = head.createEl("button", { text: "Back to occurrence", cls: "mdse-detail-btn" });
       returnToOccurrence.setAttr("title", "Return to the contextual Local Model occurrence without changing its storage.");
       returnToOccurrence.onclick = () => { void this.returnToOccurrence(); };
@@ -461,6 +466,23 @@ export class NoteDetailPanel extends Component {
     const body = content.createDiv({ cls: "mdse-detail-body markdown-rendered" });
     if (md.trim()) await MarkdownRenderer.render(this.app, md, body, definitionFile.path, this);
     else body.createEl("p", { cls: "mdse-detail-empty", text: "This definition has no text." });
+  }
+
+  private async reviewDefinitionImpact(file: TFile): Promise<void> {
+    try {
+      const impact = await this.host.definitionImpact(file.path);
+      new ReportModal(
+        this.app,
+        `Definition impact — ${file.basename}`,
+        impact.rows.length ? impact.rows : ["No current note-level or occurrence-level uses were found."],
+        [
+          `${impact.notes} note-level use${impact.notes === 1 ? "" : "s"}; ${impact.occurrences} Local Model occurrence${impact.occurrences === 1 ? "" : "s"}.`,
+          "This is read-only impact evidence. It does not change the definition or any occurrence.",
+        ],
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot review definition impact: ${(e as Error).message}`, 12000);
+    }
   }
 
   private async editDefinitionFromOccurrence(ownerFile: TFile, record: LocalRecord | null, definitionFile: TFile): Promise<void> {
