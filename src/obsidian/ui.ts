@@ -591,6 +591,7 @@ export class LocalConnectionCreateModal extends Modal {
     private readonly source: LocalRecord,
     private readonly options: LocalRecord[],
     private readonly localId: string,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (input: NewLocalRecord) => Promise<StagedLocalCreate>,
     private readonly apply: (id: string) => Promise<void>,
     private readonly cancel: (id: string) => void,
@@ -616,7 +617,11 @@ export class LocalConnectionCreateModal extends Modal {
       return el;
     };
     const heading=input("Connection name","Harness");
-    const definition=input("Reusable definition","optional");
+    const definitionRow=this.contentEl.createDiv({cls:"mdse-create-field"});
+    definitionRow.createEl("label",{text:"Reusable definition"});
+    const definition=definitionRow.createEl("select",{cls:"mdse-detail-input"});
+    definition.createEl("option",{text:"No reusable definition",value:""});
+    for(const option of this.definitions) definition.createEl("option",{text:`${option.name} — ${option.type ?? "model"}`,value:option.path});
     const pickRow=this.contentEl.createDiv({cls:"mdse-create-field"});
     pickRow.createEl("label",{text:"Endpoint B"});
     const pick=pickRow.createEl("select",{cls:"mdse-detail-input"});
@@ -634,9 +639,11 @@ export class LocalConnectionCreateModal extends Modal {
           endpointA:`[[#^${this.source.localId}|${this.source.identifier}]]`,
           endpointB:`[[#^${target.localId}|${target.identifier}]]`,
         };
-        if(definition.value.trim()) fields.definition=definition.value.trim();
+        const selected=this.definitions.find((option)=>option.path===definition.value);
+        const definitionLink=selected ? `[[${selected.path.replace(/\.md$/i,"")}]]` : "";
+        if(definitionLink) fields.definition=definitionLink;
         const staged=await this.stage({kind:"connection",localId:this.localId,heading:heading.value.trim(),fields});
-        this.staged=staged; this.review(staged,heading.value.trim(),definition.value.trim(),target);
+        this.staged=staged; this.review(staged,heading.value.trim(),definitionLink,target);
       }catch(e){ new Notice(`Cannot stage connection: ${(e as Error).message}`,12000); review.disabled=false; }
     })();
   }
@@ -1360,6 +1367,7 @@ export class LocalConnectionDefinitionEditModal extends Modal {
     app: App,
     private readonly ownerName: string,
     private readonly connection: LocalRecord,
+    private readonly definitions: NoteRecord[],
     private readonly stage: (definition: string | null) => Promise<StagedLocalPatch>,
     private readonly apply: (id: string) => Promise<void>,
     private readonly cancel: (id: string) => void,
@@ -1373,13 +1381,14 @@ export class LocalConnectionDefinitionEditModal extends Modal {
 
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Reusable definition" });
-    const input = row.createEl("input", {
-      type: "text",
-      cls: "mdse-detail-input",
-      value: this.connection.definition?.text ?? "",
-    });
-    input.setAttr("placeholder", "[[CAN Bus]]");
-    input.onkeydown = (e) => e.stopPropagation();
+    const input = row.createEl("select", { cls: "mdse-detail-input" });
+    input.createEl("option", { text: "No reusable definition", value: "" });
+    const currentTarget = this.connection.definition?.target ?? "";
+    for (const option of this.definitions) {
+      const item = input.createEl("option", { text: `${option.name} — ${option.type ?? "model"}`, value: option.path });
+      const stem = option.path.replace(/\.md$/i, "");
+      if (currentTarget === stem || currentTarget === option.name) item.selected = true;
+    }
 
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
@@ -1387,7 +1396,8 @@ export class LocalConnectionDefinitionEditModal extends Modal {
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
-        const value = input.value.trim();
+        const selected = this.definitions.find((option) => option.path === input.value);
+        const value = selected ? `[[${selected.path.replace(/\.md$/i, "")}]]` : "";
         const staged = await this.stage(value || null);
         this.staged = staged;
         this.renderReview(staged, value);
