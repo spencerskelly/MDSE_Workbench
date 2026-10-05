@@ -295,9 +295,8 @@ const SECTION_TITLE: Record<Exclude<LocalKind, "flow">, string> = {
 const SECTION_ORDER: Array<Exclude<LocalKind, "flow">> = ["part", "endpoint", "connection"];
 
 export function planLocalRecordCreate(text: string, input: NewLocalRecord): PlannedLocalEdit {
-  validateNewRecord(input);
-
   const existing = parseLocalModel(text);
+  validateNewRecord(input, existing?.schemaVersion ?? WRITABLE_VERSION);
   if (!existing) {
     if (/^##\s+Local Model\s*$/m.test(text)) {
       throw new Error("This note already has an ungoverned Local Model heading. Resolve it before structured creation.");
@@ -355,7 +354,7 @@ function checkedCreate(before: string, after: string, input: NewLocalRecord): Pl
   return { before, after, changed: after !== before, localId: input.localId, kind: input.kind, findings: parsed.findings.slice() };
 }
 
-function validateNewRecord(input: NewLocalRecord): void {
+function validateNewRecord(input: NewLocalRecord, schemaVersion: string): void {
   if (!input.heading.trim()) throw new Error("A Local Model record heading cannot be empty.");
   const prefix: Record<LocalKind, string> = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
   const want = prefix[input.kind];
@@ -365,8 +364,16 @@ function validateNewRecord(input: NewLocalRecord): void {
   for (const key of Object.keys(input.fields)) {
     if (!FIELD_ORDER[input.kind].includes(key)) throw new Error(key + " is not a governed field on a " + input.kind + " record.");
   }
-  if ((input.kind === "part" || input.kind === "endpoint" || input.kind === "flow") && !input.fields.definition?.trim()) {
-    throw new Error("A " + input.kind + " record requires a definition.");
+  const hasDefinition = !!input.fields.definition?.trim();
+  const definitionRequired =
+    input.kind === "part" ||
+    input.kind === "flow" ||
+    (input.kind === "endpoint" && schemaVersion !== "0.3");
+  if (definitionRequired && !hasDefinition) {
+    throw new Error("A " + input.kind + " record requires a definition in Local Model schema " + schemaVersion + ".");
+  }
+  if (input.kind === "endpoint" && schemaVersion === "0.3" && !hasDefinition && input.fields.usage?.trim()) {
+    throw new Error("A definitionless endpoint cannot carry usage.");
   }
   if (input.kind === "connection" && (!input.fields.endpointA?.trim() || !input.fields.endpointB?.trim())) {
     throw new Error("A connection requires endpointA and endpointB.");
