@@ -137,6 +137,11 @@ export class ModelEditService {
     return { transaction, plan, path };
   }
 
+  async stageAndReviewLocalRecordPatch(path: string, localId: string, patch: LocalRecordPatch): Promise<StagedLocalPatch> {
+    const staged = await this.stageLocalRecordPatch(path, localId, patch);
+    return this.reviewLocalPatch(staged.transaction.id);
+  }
+
   reviewLocalPatch(transactionId: string): StagedLocalPatch {
     const pending = this.requirePendingPatch(transactionId);
     return {
@@ -198,6 +203,11 @@ export class ModelEditService {
     });
     this.pendingCreates.set(txId, { path, plan, label });
     return { transaction, plan, path };
+  }
+
+  async stageAndReviewLocalRecordCreate(path: string, input: NewLocalRecord): Promise<StagedLocalCreate> {
+    const staged = await this.stageLocalRecordCreate(path, input);
+    return this.reviewLocalCreate(staged.transaction.id);
   }
 
   reviewLocalCreate(transactionId: string): StagedLocalCreate {
@@ -268,6 +278,11 @@ export class ModelEditService {
       path,
       externalImpacts: this.externalLocalDeleteImpacts(path, localId),
     };
+  }
+
+  async stageAndReviewLocalRecordDelete(path: string, localId: string): Promise<StagedLocalDelete> {
+    const staged = await this.stageLocalRecordDelete(path, localId);
+    return this.reviewLocalDelete(staged.transaction.id);
   }
 
   reviewLocalDelete(transactionId: string): StagedLocalDelete {
