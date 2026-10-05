@@ -5,6 +5,7 @@
  * reparses the result with the governed reader, and returns proposed text plus validation findings.
  */
 import {
+  WRITABLE_VERSION,
   WRITABLE_VERSIONS,
   parseLocalModel,
   parseLinks,
@@ -306,7 +307,7 @@ export function planLocalRecordCreate(text: string, input: NewLocalRecord): Plan
     const block = renderRecord(input.kind, input.heading.trim(), input.localId, normalizedFields(input.kind, input.fields));
     const regionLines = [
       "## Local Model",
-      "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+      "<!-- MDSE:LOCAL-MODEL START schema=" + WRITABLE_VERSION + " -->",
       "",
       "### " + SECTION_TITLE[input.kind],
       "",
