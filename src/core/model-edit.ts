@@ -1,5 +1,5 @@
 import { localRef, type ModelRef } from "./localmodel";
-import { planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch, type LocalRecordPatch, type NewLocalRecord, type PlannedLocalDelete, type PlannedLocalEdit } from "./localmodel-edit";
+import { planLocalFlowMove, planLocalRecordCreate, planLocalRecordDelete, planLocalRecordPatch, type LocalRecordPatch, type NewLocalRecord, type PlannedLocalDelete, type PlannedLocalEdit } from "./localmodel-edit";
 import { TransactionManager, type AppliedEdit, type EditTransaction } from "./transaction";
 
 export interface TextDocumentStore {
@@ -140,6 +140,33 @@ export class ModelEditService {
   async stageAndReviewLocalRecordPatch(path: string, localId: string, patch: LocalRecordPatch): Promise<StagedLocalPatch> {
     const staged = await this.stageLocalRecordPatch(path, localId, patch);
     return this.reviewLocalPatch(staged.transaction.id);
+  }
+
+  async stageAndReviewLocalFlowMove(path: string, flowId: string, connectionId: string): Promise<StagedLocalPatch> {
+    const before = await this.store.read(path);
+    const plan = planLocalFlowMove(before, flowId, connectionId);
+    const uid = this.ownerUid(path);
+    if (!uid) throw new Error(`${path} is not an indexed model note with a durable uid.`);
+
+    const txId = `local-move-${Date.now().toString(36)}-${(++this.sequence).toString(36)}`;
+    const label = `move flow ${flowId} to ${connectionId}`;
+    this.transactions.begin(txId, label, "structural");
+    const transaction = this.transactions.add(txId, {
+      id: txId + "-move",
+      label,
+      changes: [{
+        kind: "local.move",
+        summary: label,
+        refs: [localRef(uid, "flow", flowId), localRef(uid, "connection", connectionId)],
+        metadata: { path, localId: flowId, localKind: "flow", connectionId },
+      }],
+    });
+    this.pendingPatches.set(txId, { path, plan, label });
+    return {
+      transaction: this.transactions.review(txId),
+      plan,
+      path,
+    };
   }
 
   reviewLocalPatch(transactionId: string): StagedLocalPatch {
