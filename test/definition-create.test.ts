@@ -221,3 +221,49 @@ test("definition UID allocation retries collisions by +1 ms", () => {
     second,
   );
 });
+
+
+test("definition rollback only reverses its own latest semantic history entry", async () => {
+  const store = new MemoryDefinitionStore();
+  const tx = new TransactionManager();
+  const service = new DefinitionCreationService(store, () => false, tx);
+  const staged = service.stageAndReview({
+    localKind: "part",
+    name: "Contactor",
+    uid,
+    path: "Contactor.md",
+  });
+  await service.apply(staged.transaction.id);
+  assert.equal(await store.exists(staged.plan.path), true);
+
+  await service.rollbackApplied(staged.transaction.id);
+  assert.equal(await store.exists(staged.plan.path), false);
+  assert.equal(tx.history().length, 0);
+});
+
+test("definition rollback refuses to cross a newer semantic edit", async () => {
+  const store = new MemoryDefinitionStore();
+  const tx = new TransactionManager();
+  const service = new DefinitionCreationService(store, () => false, tx);
+  const staged = service.stageAndReview({
+    localKind: "flow",
+    name: "Status Flow",
+    uid,
+    path: "Status Flow.md",
+  });
+  await service.apply(staged.transaction.id);
+
+  tx.recordApplied(
+    "newer",
+    "newer edit",
+    "atomic",
+    [{ kind: "test", summary: "newer", refs: [] }],
+    { async undo() {}, async redo() {} },
+  );
+
+  await assert.rejects(
+    service.rollbackApplied(staged.transaction.id),
+    /newer semantic edit/,
+  );
+  assert.equal(await store.exists(staged.plan.path), true);
+});
