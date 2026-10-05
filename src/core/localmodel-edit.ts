@@ -5,7 +5,6 @@
  * reparses the result with the governed reader, and returns proposed text plus validation findings.
  */
 import {
-  WRITABLE_VERSION,
   WRITABLE_VERSIONS,
   parseLocalModel,
   parseLinks,
