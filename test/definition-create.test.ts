@@ -267,3 +267,32 @@ test("definition rollback refuses to cross a newer semantic edit", async () => {
   );
   assert.equal(await store.exists(staged.plan.path), true);
 });
+
+
+test("definition creation undo refuses active references added outside semantic history", async () => {
+  const store = new MemoryDefinitionStore();
+  const tx = new TransactionManager();
+  let referenced = false;
+  const service = new DefinitionCreationService(
+    store,
+    () => false,
+    tx,
+    async (path) => ({
+      definitionPath: path,
+      noteUses: referenced ? [{ fromPath: "System.md", field: "hasPart" }] : [],
+      occurrenceUses: [],
+    }),
+  );
+  const staged = service.stageAndReview({
+    localKind: "part",
+    name: "Contactor",
+    uid,
+    path: "Contactor.md",
+  });
+  await service.apply(staged.transaction.id);
+
+  referenced = true;
+  await assert.rejects(tx.undo(), /active reference/);
+  assert.equal(await store.exists(staged.plan.path), true);
+  assert.equal(tx.history().length, 1);
+});
