@@ -291,3 +291,31 @@ test("semantic history requires newer migration-like edits to undo before supers
   assert.equal(await store.read(oldPath),oldText);
   assert.equal(await store.read(newPath),newText);
 });
+
+
+test("supersession refuses staging when either source UID does not match the canonical note", async()=>{
+  const store=new MemoryStore();
+  store.files.set(oldPath,oldText);
+  store.files.set(newPath,newText);
+  const tx=new TransactionManager();
+  const service=new DefinitionSupersessionService(store,async()=>impact,(target)=>resolve(target),linkText,tx);
+
+  await assert.rejects(
+    service.stageAndReview({
+      replacedPath:oldPath,replacedUid:"20261005061000009skellyspencer",replacedType:"Object",
+      replacementPath:newPath,replacementUid:"20261005061000002skellyspencer",replacementType:"Object",
+      replacementStatus:"active",
+    }),
+    /expected .* uid .* found/,
+  );
+
+  await assert.rejects(
+    service.stageAndReview({
+      replacedPath:oldPath,replacedUid:"20261005061000001skellyspencer",replacedType:"Object",
+      replacementPath:newPath,replacementUid:"20261005061000009skellyspencer",replacementType:"Object",
+      replacementStatus:"active",
+    }),
+    /expected .* uid .* found/,
+  );
+  assert.equal(tx.history().length,0);
+});
