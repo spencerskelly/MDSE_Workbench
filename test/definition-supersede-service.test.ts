@@ -169,7 +169,7 @@ custom: 'unchanged'
   assert.ok(after.includes("type: Object\nuid: "+newUid+"\nstatus: active\n"));
   assert.ok(after.includes("custom: 'unchanged'"));
   assert.ok(after.includes("[[30_Objects/Another Contactor]]"));
-  assert.ok(after.includes("[[30_Objects/Old Contactor]]"));
+  assert.ok(after.includes("[[Old Contactor]]"));
   assert.ok(after.endsWith("\n# New Contactor\n"));
 });
 
