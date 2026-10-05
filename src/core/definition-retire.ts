@@ -75,6 +75,14 @@ export class DefinitionRetirementService {
   async stage(path: string, uid: string): Promise<StagedDefinitionRetirement> {
     if (!(await this.store.exists(path))) throw new Error(`${path} does not exist.`);
     const before = await this.store.read(path);
+    const frontmatterMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(before);
+    if (!frontmatterMatch) throw new Error(`${path} must begin with YAML frontmatter.`);
+    const doc = parseDocument(frontmatterMatch[1]);
+    if (doc.errors.length) throw new Error(`${path} frontmatter is invalid YAML.`);
+    const storedUid = String(doc.get("uid") ?? "").trim();
+    if (!storedUid || storedUid !== uid) {
+      throw new Error(`Cannot stage retirement of ${path}: expected uid ${uid}, found ${storedUid || "none"}.`);
+    }
     const transformed = retireDefinitionText(before);
     const impact = await this.impactFor(path);
     const plan = planDefinitionRetirement(path, transformed.currentStatus, impact);
