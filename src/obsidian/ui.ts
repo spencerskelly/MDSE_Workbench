@@ -2033,17 +2033,21 @@ export class LocalFlowConnectionMoveModal extends Modal {
 
 
 export class DefinitionCreateFromOccurrenceModal extends Modal {
-  private staged: StagedDefinitionCreation | null = null;
+  private stagedDefinition: StagedDefinitionCreation | null = null;
+  private stagedBinding: StagedLocalPatch | null = null;
   private definitionApplied = false;
+  private bindingApplied = false;
 
   constructor(
     app: App,
     private readonly ownerName: string,
     private readonly occurrence: LocalRecord,
-    private readonly stage: (name: string, path: string) => StagedDefinitionCreation,
+    private readonly stageDefinition: (name: string, path: string) => StagedDefinitionCreation,
     private readonly applyDefinition: (transactionId: string) => Promise<void>,
     private readonly cancelDefinition: (transactionId: string) => void,
-    private readonly bindOccurrence: (definitionPath: string) => Promise<void>,
+    private readonly stageBinding: (definitionPath: string) => Promise<StagedLocalPatch>,
+    private readonly applyBinding: (transactionId: string) => Promise<void>,
+    private readonly cancelBinding: (transactionId: string) => void,
     private readonly onApplied: () => void,
   ) {
     super(app);
@@ -2054,11 +2058,16 @@ export class DefinitionCreateFromOccurrenceModal extends Modal {
   }
 
   onClose(): void {
-    const staged = this.staged;
-    this.staged = null;
+    const definition = this.stagedDefinition;
+    const binding = this.stagedBinding;
+    this.stagedDefinition = null;
+    this.stagedBinding = null;
     this.contentEl.empty();
-    if (staged && !this.definitionApplied) {
-      try { this.cancelDefinition(staged.transaction.id); } catch { /* already closed */ }
+    if (binding && !this.bindingApplied) {
+      try { this.cancelBinding(binding.transaction.id); } catch { /* already closed */ }
+    }
+    if (definition && !this.definitionApplied) {
+      try { this.cancelDefinition(definition.transaction.id); } catch { /* already closed */ }
     }
   }
 
@@ -2066,7 +2075,7 @@ export class DefinitionCreateFromOccurrenceModal extends Modal {
     this.titleEl.setText("Create reusable definition");
     this.contentEl.empty();
     this.contentEl.createEl("p", {
-      text: `Create a reusable definition for ${this.occurrence.kind} occurrence "${this.occurrence.identifier}" in ${this.ownerName}. The occurrence is not rebound until the definition has been created successfully.`,
+      text: `Create a reusable definition for ${this.occurrence.kind} occurrence "${this.occurrence.identifier}" in ${this.ownerName}. Review includes both definition creation and the occurrence binding before anything is written.`,
     });
 
     const field = (label: string, value = "", placeholder = ""): HTMLInputElement => {
@@ -2082,38 +2091,52 @@ export class DefinitionCreateFromOccurrenceModal extends Modal {
     const path = field("Vault path", "", "e.g. 40_Objects/Main Contactor.md");
     this.contentEl.createEl("p", {
       cls: "mdse-muted",
-      text: "Choose the canonical vault location explicitly. Workbench will generate the governed UID from your configured creator identity.",
+      text: "Choose the canonical vault location explicitly. Workbench generates the governed UID from your configured creator identity.",
     });
 
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
     const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
     review.onclick = () => {
-      review.disabled = true;
-      try {
-        const staged = this.stage(name.value.trim(), path.value.trim());
-        this.staged = staged;
-        this.renderReview(staged);
-      } catch (e) {
-        new Notice(`Cannot stage definition creation: ${(e as Error).message}`, 12000);
-        review.disabled = false;
-      }
+      void (async () => {
+        review.disabled = true;
+        try {
+          const definition = this.stageDefinition(name.value.trim(), path.value.trim());
+          this.stagedDefinition = definition;
+          try {
+            const binding = await this.stageBinding(definition.plan.path);
+            this.stagedBinding = binding;
+            this.renderReview(definition, binding);
+          } catch (error) {
+            try { this.cancelDefinition(definition.transaction.id); } catch { /* already closed */ }
+            this.stagedDefinition = null;
+            throw error;
+          }
+        } catch (e) {
+          new Notice(`Cannot stage definition workflow: ${(e as Error).message}`, 12000);
+          review.disabled = false;
+        }
+      })();
     };
   }
 
-  private renderReview(staged: StagedDefinitionCreation): void {
-    this.titleEl.setText("Review reusable definition");
+  private renderReview(definition: StagedDefinitionCreation, binding: StagedLocalPatch): void {
+    this.titleEl.setText("Review definition + occurrence binding");
     this.contentEl.empty();
 
     const rows: Array<[string, string]> = [
       ["Owner", this.ownerName],
       ["Occurrence", `${this.occurrence.kind} ${this.occurrence.identifier}`],
-      ["Transaction", staged.transaction.label],
-      ["Scope", staged.transaction.scope],
-      ["Definition", staged.plan.name],
-      ["Type", staged.plan.type],
-      ["UID", staged.plan.uid],
-      ["Path", staged.plan.path],
+      ["Definition transaction", definition.transaction.label],
+      ["Definition scope", definition.transaction.scope],
+      ["Definition", definition.plan.name],
+      ["Type", definition.plan.type],
+      ["UID", definition.plan.uid],
+      ["Path", definition.plan.path],
+      ["Binding transaction", binding.transaction.label],
+      ["Binding scope", binding.transaction.scope],
+      ["Occurrence field", "definition"],
+      ["Binding target", definition.plan.path.replace(/\.md$/i, "")],
     ];
     const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
     for (const [key, value] of rows) {
@@ -2122,43 +2145,56 @@ export class DefinitionCreateFromOccurrenceModal extends Modal {
       tr.createEl("td", { text: value });
     }
 
-    this.contentEl.createEl("p", {
-      cls: "mdse-muted",
-      text: "Apply creates the reusable definition first. Workbench then binds this occurrence through a separate reviewed Local Model transaction. If the occurrence changed meanwhile, binding is refused and the valid definition remains available.",
-    });
+    const bindingBlocking = binding.plan.findings.filter((finding) => finding.severity === "error");
+    for (const finding of binding.plan.findings) {
+      this.contentEl.createEl("p", {
+        text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+        cls: finding.severity === "error" ? "mdse-warn" : undefined,
+      });
+    }
+    if (!binding.plan.findings.length) {
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "Both structural transactions are staged and reviewed. Apply creates the definition first, then applies the already-reviewed occurrence binding.",
+      });
+    }
 
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
-    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
-      try { this.cancelDefinition(staged.transaction.id); } finally {
-        this.staged = null;
-        this.close();
-      }
-    };
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
     const apply = buttons.createEl("button", { text: "Apply definition + bind", cls: "mod-cta" });
+    apply.disabled = bindingBlocking.length > 0;
+    apply.setAttr("title", bindingBlocking.length
+      ? "Resolve blocking occurrence-binding findings before Apply."
+      : "Apply the reviewed definition creation, then the reviewed occurrence binding.");
     apply.onclick = () => {
       void (async () => {
         apply.disabled = true;
         try {
-          await this.applyDefinition(staged.transaction.id);
+          await this.applyDefinition(definition.transaction.id);
           this.definitionApplied = true;
-          this.staged = null;
-          await this.bindOccurrence(staged.plan.path);
+          this.stagedDefinition = null;
+
+          await this.applyBinding(binding.transaction.id);
+          this.bindingApplied = true;
+          this.stagedBinding = null;
+
           this.close();
           this.onApplied();
-          new Notice(`Created ${staged.plan.name} and bound ${this.occurrence.identifier} to it.`, 6000);
+          new Notice(`Created ${definition.plan.name} and bound ${this.occurrence.identifier} to it.`, 6000);
         } catch (e) {
-          if (this.definitionApplied) {
-            new Notice(`Definition was created, but the occurrence was not rebound: ${(e as Error).message}`, 15000);
+          if (this.definitionApplied && !this.bindingApplied) {
+            new Notice(`Definition was created, but the reviewed occurrence binding was refused: ${(e as Error).message}`, 15000);
             this.contentEl.createEl("p", {
               cls: "mdse-warn",
-              text: "The reusable definition now exists, but the occurrence binding was safely refused. Close and reopen the occurrence before binding it.",
+              text: "The reusable definition now exists. The staged binding was not applied, so no dangling reference was created. Close and reopen the occurrence before trying to bind again.",
             });
           } else {
-            new Notice(`Definition was not created: ${(e as Error).message}`, 15000);
-            apply.disabled = false;
+            new Notice(`Definition workflow was not applied: ${(e as Error).message}`, 15000);
+            apply.disabled = bindingBlocking.length > 0;
           }
         }
       })();
     };
   }
 }
+
