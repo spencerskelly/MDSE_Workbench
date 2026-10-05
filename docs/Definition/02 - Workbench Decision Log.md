@@ -1172,3 +1172,15 @@ The existing note-details **View…** entry point is the normal way to reach app
 The Workbench repository now carries `docs/User Guide/MDSE Workbench User Guide.md`. The controlled Base Vault carries an exact release-managed copy so ordinary engineers receive the guide inside the engineering vault.
 
 The guide distinguishes the pinned runtime from candidate capabilities. Documentation must not imply an editor/view is released merely because source exists on Workbench main. Cross-repository release validation should compare the Workbench source guide with the Base Vault copy so they cannot drift silently.
+
+
+### WB-125 — 2026-10-05 fresh-source identity guard for relationship writes
+**Status:** Implemented and CI-verified on standalone main; no release promotion.
+
+The expanded WB-106 editor safety pass found a remaining asymmetry after Local Model mutation paths were hardened: `RelationshipWriter` validated relationship endpoints through the semantic index, then wrote the current Markdown file without first proving that the file still carried the indexed durable `uid`. A stale index could therefore address a semantic relationship operation to a path whose identity had changed.
+
+This slice adds a reusable pure-core source-UID reader/assertion in `src/core/identity.ts` and applies it to both sides of relationship add/remove before any frontmatter mutation. If the current source UID is absent or differs from the indexed UID, the operation fails closed before writing. The check is intentionally limited to relationship add/remove in this slice; remove-missing, ordinary property/body edits and any remaining legacy writer paths stay as separate symmetry checks.
+
+Focused regression coverage in `test/identity.test.ts` proves matching source/index identity passes while stale or missing source identity is rejected. GitHub Actions run `37339741587` passed `npm test`, the 60k semantic-cache scale smoke, paired cold/warm startup benchmark, 60k relationship re-resolution benchmark, and `npm run build`; the workflow also synchronized the checked-in 0.1.17 artifact.
+
+Implementation/test commits: `65b6cf9f`, `84963992`, `109ded46` (with the normal artifact build commit between source/test pushes).
