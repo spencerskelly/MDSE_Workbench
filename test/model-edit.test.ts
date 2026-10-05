@@ -1047,7 +1047,6 @@ function noteWithParentableEndpoints(): string {
     "### Local Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
-    "- part: [[#^" + partId + "|K1]]",
     "- parent: [[#^" + endpointB + "|J2]]",
     "^" + endpointA,
     "",
