@@ -48,6 +48,8 @@ interface Settings {
   showDetails: boolean;
   /** Pre-release gate for RTA-3 warm restore. Off in controlled bases until runtime validation passes. */
   warmCachePreview: boolean;
+  /** 13 ASCII letters used as the governed creator suffix for newly created note UIDs. */
+  creatorSuffix: string;
 }
 
 const DEFAULTS: Settings = {
@@ -57,6 +59,7 @@ const DEFAULTS: Settings = {
   canvasProbe: true,
   showDetails: true,
   warmCachePreview: false,
+  creatorSuffix: "",
 };
 
 interface RuntimeSample {
@@ -95,7 +98,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, and definition-note creation now uses structural Review/Apply/Cancel with path/UID collision rechecks plus guarded undo/redo. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, and creator identity is explicit so new definition UIDs never borrow attribution from an existing model note. */
   modelEditor: ModelEditService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
@@ -1518,6 +1521,15 @@ class WorkbenchSettings extends PluginSettingTab {
     text("Relationship schema", "Path to relationships.yaml in this vault.", "relationshipsPath");
     text("Element types", "Path to element-types.yaml in this vault.", "elementTypesPath");
     text("Generated views folder", "Generated canvases are written here. Add this folder to .gitignore.", "viewsFolder");
+    new Setting(containerEl)
+      .setName("Creator UID suffix")
+      .setDesc("13 ASCII letters used for new governed note UIDs, typically normalized last name + first name. Example: skellyspencer. Workbench will not create reusable definitions until this is valid.")
+      .addText((t) =>
+        t.setValue(this.plugin.settings.creatorSuffix).onChange(async (v) => {
+          this.plugin.settings.creatorSuffix = v.replace(/[^A-Za-z]/g, "").toLowerCase();
+          await this.plugin.saveAll();
+        }),
+      );
     new Setting(containerEl)
       .setName("Note details on click")
       .setDesc("Clicking a note on a generated view (a canvas in the views folder) opens its properties and text in a popup. Uses Canvas internals that Obsidian does not document.")
