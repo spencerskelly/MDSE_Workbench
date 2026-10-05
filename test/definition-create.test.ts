@@ -296,3 +296,24 @@ test("definition creation undo refuses active references added outside semantic 
   assert.equal(await store.exists(staged.plan.path), true);
   assert.equal(tx.history().length, 1);
 });
+
+
+test("definition creation redo refuses UID collision introduced after undo", async () => {
+  const store = new MemoryDefinitionStore();
+  const tx = new TransactionManager();
+  let uidCollision = false;
+  const service = new DefinitionCreationService(store, () => uidCollision, tx);
+  const staged = service.stageAndReview({
+    localKind: "part",
+    name: "Contactor",
+    uid,
+    path: "Contactor.md",
+  });
+  await service.apply(staged.transaction.id);
+  await tx.undo();
+
+  uidCollision = true;
+  await assert.rejects(tx.redo(), /uid .* is in use/);
+  assert.equal(await store.exists(staged.plan.path), false);
+  assert.equal(tx.history().length, 0);
+});
