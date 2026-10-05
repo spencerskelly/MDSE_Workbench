@@ -466,7 +466,8 @@ export default class MdseWorkbench extends Plugin {
     replacementPath: string,
   ) {
     const editor = this.modelEditor;
-    if (!editor) throw new Error("Workbench is still starting.");
+    const indexer = this.indexer;
+    if (!editor || !indexer) throw new Error("Workbench is still starting.");
 
     const normalizedOwner = normalizePath(ownerPath);
     const ownerFile = this.app.vault.getAbstractFileByPath(normalizedOwner);
@@ -490,19 +491,35 @@ export default class MdseWorkbench extends Plugin {
     });
 
     const normalizedReplacement = normalizePath(replacementPath);
+    const indexedReplacement = indexer.index.notes.get(normalizedReplacement);
+    if (!indexedReplacement?.uid) {
+      throw new Error(`${normalizedReplacement} is not an indexed model definition with a durable uid.`);
+    }
+    const replacementUid = indexedReplacement.uid;
     const replacementFile = this.app.vault.getAbstractFileByPath(normalizedReplacement);
     if (!(replacementFile instanceof TFile)) throw new Error(`${normalizedReplacement} no longer exists.`);
+    const validateReplacementIdentity = async (): Promise<void> => {
+      const currentReplacement = this.app.vault.getAbstractFileByPath(normalizedReplacement);
+      if (!(currentReplacement instanceof TFile)) {
+        throw new Error(`${normalizedReplacement} no longer exists; reopen supersession migration review.`);
+      }
+      const text = await this.app.vault.read(currentReplacement);
+      const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
+      const frontmatter = match ? parseYaml(match[1]) as Record<string, unknown> | null : null;
+      const sourceUid = typeof frontmatter?.uid === "string" ? frontmatter.uid.trim() : "";
+      if (!sourceUid || sourceUid !== replacementUid) {
+        throw new Error(
+          `${normalizedReplacement} identity changed; expected uid ${replacementUid}, found ${sourceUid || "none"}. Reopen supersession migration review.`,
+        );
+      }
+    };
+    await validateReplacementIdentity();
 
     return editor.stageAndReviewLocalRecordPatch(
       normalizedOwner,
       localId,
       { fields: { definition: plan.definitionLink } },
-      async () => {
-        const currentReplacement = this.app.vault.getAbstractFileByPath(normalizedReplacement);
-        if (!(currentReplacement instanceof TFile)) {
-          throw new Error(`${normalizedReplacement} no longer exists; reopen supersession migration review.`);
-        }
-      },
+      validateReplacementIdentity,
     );
   }
 
