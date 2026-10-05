@@ -55,3 +55,45 @@ export function assessDefinitionDeletion(impact: DefinitionDeletionImpact): Defi
     occurrenceUseCount: occurrenceUses.length,
   };
 }
+
+
+export interface DefinitionRetirementPlan {
+  definitionPath: string;
+  fromStatus: string | null;
+  toStatus: "retired";
+  changed: boolean;
+  noteUseCount: number;
+  occurrenceUseCount: number;
+  impactRows: string[];
+  /** Retirement preserves references. Migration belongs to explicit supersession work. */
+  preservesReferences: true;
+}
+
+/**
+ * Pure lifecycle planner for non-destructive definition retirement.
+ *
+ * Retirement never detaches or rewrites active users. It only changes the canonical definition's
+ * lifecycle status to "retired"; existing uses remain explicit impact evidence for later migration.
+ */
+export function planDefinitionRetirement(
+  definitionPath: string,
+  currentStatus: unknown,
+  impact: DefinitionDeletionImpact,
+): DefinitionRetirementPlan {
+  const status =
+    typeof currentStatus === "string" && currentStatus.trim()
+      ? currentStatus.trim().toLowerCase()
+      : null;
+  const assessment = assessDefinitionDeletion(impact);
+
+  return {
+    definitionPath,
+    fromStatus: status,
+    toStatus: "retired",
+    changed: status !== "retired",
+    noteUseCount: assessment.noteUseCount,
+    occurrenceUseCount: assessment.occurrenceUseCount,
+    impactRows: assessment.blockers,
+    preservesReferences: true,
+  };
+}
