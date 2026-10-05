@@ -14565,6 +14565,33 @@ var DefinitionSupersedeModal = class extends import_obsidian3.Modal {
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Done" }).onclick = () => this.close();
   }
+  renderMigrationRefreshFailure(supersession, error) {
+    this.titleEl.setText("Migration applied");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: "The migration was applied successfully, but Workbench could not refresh the remaining dependent inventory."
+    });
+    this.contentEl.createEl("p", {
+      cls: "mdse-warn",
+      text: `Refresh failed: ${error.message}`
+    });
+    this.contentEl.createEl("p", {
+      text: "Do not re-apply the completed migration. Retry the inventory refresh or close this dialog and reopen supersession later."
+    });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    const retry = buttons.createEl("button", { text: "Retry inventory", cls: "mod-cta" });
+    retry.onclick = () => {
+      void (async () => {
+        retry.disabled = true;
+        try {
+          await this.refreshMigration(supersession);
+        } catch (e) {
+          this.renderMigrationRefreshFailure(supersession, e);
+        }
+      })();
+    };
+    buttons.createEl("button", { text: "Done" }).onclick = () => this.close();
+  }
   renderNoteMigrationReview(supersession, candidate, migration) {
     this.titleEl.setText("Review relationship migration");
     this.contentEl.empty();
@@ -14605,13 +14632,18 @@ var DefinitionSupersedeModal = class extends import_obsidian3.Modal {
         apply.disabled = true;
         try {
           await this.applyNoteMigration(migration.transaction.id);
-          this.noteMigrationApplied = true;
-          this.stagedNoteMigration = null;
-          new import_obsidian3.Notice(`Migrated ${candidate.ownerPath} ${candidate.field} to the replacement definition.`, 6e3);
-          await this.refreshMigration(supersession);
         } catch (e) {
           new import_obsidian3.Notice(`Relationship migration was not applied: ${e.message}`, 15e3);
           apply.disabled = false;
+          return;
+        }
+        this.noteMigrationApplied = true;
+        this.stagedNoteMigration = null;
+        new import_obsidian3.Notice(`Migrated ${candidate.ownerPath} ${candidate.field} to the replacement definition.`, 6e3);
+        try {
+          await this.refreshMigration(supersession);
+        } catch (e) {
+          this.renderMigrationRefreshFailure(supersession, e);
         }
       })();
     };
@@ -14656,13 +14688,18 @@ var DefinitionSupersedeModal = class extends import_obsidian3.Modal {
         apply.disabled = true;
         try {
           await this.applyMigration(migration.transaction.id);
-          this.migrationApplied = true;
-          this.stagedMigration = null;
-          new import_obsidian3.Notice(`Migrated occurrence ^${candidate.localId} to the replacement definition.`, 6e3);
-          await this.refreshMigration(supersession);
         } catch (e) {
           new import_obsidian3.Notice(`Occurrence migration was not applied: ${e.message}`, 15e3);
           apply.disabled = blocking;
+          return;
+        }
+        this.migrationApplied = true;
+        this.stagedMigration = null;
+        new import_obsidian3.Notice(`Migrated occurrence ^${candidate.localId} to the replacement definition.`, 6e3);
+        try {
+          await this.refreshMigration(supersession);
+        } catch (e) {
+          this.renderMigrationRefreshFailure(supersession, e);
         }
       })();
     };
@@ -16841,7 +16878,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
