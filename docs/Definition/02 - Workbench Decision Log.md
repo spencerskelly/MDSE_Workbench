@@ -1194,3 +1194,15 @@ WB-125 deliberately left the legacy undefined-target removal path for a separate
 This closes the stale-index redirect risk for relationship removal when the target note no longer exists. The operation remains single-file because there is no target note/inverse to update. The existing pure source/index UID assertion remains the common guard used by relationship add, normal remove, and missing-target remove.
 
 Ordinary property and body edits remain separate identity-hardening slices; they are not pulled into WB-126.
+
+
+### WB-127 — 2026-10-05 fresh-source identity guard for ordinary property and body writes
+**Status:** Implemented on standalone main; this is the Workbench pause boundary for the importer-focused work window.
+
+WB-125 and WB-126 closed stale-index identity risks for relationship add/remove and missing-target removal. The remaining legacy note-edit paths were ordinary property writes and ordinary body writes. Both now read the current Markdown source and prove that its durable `uid` still matches the indexed note identity before any mutation begins.
+
+Property edits therefore cannot redirect through stale path/index state into a different semantic note. Body edits perform the same identity proof before the existing loaded-body concurrency check and before the existing Local Model region protection. A missing or mismatched source UID fails closed without changing the file.
+
+Together with the already-guarded Local Model mutation services, definition lifecycle/migration services, and relationship writer paths, this closes the currently known fresh-source identity asymmetry across supported Workbench model writers. Do not continue open-ended identity hardening without a concrete failing path or regression. Further Workbench work resumes with the minimum structured-editor/integration gate after the current importer correction window.
+
+Implementation commit: `a45bc089`. Release promotion remains unchanged; the controlled Base is still pinned separately and must not be updated merely because this standalone safety boundary is complete.
