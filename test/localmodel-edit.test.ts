@@ -1236,7 +1236,7 @@ test("plans part definition change while preserving attached endpoint topology",
     "### Part Occurrences",
     "#### K1",
     "- definition: [[Old Contactor]]",
-    "- usage: spare",
+    "- usage: option",
     "- multiplicity: 2",
     "^" + partId,
     "",
@@ -1259,7 +1259,7 @@ test("plans part definition change while preserving attached endpoint topology",
   const part = region?.records.find((record) => record.localId === partId);
   const endpoint = region?.records.find((record) => record.localId === endpointId);
   assert.equal(part?.definition?.target, "New Contactor");
-  assert.equal(part?.usage, "spare");
+  assert.equal(part?.usage, "option");
   assert.equal(part?.multiplicity, "2");
   assert.equal(endpoint?.part?.blockId, partId);
   assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
@@ -1276,7 +1276,7 @@ test("part definition cannot be cleared because the definition is required", () 
 
   assert.ok(result.findings.some((finding) =>
     finding.localId === partId &&
-    finding.code === "definition.required" &&
+    finding.code === "record.missing-definition" &&
     finding.severity === "error"
   ));
 });
