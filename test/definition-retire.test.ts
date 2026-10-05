@@ -89,3 +89,42 @@ test("definition retirement refuses an already retired definition",async()=>{
   await assert.rejects(service.apply(staged.transaction.id),/already retired/);
   service.cancel(staged.transaction.id);
 });
+
+
+test("retirement preserves unrelated frontmatter formatting and comments byte-for-byte",()=>{
+  const formatted=`---
+# lifecycle comment
+type: Object
+uid: ${uid}
+status: "active" # keep inline comment
+custom: 'keep single quotes'
+tags:
+  - power
+
+---
+
+# Contactor
+`;
+  const result=retireDefinitionText(formatted);
+  assert.equal(result.currentStatus,"active");
+  assert.ok(result.text.includes("# lifecycle comment\ntype: Object\nuid: "+uid+"\nstatus: retired # keep inline comment\ncustom: 'keep single quotes'\ntags:\n  - power\n"));
+  assert.ok(result.text.endsWith("\n# Contactor\n"));
+});
+
+test("retirement adds missing status without rewriting existing frontmatter",()=>{
+  const formatted=`---
+# identity comment
+type: Object
+uid: ${uid}
+custom:
+  nested: value
+tags: [power, control]
+---
+
+# Contactor
+`;
+  const result=retireDefinitionText(formatted);
+  assert.equal(result.currentStatus,undefined);
+  assert.ok(result.text.includes("# identity comment\ntype: Object\nuid: "+uid+"\ncustom:\n  nested: value\ntags: [power, control]\nstatus: retired\n---"));
+  assert.ok(result.text.endsWith("\n# Contactor\n"));
+});
