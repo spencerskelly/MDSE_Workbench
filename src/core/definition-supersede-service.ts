@@ -234,6 +234,10 @@ export class DefinitionSupersessionService {
             await this.store.write(pending.request.replacedPath, pending.replacedBefore);
           },
           redo: async () => {
+            const latestImpact = await this.impactFor(pending.request.replacedPath);
+            if (impactSignature(latestImpact) !== pending.impactSignature) {
+              throw new Error(`Cannot redo ${pending.label}: dependent usage changed after Review.`);
+            }
             if (await this.store.read(pending.request.replacementPath) !== pending.replacementBefore) throw new Error(`${pending.request.replacementPath} changed after undoing supersession.`);
             if (await this.store.read(pending.request.replacedPath) !== pending.replacedBefore) throw new Error(`${pending.request.replacedPath} changed after undoing supersession.`);
             await this.store.write(pending.request.replacementPath, pending.replacementAfter);
