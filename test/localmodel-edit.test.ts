@@ -1402,3 +1402,88 @@ test("endpoint definition edit rejects a block-fragment definition", () => {
     finding.severity === "error"
   ));
 });
+
+
+test("plans flow definition change while preserving owning connection and endpoint roles", () => {
+  const endpointA = "ep-20261005018000000skellyspencer";
+  const endpointB = "ep-20261005018000001skellyspencer";
+  const connectionId = "conn-20261005018000002skellyspencer";
+  const flowId = "flow-20261005018000003skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "^" + connectionId,
+    "##### Commands",
+    "- definition: [[Old Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordPatch(
+    text,
+    flowId,
+    { fields: { definition: "[[New Data]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  const flow = parseLocalModel(result.after)?.records.find((record) => record.localId === flowId);
+  assert.equal(flow?.definition?.target, "New Data");
+  assert.equal(flow?.connectionId, connectionId);
+  assert.equal(flow?.roleA, "transmit");
+  assert.equal(flow?.roleB, "receive");
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("flow definition cannot be cleared because the definition is required", () => {
+  const flowId = "flow-" + tokenB;
+  const result = planLocalRecordPatch(
+    note(),
+    flowId,
+    { fields: { definition: null } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === flowId &&
+    finding.code === "record.missing-definition" &&
+    finding.severity === "error"
+  ));
+});
+
+test("flow definition edit rejects a block-fragment definition", () => {
+  const flowId = "flow-" + tokenB;
+  const result = planLocalRecordPatch(
+    note(),
+    flowId,
+    { fields: { definition: "[[Some Note#^ep-" + tokenC + "|Bad]]" } },
+    { allowInvalidTarget: true },
+  );
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === flowId &&
+    finding.code === "definition.incompatible" &&
+    finding.severity === "error"
+  ));
+});
