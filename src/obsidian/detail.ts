@@ -14,7 +14,7 @@ import { nextLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, ElementPicker, LocalEndpointCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
+import { ConfirmModal, ElementPicker, LocalConnectionCreateModal, LocalEndpointCreateModal, LocalOccurrenceDeleteModal, LocalPartCreateModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -230,6 +230,10 @@ export class NoteDetailPanel extends Component {
       const addEndpoint = head.createEl("button", { text: "Add endpoint…", cls: "mdse-detail-btn" });
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
     }
+    if (this.editing && record.kind === "endpoint") {
+      const connect = head.createEl("button", { text: "Connect to endpoint…", cls: "mdse-detail-btn" });
+      connect.onclick = () => { void this.createConnectionOccurrence(file, record); };
+    }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence…", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
@@ -328,6 +332,34 @@ export class NoteDetailPanel extends Component {
         : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data.",
     });
     root.scrollTop = 0;
+  }
+
+  private async createConnectionOccurrence(file: TFile, source: LocalRecord): Promise<void> {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const options = region.records.filter((record) => record.kind === "endpoint" && record.localId !== source.localId);
+      if (!options.length) throw new Error("This note has no second endpoint occurrence to connect.");
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+      const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
+      const localId = nextLocalId("connection", ownerUid);
+      new LocalConnectionCreateModal(
+        this.app,
+        file.basename,
+        source,
+        options,
+        localId,
+        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (transactionId) => editor.applyLocalCreate(transactionId),
+        (transactionId) => { editor.cancelLocalCreate(transactionId); },
+        (createdId) => { void this.refreshLocal(file, createdId, true); },
+      ).open();
+    } catch (e) {
+      new Notice(`Cannot create connection: ${(e as Error).message}`, 12000);
+    }
   }
 
   private createEndpointOccurrence(file: TFile, part: LocalRecord): void {
