@@ -1363,3 +1363,130 @@ test("cancelled endpoint equals edit leaves source and history untouched", async
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithRewirableConnection(): string {
+  const endpointA = "ep-20261005012000000skellyspencer";
+  const endpointB = "ep-20261005012000001skellyspencer";
+  const endpointC = "ep-20261005012000002skellyspencer";
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const flowId = "flow-20261005012000004skellyspencer";
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "",
+    "#### J3",
+    "- definition: [[CAN Port]]",
+    "^" + endpointC,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "^" + connectionId,
+    "##### Commands",
+    "- definition: [[CAN Data]]",
+    "- endpointA: transmit",
+    "- endpointB: receive",
+    "^" + flowId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("staged connection endpoint rewire stays unwritten until Apply and preserves child flow", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const endpointB = "ep-20261005012000001skellyspencer";
+  const endpointC = "ep-20261005012000002skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { endpointA: "[[#^" + endpointC + "|J3]]" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- endpointA: [[#^" + endpointC + "|J3]]"));
+  assert.ok(store.text.includes("- endpointB: [[#^" + endpointB + "|J2]]"));
+  assert.match(store.text, /##### Commands/);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.ok(store.text.includes("- endpointA: [[#^" + endpointC + "|J3]]"));
+  assert.match(store.text, /##### Commands/);
+});
+
+test("staged connection endpoint B rewire preserves endpoint A", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const endpointA = "ep-20261005012000000skellyspencer";
+  const endpointC = "ep-20261005012000002skellyspencer";
+  const store = new MemoryStore(noteWithRewirableConnection());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { endpointB: "[[#^" + endpointC + "|J3]]" },
+  });
+
+  await service.applyLocalPatch(staged.transaction.id);
+  assert.ok(store.text.includes("- endpointA: [[#^" + endpointA + "|J1]]"));
+  assert.ok(store.text.includes("- endpointB: [[#^" + endpointC + "|J3]]"));
+  assert.match(store.text, /##### Commands/);
+});
+
+test("staged connection endpoint rewire blocks missing target at Apply", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { endpointA: "[[#^ep-20261005012100099skellyspencer|Missing]]" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled connection endpoint rewire leaves source and history untouched", async () => {
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const endpointC = "ep-20261005012000002skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { endpointA: "[[#^" + endpointC + "|J3]]" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
