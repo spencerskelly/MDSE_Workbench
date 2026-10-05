@@ -1206,3 +1206,17 @@ Property edits therefore cannot redirect through stale path/index state into a d
 Together with the already-guarded Local Model mutation services, definition lifecycle/migration services, and relationship writer paths, this closes the currently known fresh-source identity asymmetry across supported Workbench model writers. Do not continue open-ended identity hardening without a concrete failing path or regression. Further Workbench work resumes with the minimum structured-editor/integration gate after the current importer correction window.
 
 Implementation commit: `a45bc089`. Release promotion remains unchanged; the controlled Base is still pinned separately and must not be updated merely because this standalone safety boundary is complete.
+
+
+### WB-128 — 2026-10-05 Local Model 0.4 compatibility and connection-owned exposure
+**Status:** High-priority required work; not implemented yet.
+
+MDSE W-384 advances the governed Local Model write format to 0.4. Workbench must preserve existing 0.1/0.2/0.3 meaning while adding explicit 0.4 parsing, validation, views, and structured editing before an importer that emits 0.4 can be accepted.
+
+Local Model 0.4 changes the visible section headings from `Part Occurrences` / `Local Interfaces` to `Parts` / `Interfaces`, while `Connections` remains unchanged. Workbench must select section names by the region schema version; it must never reinterpret or silently rewrite a 0.3 region as 0.4.
+
+Reusable interface definitions are now first-class `Object / interface` notes rather than Port notes. A local Interface occurrence may optionally reference one of those reusable definitions. First-class Port notes and note-level Port topology are not part of the 0.4 model.
+
+Exposure ownership also changes in 0.4: `exposes` belongs to a **Connection** and points to the assembly-boundary Interface occurrence through which that internal/context-owned connection is made available externally. Workbench 0.4 views must render that meaning as internal connection → boundary Interface. Existing 0.3 endpoint-owned exposure remains readable under 0.3 semantics only.
+
+This is a compatibility/safety prerequisite, not optional UI polish. Required scope includes parser, in-memory model, validator, writer, Internal/Interfaces views, Review findings, test fixtures, and documentation. Unknown or partially supported 0.4 semantics must disable unsafe structured editing rather than guess.
