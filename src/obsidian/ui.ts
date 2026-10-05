@@ -8,6 +8,7 @@ import type { StagedLocalCreate, StagedLocalDelete, StagedLocalPatch } from "../
 import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { StagedDefinitionDelete } from "../core/definition-delete";
 import type { StagedDefinitionRetirement } from "../core/definition-retire";
+import type { StagedDefinitionSupersession } from "../core/definition-supersede-service";
 
 /** Element picker (WB-018 to WB-020): name first, with type and id beside it (WB-083). */
 export class ElementPicker extends FuzzySuggestModal<NoteRecord> {
@@ -2438,6 +2439,141 @@ export class DefinitionRetireModal extends Modal {
         } catch (e) {
           new Notice(`Definition was not retired: ${(e as Error).message}`, 15000);
           apply.disabled = !staged.plan.changed;
+        }
+      })();
+    };
+  }
+}
+
+
+export class DefinitionSupersedeModal extends Modal {
+  private staged: StagedDefinitionSupersession | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly replacedName: string,
+    private readonly candidates: NoteRecord[],
+    private readonly stage: (replacementPath: string) => Promise<StagedDefinitionSupersession>,
+    private readonly apply: (transactionId: string) => Promise<void>,
+    private readonly cancel: (transactionId: string) => void,
+    private readonly onApplied: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.renderCompose();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) {
+      try { this.cancel(staged.transaction.id); } catch { /* already closed */ }
+    }
+  }
+
+  private renderCompose(): void {
+    this.titleEl.setText("Supersede definition");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Choose the reusable definition that replaces ${this.replacedName}. Only same-class definitions are offered. Supersession records replacement intent; dependent migration remains separate and reviewed.`,
+    });
+
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Replacement definition" });
+    const pick = row.createEl("select", { cls: "mdse-detail-input" });
+    pick.createEl("option", { text: "Choose replacement…", value: "" });
+    for (const candidate of this.candidates) {
+      pick.createEl("option", { text: candidate.name, value: candidate.path });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.disabled = this.candidates.length === 0;
+    review.setAttr("title", this.candidates.length
+      ? "Stage the supersession relationship and complete migration inventory for review."
+      : "No same-class replacement definitions are available.");
+    review.onclick = () => {
+      void (async () => {
+        review.disabled = true;
+        try {
+          if (!pick.value) throw new Error("Choose a replacement definition.");
+          const staged = await this.stage(pick.value);
+          this.staged = staged;
+          this.renderReview(staged);
+        } catch (e) {
+          new Notice(`Cannot stage supersession: ${(e as Error).message}`, 15000);
+          review.disabled = this.candidates.length === 0;
+        }
+      })();
+    };
+  }
+
+  private renderReview(staged: StagedDefinitionSupersession): void {
+    this.titleEl.setText("Review definition supersession");
+    this.contentEl.empty();
+
+    const replacement = this.candidates.find((candidate) => candidate.path === staged.plan.replacementPath);
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: Array<[string, string]> = [
+      ["Replaced definition", this.replacedName],
+      ["Replacement", replacement?.name ?? staged.plan.replacementPath],
+      ["Relationship", "replacement supersedes replaced"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+      ["Migration candidates", String(staged.plan.migrationCandidates.length)],
+      ["Automatic rewrites", "none"],
+    ];
+    for (const [key, value] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: value });
+    }
+
+    for (const warning of staged.plan.warnings) {
+      this.contentEl.createEl("p", { cls: "mdse-warn", text: `WARNING: ${warning}` });
+    }
+
+    if (staged.plan.migrationCandidates.length) {
+      const inventory = this.contentEl.createDiv({ cls: "mdse-detail-state" });
+      inventory.createEl("strong", { text: "Guided migration inventory" });
+      for (const candidate of staged.plan.migrationCandidates) {
+        inventory.createEl("p", {
+          text: candidate.scope === "occurrence"
+            ? `LOCAL: ${candidate.ownerPath} — ${candidate.kind} ${candidate.identifier} (^${candidate.localId})`
+            : `MODEL: ${candidate.ownerPath} — ${candidate.field}`,
+        });
+      }
+      inventory.createEl("p", {
+        text: "Apply does not alter these dependents. Each migration remains a separate governed model edit.",
+      });
+    } else {
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "No current dependents require migration. Apply still records only the paired supersession relationship.",
+      });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const apply = buttons.createEl("button", { text: "Apply supersession", cls: "mod-cta" });
+    apply.onclick = () => {
+      void (async () => {
+        apply.disabled = true;
+        try {
+          await this.apply(staged.transaction.id);
+          this.applied = true;
+          this.staged = null;
+          this.close();
+          this.onApplied();
+          new Notice(`Recorded supersession for ${this.replacedName}. Dependent migration remains explicit.`, 7000);
+        } catch (e) {
+          new Notice(`Supersession was not applied: ${(e as Error).message}`, 15000);
+          apply.disabled = false;
         }
       })();
     };
