@@ -904,12 +904,20 @@ function planLocalRecordDelete(text, localId) {
   const editable = editableLocalRegion(text);
   const record = editable.region.records.find((candidate) => candidate.localId === localId);
   if (!record) throw new Error("Local Model record ^" + localId + " does not exist in this note.");
-  if (record.kind !== "part" && record.kind !== "endpoint") {
-    throw new Error("This deletion slice supports part and endpoint occurrences only.");
+  if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection") {
+    throw new Error("This deletion slice supports part, endpoint and connection occurrences only.");
   }
   const impacts = [];
   for (const source of editable.region.records) {
     if (source.localId === localId) continue;
+    if (record.kind === "connection" && source.kind === "flow" && source.connectionId === localId) {
+      impacts.push({
+        sourceLocalId: source.localId,
+        sourceKind: source.kind,
+        sourceIdentifier: source.identifier,
+        field: "connection"
+      });
+    }
     for (const [field, value] of source.fields) {
       for (const link of parseLinks(value)) {
         if (!link.target && link.blockId === localId) {
@@ -5504,7 +5512,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         void this.createConnectionOccurrence(file, record);
       };
     }
-    if (this.editing && (record.kind === "part" || record.kind === "endpoint")) {
+    if (this.editing && (record.kind === "part" || record.kind === "endpoint" || record.kind === "connection")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
     }
@@ -5652,7 +5660,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     }
   }
   deleteOccurrence(file, record) {
-    if (record.kind !== "part" && record.kind !== "endpoint") return;
+    if (record.kind !== "part" && record.kind !== "endpoint" && record.kind !== "connection") return;
     try {
       const editor = this.host.modelEditor();
       if (!editor) throw new Error("Workbench is still starting.");
