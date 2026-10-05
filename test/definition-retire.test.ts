@@ -147,3 +147,22 @@ test("definition retirement refuses changed impact evidence after Review",async(
   assert.equal(tx.history().length,0);
   service.cancel(staged.transaction.id);
 });
+
+
+test("definition retirement redo refuses changed impact evidence after undo",async()=>{
+  const store=new MemoryRetirementStore(); store.files.set(path,active);
+  const tx=new TransactionManager();
+  let currentImpact=impact;
+  const service=new DefinitionRetirementService(store,async()=>currentImpact,tx);
+
+  const staged=await service.stageAndReview(path,uid);
+  await service.apply(staged.transaction.id);
+  await tx.undo();
+  currentImpact={
+    definitionPath:path,
+    noteUses:[...impact.noteUses,{fromPath:"Another System.md",field:"hasPart"}],
+    occurrenceUses:impact.occurrenceUses,
+  };
+  await assert.rejects(tx.redo(),/dependent usage changed after Review/);
+  assert.equal(await store.read(path),active);
+});
