@@ -13,9 +13,10 @@ import { parseLocalModel, type LinkRef, type LocalRecord } from "../core/localmo
 import { nextAvailableLocalId, type LocalRecordPatch } from "../core/localmodel-edit";
 import type { ModelEditService } from "../core/model-edit";
 import type { StagedDefinitionCreation } from "../core/definition-create";
+import type { StagedDefinitionDelete } from "../core/definition-delete";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
-import { ConfirmModal, DefinitionCreateFromOccurrenceModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
+import { ConfirmModal, DefinitionCreateFromOccurrenceModal, DefinitionDeleteModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
 
 /** What the popup needs from the plugin. */
 export interface DetailHost {
@@ -37,6 +38,9 @@ export interface DetailHost {
   applyDefinitionCreation(transactionId: string): Promise<void>;
   cancelDefinitionCreation(transactionId: string): void;
   rollbackDefinitionCreation(transactionId: string): Promise<void>;
+  stageDefinitionDeletion(path: string, uid: string): Promise<StagedDefinitionDelete>;
+  applyDefinitionDeletion(transactionId: string): Promise<void>;
+  cancelDefinitionDeletion(transactionId: string): void;
   stageOccurrenceDefinitionBinding(ownerPath: string, localId: string, definitionPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
   applyOccurrenceDefinitionBinding(transactionId: string): Promise<void>;
   cancelOccurrenceDefinitionBinding(transactionId: string): void;
@@ -148,6 +152,21 @@ export class NoteDetailPanel extends Component {
       const returnToOccurrence = head.createEl("button", { text: "Back to occurrence", cls: "mdse-detail-btn" });
       returnToOccurrence.setAttr("title", "Return to the contextual Local Model occurrence without changing its storage.");
       returnToOccurrence.onclick = () => { void this.returnToOccurrence(); };
+      const uid = typeof fm?.uid === "string" ? fm.uid : "";
+      if (uid) {
+        const remove = head.createEl("button", { text: "Delete definition…", cls: "mdse-detail-btn" });
+        remove.setAttr("title", "Review all active references before destructive definition deletion.");
+        remove.onclick = () => {
+          new DefinitionDeleteModal(
+            this.app,
+            file.basename,
+            () => this.host.stageDefinitionDeletion(file.path, uid),
+            (transactionId) => this.host.applyDefinitionDeletion(transactionId),
+            (transactionId) => this.host.cancelDefinitionDeletion(transactionId),
+            () => { void this.returnToOccurrence(); },
+          ).open();
+        };
+      }
     }
     const edit = head.createEl("button", { text: this.editing ? "Done" : "Edit definition", cls: this.editing ? "mdse-detail-btn mod-cta" : "mdse-detail-btn" });
     if (!this.definitionReturn || this.definitionReturn.definitionPath !== file.path) {
