@@ -1330,3 +1330,106 @@ export class LocalConnectionEndpointRewireModal extends Modal {
     })();
   }
 }
+
+
+export class LocalConnectionDefinitionEditModal extends Modal {
+  private staged: StagedLocalPatch | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly connection: LocalRecord,
+    private readonly stage: (definition: string | null) => Promise<StagedLocalPatch>,
+    private readonly apply: (id: string) => Promise<void>,
+    private readonly cancel: (id: string) => void,
+    private readonly onApplied: () => void,
+  ) { super(app); }
+
+  onOpen(): void {
+    this.titleEl.setText("Edit connection definition");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Change only the reusable definition link for ${this.connection.identifier}. Connection identity, endpoints, and child flows remain unchanged.` });
+
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Reusable definition" });
+    const input = row.createEl("input", {
+      type: "text",
+      cls: "mdse-detail-input",
+      value: this.connection.definition?.text ?? "",
+    });
+    input.setAttr("placeholder", "[[CAN Bus]]");
+    input.onkeydown = (e) => e.stopPropagation();
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const value = input.value.trim();
+        const staged = await this.stage(value || null);
+        this.staged = staged;
+        this.renderReview(staged, value);
+      } catch (e) {
+        new Notice(`Cannot stage connection definition edit: ${(e as Error).message}`, 12000);
+        review.disabled = false;
+      }
+    })();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try { this.cancel(staged.transaction.id); } catch {}
+  }
+
+  private renderReview(staged: StagedLocalPatch, value: string): void {
+    this.titleEl.setText("Review connection definition edit");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: [string, string][] = [
+      ["Owner", this.ownerName],
+      ["Connection", this.connection.identifier],
+      ["New definition", value || "none"],
+      ["Endpoint A", this.connection.endpointA?.text ?? "-"],
+      ["Endpoint B", this.connection.endpointB?.text ?? "-"],
+      ["Child flows", "preserved"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+    ];
+    for (const [key, val] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: val });
+    }
+
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    for (const finding of staged.plan.findings) {
+      this.contentEl.createEl("p", { text: `${finding.severity.toUpperCase()}: ${finding.message}`, cls: finding.severity === "error" ? "mdse-warn" : undefined });
+    }
+    if (!staged.plan.findings.length) this.contentEl.createEl("p", { cls: "mdse-muted", text: "Validation passed. Apply will change only the connection definition field." });
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally { this.staged = null; this.close(); }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new Notice(`Updated definition for connection ${this.connection.identifier}.`, 5000);
+      } catch (e) {
+        new Notice(`Not applied: ${(e as Error).message}`, 12000);
+        apply.disabled = false;
+      }
+    })();
+  }
+}
