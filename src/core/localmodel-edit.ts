@@ -155,6 +155,23 @@ export function nextLocalId(kind: LocalKind, ownerUid: string, now = new Date())
   return prefix[kind] + stamp + suffix;
 }
 
+
+export function nextAvailableLocalId(
+  kind: LocalKind,
+  ownerUid: string,
+  existingLocalIds: ReadonlySet<string> | readonly string[],
+  now = new Date(),
+): string {
+  const occupied = existingLocalIds instanceof Set ? existingLocalIds : new Set(existingLocalIds);
+  let candidateTime = new Date(now.getTime());
+  for (let attempts = 0; attempts < 10000; attempts++) {
+    const candidate = nextLocalId(kind, ownerUid, candidateTime);
+    if (!occupied.has(candidate)) return candidate;
+    candidateTime = new Date(candidateTime.getTime() + 1);
+  }
+  throw new Error("Cannot allocate a unique Local Model identity after 10000 millisecond retries.");
+}
+
 export interface LocalDeleteImpact {
   sourceLocalId: string;
   sourceKind: LocalKind;
