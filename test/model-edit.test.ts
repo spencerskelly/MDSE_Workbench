@@ -2206,3 +2206,39 @@ test("cancelled flow ownership move leaves source and semantic history untouched
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged Local Model patch semantic guard blocks Apply and Redo when target validity changes", async () => {
+  const store = new MemoryStore(note());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  let valid = true;
+  const guard = async () => {
+    if (!valid) throw new Error("replacement definition no longer exists");
+  };
+
+  const staged = await service.stageAndReviewLocalRecordPatch(
+    "Assembly.md",
+    localId,
+    { fields: { definition: "[[Replacement Contactor]]" } },
+    guard,
+  );
+
+  valid = false;
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /replacement definition no longer exists/);
+  assert.equal(store.text, note());
+  service.cancelLocalPatch(staged.transaction.id);
+
+  valid = true;
+  const staged2 = await service.stageAndReviewLocalRecordPatch(
+    "Assembly.md",
+    localId,
+    { fields: { definition: "[[Replacement Contactor]]" } },
+    guard,
+  );
+  await service.applyLocalPatch(staged2.transaction.id);
+  await transactions.undo();
+  valid = false;
+  await assert.rejects(transactions.redo(), /replacement definition no longer exists/);
+  assert.equal(store.text, note());
+});
