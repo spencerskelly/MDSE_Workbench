@@ -13,8 +13,8 @@ Start from the methodology vault's `00_Workspace/00 - Current State.md`; it name
 Current schema target:
 - relationships 1.35;
 - element-types 1.17;
-- Local Model writer 0.2;
-- Workbench Local Model reader compatibility 0.1 + 0.2.
+- Local Model default writer 0.3;
+- Workbench Local Model reader compatibility 0.1 + 0.2 + 0.3; existing 0.2 regions remain structured-editable under their original semantics.
 
 See `WB106_IMPLEMENTATION_CONTRACT.md` for the exact next Workbench build boundary.
 
