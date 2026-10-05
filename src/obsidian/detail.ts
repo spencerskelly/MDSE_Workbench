@@ -575,6 +575,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         connection,
+        this.host.elements(file.path),
         (definition) => editor.stageAndReviewLocalRecordPatch(file.path, connection.localId, {
           fields: { definition },
         }),
@@ -658,12 +659,14 @@ export class NoteDetailPanel extends Component {
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
       const localId = nextAvailableLocalId("connection", ownerUid, region.records.map((record) => record.localId));
+      const definitions = this.host.elements(file.path);
       new LocalConnectionCreateModal(
         this.app,
         file.basename,
         source,
         options,
         localId,
+        definitions,
         (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => { editor.cancelLocalCreate(transactionId); },
