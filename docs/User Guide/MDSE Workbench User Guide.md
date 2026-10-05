@@ -195,7 +195,7 @@ A staged transaction may be temporarily incomplete while it is being assembled, 
 
 ### Do not edit the governed Local Model region as ordinary text
 
-New Local Model writes use schema 0.2. Workbench reads 0.1 for compatibility but does not use ordinary body editing to rewrite governed Local Model records.
+New Local Model regions use schema 0.3. Workbench reads 0.1, 0.2 and 0.3; existing 0.2 regions remain structured-editable under their original semantics, while 0.1 remains read-compatible/read-only. Ordinary body editing does not rewrite governed Local Model records. In schema 0.3, a contextual endpoint may omit `definition`; a definitionless endpoint may not carry `usage`.
 
 Use structured Workbench controls for Local Model changes.
 
