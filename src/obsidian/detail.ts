@@ -583,10 +583,6 @@ export class NoteDetailPanel extends Component {
     else body.createEl("p", { cls: "mdse-detail-empty", text: "This definition has no text." });
   }
 
-  private definitionEditFromOccurrence(file: TFile): boolean {
-    return this.definitionReturn?.definitionPath === file.path;
-  }
-
   /**
    * Impact review is consumed by one canonical-definition mutation. This makes the gate apply
    * immediately before Apply rather than only when edit mode was entered.
