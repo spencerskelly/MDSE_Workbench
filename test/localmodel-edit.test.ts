@@ -521,3 +521,95 @@ test("deletion slice still refuses flow records", () => {
     /part, endpoint and connection occurrences only/,
   );
 });
+
+
+test("creates a flow under the addressed connection with reviewed endpoint roles", () => {
+  const connectionId = "conn-20261005002000000skellyspencer";
+  const flowId = "flow-20261005002000001skellyspencer";
+  const endpointA = "ep-20261005002000002skellyspencer";
+  const endpointB = "ep-20261005002000003skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "^" + connectionId,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordCreate(text, {
+    kind: "flow",
+    localId: flowId,
+    connectionId,
+    heading: "Commands",
+    fields: {
+      definition: "[[CAN Data]]",
+      endpointA: "transmit",
+      endpointB: "receive",
+    },
+  });
+
+  const flow = parseLocalModel(result.after)?.records.find((record) => record.localId === flowId);
+  assert.equal(flow?.kind, "flow");
+  assert.equal(flow?.connectionId, connectionId);
+  assert.equal(flow?.roleA, "transmit");
+  assert.equal(flow?.roleB, "receive");
+  assert.equal(flow?.definition?.target, "CAN Data");
+  assert.ok(result.after.indexOf("#### Harness") < result.after.indexOf("##### Commands"));
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("flow creation rejects a missing structural owner connection", () => {
+  assert.throws(
+    () => planLocalRecordCreate(note(), {
+      kind: "flow",
+      localId: "flow-20261005002100000skellyspencer",
+      connectionId: "conn-20261005002100099skellyspencer",
+      heading: "Commands",
+      fields: { definition: "[[CAN Data]]", endpointA: "transmit", endpointB: "receive" },
+    }),
+    /parent connection .* does not exist/,
+  );
+});
+
+test("flow creation requires a definition and both endpoint roles", () => {
+  const connectionId = "conn-" + tokenD;
+  assert.throws(
+    () => planLocalRecordCreate(note(), {
+      kind: "flow",
+      localId: "flow-20261005002200000skellyspencer",
+      connectionId,
+      heading: "Commands",
+      fields: { endpointA: "transmit", endpointB: "receive" },
+    }),
+    /requires a definition/,
+  );
+  assert.throws(
+    () => planLocalRecordCreate(note(), {
+      kind: "flow",
+      localId: "flow-20261005002200001skellyspencer",
+      connectionId,
+      heading: "Commands",
+      fields: { definition: "[[CAN Data]]", endpointA: "transmit" },
+    }),
+    /requires endpointA and endpointB roles/,
+  );
+});
