@@ -8314,27 +8314,33 @@ var DefinitionSupersessionService = class {
     if (!await this.store.exists(request.replacementPath)) throw new Error(`${request.replacementPath} does not exist.`);
     const replacedBefore = await this.store.read(request.replacedPath);
     const replacementBefore = await this.store.read(request.replacementPath);
-    const sourceUid = (text, path) => {
+    const sourceSemantics = (text, path) => {
       const parsed = frontmatter(text);
       const doc = parseDocument(parsed.yaml);
       if (doc.errors.length) throw new Error(`${path} frontmatter is invalid YAML.`);
-      return String(doc.get("uid") ?? "").trim();
+      const uid = String(doc.get("uid") ?? "").trim();
+      const type = String(doc.get("type") ?? "").trim();
+      const rawStatus = doc.get("status");
+      const status = rawStatus === void 0 || rawStatus === null ? null : String(rawStatus).trim();
+      return { uid, type, status };
     };
-    const replacedSourceUid = sourceUid(replacedBefore, request.replacedPath);
+    const replacedSource = sourceSemantics(replacedBefore, request.replacedPath);
+    const replacedSourceUid = replacedSource.uid;
     if (!replacedSourceUid || replacedSourceUid !== request.replacedUid) {
       throw new Error(`Cannot stage supersession: expected ${request.replacedPath} uid ${request.replacedUid}, found ${replacedSourceUid || "none"}.`);
     }
-    const replacementSourceUid = sourceUid(replacementBefore, request.replacementPath);
+    const replacementSource = sourceSemantics(replacementBefore, request.replacementPath);
+    const replacementSourceUid = replacementSource.uid;
     if (!replacementSourceUid || replacementSourceUid !== request.replacementUid) {
       throw new Error(`Cannot stage supersession: expected ${request.replacementPath} uid ${request.replacementUid}, found ${replacementSourceUid || "none"}.`);
     }
     const impact = await this.impactFor(request.replacedPath);
     const plan = planDefinitionSupersession({
       replacedPath: request.replacedPath,
-      replacedType: request.replacedType,
+      replacedType: replacedSource.type,
       replacementPath: request.replacementPath,
-      replacementType: request.replacementType,
-      replacementStatus: request.replacementStatus,
+      replacementType: replacementSource.type,
+      replacementStatus: replacementSource.status,
       impact
     });
     if (!plan.valid) throw new Error(plan.blockers.join(" "));
