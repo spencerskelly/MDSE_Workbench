@@ -362,3 +362,85 @@ test("deletion slice still refuses connection and flow records", () => {
     /part and endpoint occurrences only/,
   );
 });
+
+
+test("creates a connection between two existing endpoint occurrences", () => {
+  const endpointA = "ep-20261005000000000skellyspencer";
+  const endpointB = "ep-20261005000000001skellyspencer";
+  const connectionId = "conn-20261005000000002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordCreate(text, {
+    kind: "connection",
+    localId: connectionId,
+    heading: "CAN Harness",
+    fields: {
+      endpointA: "[[#^" + endpointA + "|J1]]",
+      endpointB: "[[#^" + endpointB + "|J2]]",
+      definition: "[[CAN Harness]]",
+    },
+  });
+
+  const connection = parseLocalModel(result.after)?.records.find((record) => record.localId === connectionId);
+  assert.equal(connection?.kind, "connection");
+  assert.equal(connection?.endpointA?.blockId, endpointA);
+  assert.equal(connection?.endpointB?.blockId, endpointB);
+  assert.equal(connection?.definition?.target, "CAN Harness");
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
+});
+
+test("connection creation surfaces a missing endpoint target as blocking validation", () => {
+  const endpointA = "ep-20261005000100000skellyspencer";
+  const connectionId = "conn-20261005000100002skellyspencer";
+  const text = [
+    "---",
+    "type: Object",
+    "uid: 20261003130000000skellyspencer",
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+
+  const result = planLocalRecordCreate(text, {
+    kind: "connection",
+    localId: connectionId,
+    heading: "Broken Harness",
+    fields: {
+      endpointA: "[[#^" + endpointA + "|J1]]",
+      endpointB: "[[#^ep-20261005000100099skellyspencer|Missing]]",
+    },
+  });
+
+  assert.ok(result.findings.some((finding) =>
+    finding.localId === connectionId &&
+    finding.code === "ref.local-missing" &&
+    finding.severity === "error"
+  ));
+});
