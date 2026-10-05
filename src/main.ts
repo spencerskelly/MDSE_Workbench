@@ -102,7 +102,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement has a governed structural service, and that retirement service is now bound to real vault mutation plus the same fully hydrated note/occurrence impact provider while preserving every dependent reference. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, and definition mode now exposes a retirement review that shows all preserved dependent uses before applying only canonical status: retired. */
   modelEditor: ModelEditService | null = null;
   /** Canonical reusable-definition creation shares the same semantic transaction history. */
   definitionCreator: DefinitionCreationService | null = null;
@@ -178,6 +178,9 @@ export default class MdseWorkbench extends Plugin {
       stageDefinitionDeletion: (path, uid) => this.stageDefinitionDeletion(path, uid),
       applyDefinitionDeletion: (transactionId) => this.applyDefinitionDeletion(transactionId),
       cancelDefinitionDeletion: (transactionId) => this.cancelDefinitionDeletion(transactionId),
+      stageDefinitionRetirement: (path, uid) => this.stageDefinitionRetirement(path, uid),
+      applyDefinitionRetirement: (transactionId) => this.applyDefinitionRetirement(transactionId),
+      cancelDefinitionRetirement: (transactionId) => this.cancelDefinitionRetirement(transactionId),
       stageOccurrenceDefinitionBinding: (ownerPath, localId, definitionPath) => this.stageOccurrenceDefinitionBinding(ownerPath, localId, definitionPath),
       applyOccurrenceDefinitionBinding: (transactionId) => this.applyOccurrenceDefinitionBinding(transactionId),
       cancelOccurrenceDefinitionBinding: (transactionId) => this.cancelOccurrenceDefinitionBinding(transactionId),
@@ -376,6 +379,24 @@ export default class MdseWorkbench extends Plugin {
     const deleter = this.definitionDeleter;
     if (!deleter) throw new Error("Definition deletion is unavailable.");
     deleter.cancel(transactionId);
+  }
+
+  private async stageDefinitionRetirement(path: string, uid: string) {
+    const retirer = this.definitionRetirer;
+    if (!retirer || !this.isReady()) throw new Error("Definition retirement is unavailable while Workbench is starting.");
+    return retirer.stageAndReview(normalizePath(path), uid);
+  }
+
+  private async applyDefinitionRetirement(transactionId: string): Promise<void> {
+    const retirer = this.definitionRetirer;
+    if (!retirer) throw new Error("Definition retirement is unavailable.");
+    await retirer.apply(transactionId);
+  }
+
+  private cancelDefinitionRetirement(transactionId: string): void {
+    const retirer = this.definitionRetirer;
+    if (!retirer) throw new Error("Definition retirement is unavailable.");
+    retirer.cancel(transactionId);
   }
 
   private async stageOccurrenceDefinitionBinding(
