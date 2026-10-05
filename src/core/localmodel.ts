@@ -9,8 +9,9 @@ import type { ModelIndex } from "./model";
 
 export type LocalKind = "part" | "endpoint" | "connection" | "flow";
 
-export const READABLE_VERSIONS = ["0.1", "0.2"] as const;
-export const WRITABLE_VERSION = "0.2";
+export const READABLE_VERSIONS = ["0.1", "0.2", "0.3"] as const;
+export const WRITABLE_VERSIONS = ["0.2", "0.3"] as const;
+export const WRITABLE_VERSION = "0.3";
 
 const PREFIX: Record<LocalKind, string> = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
 const SECTION: Record<string, LocalKind> = { "part occurrences": "part", "local interfaces": "endpoint", connections: "connection" };
@@ -321,7 +322,14 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       if (r.kind === "connection" || r.kind === "flow") add("record.usage-invalid", `${label}: usage is not valid on a ${r.kind}.`, r);
       else if (version === "0.2" && !USAGES.includes(r.usage)) add("record.usage-invalid", `${label}: usage "${r.usage}" is not standard, variant or option.`, r);
     }
-    if ((r.kind === "part" || r.kind === "endpoint" || r.kind === "flow") && !r.definition) add("record.missing-definition", `${label} has no definition link.`, r);
+    const definitionRequired =
+      r.kind === "part" ||
+      r.kind === "flow" ||
+      (r.kind === "endpoint" && version !== "0.3");
+    if (definitionRequired && !r.definition) add("record.missing-definition", `${label} has no definition link.`, r);
+    if (r.kind === "endpoint" && version === "0.3" && !r.definition && r.usageExplicit) {
+      add("record.usage-without-definition", `${label}: usage requires a reusable endpoint definition.`, r);
+    }
     if (r.definition && r.definition.blockId) add("definition.incompatible", `${label}: the definition must link to a note, not a block.`, r);
   }
   for (const [id, list] of byId) if (list.length > 1) add("record.duplicate-id", `Block ID ${id} is used by ${list.length} records.`, list[1]);
