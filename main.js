@@ -8438,6 +8438,29 @@ function list(value) {
   }
   return [value];
 }
+function fieldPairRange(doc, yaml, field) {
+  const contents = doc.contents;
+  const pair = contents?.items?.find((item) => {
+    const key2 = item.key;
+    if (!key2) return false;
+    const value = typeof key2.toJSON === "function" ? key2.toJSON() : void 0;
+    return String(value ?? "") === field;
+  });
+  const keyRange = pair?.key?.range;
+  if (!keyRange) return null;
+  const start = yaml.lastIndexOf("\n", Math.max(0, keyRange[0] - 1)) + 1;
+  let cursor = yaml.indexOf("\n", keyRange[1]);
+  if (cursor < 0) return [start, yaml.length];
+  cursor += 1;
+  while (cursor < yaml.length) {
+    const next = yaml.indexOf("\n", cursor);
+    const end = next < 0 ? yaml.length : next;
+    const line = yaml.slice(cursor, end);
+    if (line.length > 0 && !/^\s/.test(line)) break;
+    cursor = next < 0 ? yaml.length : next + 1;
+  }
+  return [start, cursor];
+}
 function mutateRelationship(text, sourcePath, field, removePath, addPath, resolve, linkText) {
   const { doc, yaml, body } = frontmatter2(text);
   const values = list(doc.get(field));
@@ -8453,16 +8476,24 @@ function mutateRelationship(text, sourcePath, field, removePath, addPath, resolv
     if (!already) kept.push(`[[${linkText(addPath, sourcePath)}]]`);
   }
   const sorted = kept.sort((a, b) => String(a).localeCompare(String(b), void 0, { sensitivity: "base" }));
-  const encoded = sorted.length ? "\n" + sorted.map((value) => `  - ${JSON.stringify(String(value))}`).join("\n") : " []";
   const node = doc.get(field, true);
   let nextYaml;
-  if (node === void 0 || node === null) {
-    const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}${field}:${encoded}`;
-    nextYaml = yaml + addition;
+  if (sorted.length === 0) {
+    if (node === void 0 || node === null) return text;
+    const pairRange = fieldPairRange(doc, yaml, field);
+    if (!pairRange) throw new Error(`Cannot safely remove empty ${field}; YAML property source range is unavailable.`);
+    nextYaml = yaml.slice(0, pairRange[0]) + yaml.slice(pairRange[1]);
+    if (nextYaml.endsWith("\n")) nextYaml = nextYaml.slice(0, -1);
   } else {
-    const range = node.range;
-    if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
-    nextYaml = yaml.slice(0, range[0]) + encoded.trimStart() + yaml.slice(range[1]);
+    const encoded = "\n" + sorted.map((value) => `  - ${JSON.stringify(String(value))}`).join("\n");
+    if (node === void 0 || node === null) {
+      const addition = `${yaml.endsWith("\n") || yaml.length === 0 ? "" : "\n"}${field}:${encoded}`;
+      nextYaml = yaml + addition;
+    } else {
+      const range = node.range;
+      if (!range) throw new Error(`Cannot safely update ${field}; YAML source range is unavailable.`);
+      nextYaml = yaml.slice(0, range[0]) + encoded.trimStart() + yaml.slice(range[1]);
+    }
   }
   return `---
 ${nextYaml}
@@ -16878,7 +16909,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and paired migration fails closed on missing or duplicate inverse state instead of silently repairing it, and the supersession UI refreshes live dependent inventory after each reviewed occurrence or note migration so multiple migrations can continue in one session without stale candidates, while post-apply refresh failures are reported separately and never misstate a committed migration as unapplied; note migration also removes relationship properties that become empty instead of persisting empty arrays. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
