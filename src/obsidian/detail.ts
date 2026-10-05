@@ -533,6 +533,7 @@ export class NoteDetailPanel extends Component {
         this.app,
         file.basename,
         endpoint,
+        this.host.elements(file.path),
         (definition) => editor.stageAndReviewLocalRecordPatch(file.path, endpoint.localId, {
           fields: { definition },
         }),
@@ -683,12 +684,15 @@ export class NoteDetailPanel extends Component {
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
       const localId = nextAvailableLocalId("endpoint", ownerUid, region.records.map((record) => record.localId));
+      const definitions = this.host.elements(file.path);
+      if (!definitions.length) throw new Error("No reusable model definitions are available.");
       new LocalEndpointCreateModal(
         this.app,
         file.basename,
         part.identifier,
         part.localId,
         localId,
+        definitions,
         (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => { editor.cancelLocalCreate(transactionId); },
