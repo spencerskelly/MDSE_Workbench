@@ -2076,3 +2076,72 @@ test("staged endpoint part assignment clears existing parent and supports undo/r
   assert.equal(redone?.part?.blockId, partId);
   assert.equal(redone?.parent, null);
 });
+
+
+test("staged flow endpoint-role edit stays unwritten until Apply and preserves definition and connection", async () => {
+  const flowId = "flow-20261005012000004skellyspencer";
+  const connectionId = "conn-20261005012000003skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", flowId, {
+    fields: { endpointA: "exchange", endpointB: "unspecified" },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(store.text, original);
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+
+  await service.applyLocalPatch(staged.transaction.id);
+  const applied = parseLocalModel(store.text)?.records.find((record) => record.localId === flowId);
+  assert.equal(applied?.roleA, "exchange");
+  assert.equal(applied?.roleB, "unspecified");
+  assert.equal(applied?.definition?.target, "CAN Data");
+  assert.equal(applied?.connectionId, connectionId);
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  const redone = parseLocalModel(store.text)?.records.find((record) => record.localId === flowId);
+  assert.equal(redone?.roleA, "exchange");
+  assert.equal(redone?.roleB, "unspecified");
+  assert.equal(redone?.definition?.target, "CAN Data");
+  assert.equal(redone?.connectionId, connectionId);
+});
+
+test("staged flow endpoint-role edit blocks invalid roles at Apply", async () => {
+  const flowId = "flow-20261005012000004skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", flowId, {
+    fields: { endpointA: "source", endpointB: "receive" },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.code === "ref.flow-role-invalid" && finding.severity === "error"));
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
+test("cancelled flow endpoint-role edit leaves source and history untouched", async () => {
+  const flowId = "flow-20261005012000004skellyspencer";
+  const original = noteWithRewirableConnection();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", flowId, {
+    fields: { endpointA: "exchange", endpointB: "unspecified" },
+  });
+  service.cancelLocalPatch(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
