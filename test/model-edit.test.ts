@@ -759,3 +759,40 @@ test("cancelled connection deletion leaves source and history untouched", async 
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+test("staged flow creation stays unwritten until Apply and supports undo/redo", async () => {
+  const connectionId = "conn-20261005001200002skellyspencer";
+  const flowId = "flow-20261005002300000skellyspencer";
+  const original = noteWithCleanConnection(false);
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "flow",
+    localId: flowId,
+    connectionId,
+    heading: "Commands",
+    fields: {
+      definition: "[[CAN Data]]",
+      endpointA: "transmit",
+      endpointB: "receive",
+    },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+  assert.equal(store.text, original);
+
+  await service.applyLocalCreate(staged.transaction.id);
+  assert.match(store.text, /##### Commands/);
+  assert.ok(store.text.includes("- endpointA: transmit"));
+  assert.ok(store.text.includes("- endpointB: receive"));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.create");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.match(store.text, /##### Commands/);
+});
