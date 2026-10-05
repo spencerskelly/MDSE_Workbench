@@ -46,13 +46,18 @@ export function addLink(fm: Frontmatter, field: string, linkText: string, same?:
   return true;
 }
 
-/** Removes the entries that point at the note. Returns false when it was not linked. */
+/**
+ * Removes the entries that point at the note. Relationship frontmatter is sparse: when the final
+ * target is removed, drop the property instead of persisting an empty relationship array.
+ * Returns false when it was not linked.
+ */
 export function removeLink(fm: Frontmatter, field: string, linkText: string, same?: SameNote): boolean {
   const list = asList(fm[field]);
   const match = same ?? ((v: unknown) => linkTarget(v)?.toLowerCase() === linkText.toLowerCase());
   const kept = list.filter((v) => !match(v));
   if (kept.length === list.length) return false;
-  fm[field] = kept;
+  if (kept.length) fm[field] = kept;
+  else delete fm[field];
   return true;
 }
 
