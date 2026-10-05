@@ -5099,6 +5099,119 @@ var LocalEndpointCreateModal = class extends import_obsidian3.Modal {
     };
   }
 };
+var LocalConnectionCreateModal = class extends import_obsidian3.Modal {
+  constructor(app, ownerName, source, options, localId, stage, apply, cancel, onApplied) {
+    super(app);
+    this.ownerName = ownerName;
+    this.source = source;
+    this.options = options;
+    this.localId = localId;
+    this.stage = stage;
+    this.apply = apply;
+    this.cancel = cancel;
+    this.onApplied = onApplied;
+    this.staged = null;
+    this.applied = false;
+  }
+  onOpen() {
+    this.compose();
+  }
+  onClose() {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try {
+      this.cancel(staged.transaction.id);
+    } catch {
+    }
+  }
+  compose() {
+    this.titleEl.setText("Add connection");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", { text: `Connect ${this.source.identifier} to another endpoint in ${this.ownerName}. Flows are not created here.` });
+    const input = (label, placeholder = "") => {
+      const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+      row.createEl("label", { text: label });
+      const el = row.createEl("input", { type: "text", cls: "mdse-detail-input" });
+      if (placeholder) el.setAttr("placeholder", placeholder);
+      el.onkeydown = (e) => e.stopPropagation();
+      return el;
+    };
+    const heading = input("Connection name", "Harness");
+    const definition = input("Reusable definition", "optional");
+    const pickRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    pickRow.createEl("label", { text: "Endpoint B" });
+    const pick = pickRow.createEl("select", { cls: "mdse-detail-input" });
+    pick.createEl("option", { text: "Choose endpoint\u2026", value: "" });
+    for (const ep of this.options) pick.createEl("option", { text: ep.identifier, value: ep.localId });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const target = this.options.find((ep) => ep.localId === pick.value);
+        if (!target) throw new Error("Choose a second endpoint.");
+        const fields = {
+          endpointA: `[[#^${this.source.localId}|${this.source.identifier}]]`,
+          endpointB: `[[#^${target.localId}|${target.identifier}]]`
+        };
+        if (definition.value.trim()) fields.definition = definition.value.trim();
+        const staged = await this.stage({ kind: "connection", localId: this.localId, heading: heading.value.trim(), fields });
+        this.staged = staged;
+        this.review(staged, heading.value.trim(), definition.value.trim(), target);
+      } catch (e) {
+        new import_obsidian3.Notice(`Cannot stage connection: ${e.message}`, 12e3);
+        review.disabled = false;
+      }
+    })();
+  }
+  review(staged, heading, definition, target) {
+    this.titleEl.setText("Review new connection");
+    this.contentEl.empty();
+    const rows = [
+      ["Owner", this.ownerName],
+      ["Connection", heading],
+      ["Endpoint A", this.source.identifier],
+      ["Endpoint B", target.identifier],
+      ["Reusable definition", definition],
+      ["Local ID", staged.plan.localId]
+    ];
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    for (const [k, v] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: k });
+      tr.createEl("td", { text: v || "\u2014" });
+    }
+    const blocking = staged.plan.findings.filter((f) => f.severity === "error");
+    for (const f of staged.plan.findings) this.contentEl.createEl("p", { text: `${f.severity.toUpperCase()}: ${f.message}`, cls: f.severity === "error" ? "mdse-warn" : void 0 });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try {
+        this.cancel(staged.transaction.id);
+      } finally {
+        this.staged = null;
+        this.close();
+      }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied(staged.plan.localId);
+        new import_obsidian3.Notice(`Created connection ${heading}.`, 5e3);
+      } catch (e) {
+        new import_obsidian3.Notice(`Not applied: ${e.message}`, 12e3);
+        apply.disabled = false;
+      }
+    })();
+  }
+};
 
 // src/obsidian/detail.ts
 var import_obsidian4 = require("obsidian");
@@ -5385,6 +5498,12 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       const addEndpoint = head.createEl("button", { text: "Add endpoint\u2026", cls: "mdse-detail-btn" });
       addEndpoint.onclick = () => this.createEndpointOccurrence(file, record);
     }
+    if (this.editing && record.kind === "endpoint") {
+      const connect = head.createEl("button", { text: "Connect to endpoint\u2026", cls: "mdse-detail-btn" });
+      connect.onclick = () => {
+        void this.createConnectionOccurrence(file, record);
+      };
+    }
     if (this.editing && (record.kind === "part" || record.kind === "endpoint")) {
       const deleteOccurrence = head.createEl("button", { text: "Delete occurrence\u2026", cls: "mdse-detail-btn" });
       deleteOccurrence.onclick = () => this.deleteOccurrence(file, record);
@@ -5474,6 +5593,37 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       text: this.editing ? "Editing context only. Definition identity and structural/topology links remain separate and read-only here." : "This is contextual occurrence data stored in the owner note. Open the reusable definition separately to edit definition-level data."
     });
     root.scrollTop = 0;
+  }
+  async createConnectionOccurrence(file, source) {
+    try {
+      const editor = this.host.modelEditor();
+      if (!editor) throw new Error("Workbench is still starting.");
+      const text = await this.app.vault.read(file);
+      const region = parseLocalModel(text);
+      if (!region?.structured) throw new Error("The owner note has no usable Local Model.");
+      const options = region.records.filter((record) => record.kind === "endpoint" && record.localId !== source.localId);
+      if (!options.length) throw new Error("This note has no second endpoint occurrence to connect.");
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
+      const localId = nextLocalId("connection", ownerUid);
+      new LocalConnectionCreateModal(
+        this.app,
+        file.basename,
+        source,
+        options,
+        localId,
+        (input) => editor.stageLocalRecordCreate(file.path, input),
+        (transactionId) => editor.applyLocalCreate(transactionId),
+        (transactionId) => {
+          editor.cancelLocalCreate(transactionId);
+        },
+        (createdId) => {
+          void this.refreshLocal(file, createdId, true);
+        }
+      ).open();
+    } catch (e) {
+      new import_obsidian4.Notice(`Cannot create connection: ${e.message}`, 12e3);
+    }
   }
   createEndpointOccurrence(file, part) {
     try {
