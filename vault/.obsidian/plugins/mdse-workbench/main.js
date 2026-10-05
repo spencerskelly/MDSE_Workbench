@@ -4793,10 +4793,11 @@ var ConfirmModal = class extends import_obsidian3.Modal {
   }
 };
 var LocalPartCreateModal = class extends import_obsidian3.Modal {
-  constructor(app, ownerName, localId, stage, apply, cancel, onApplied) {
+  constructor(app, ownerName, localId, definitions, stage, apply, cancel, onApplied) {
     super(app);
     this.ownerName = ownerName;
     this.localId = localId;
+    this.definitions = definitions;
     this.stage = stage;
     this.apply = apply;
     this.cancel = cancel;
@@ -4833,7 +4834,13 @@ var LocalPartCreateModal = class extends import_obsidian3.Modal {
       return input;
     };
     const heading = field("Occurrence name", "", "K1");
-    const definition = field("Reusable definition", "", "[[Main Contactor]]");
+    const definitionRow = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    definitionRow.createEl("label", { text: "Reusable definition" });
+    const definition = definitionRow.createEl("select", { cls: "mdse-detail-input" });
+    definition.createEl("option", { text: "Choose a model definition\u2026", value: "" });
+    for (const option of this.definitions) {
+      definition.createEl("option", { text: `${option.name} \u2014 ${option.type ?? "model"}`, value: option.path });
+    }
     const usage = field("Usage", "standard", "standard");
     const multiplicity = field("Multiplicity", "", "optional");
     const id = this.contentEl.createEl("p", { cls: "mdse-muted", text: `Local ID: ${this.localId}` });
@@ -4845,8 +4852,11 @@ var LocalPartCreateModal = class extends import_obsidian3.Modal {
       void (async () => {
         review.disabled = true;
         try {
+          const selected = this.definitions.find((option) => option.path === definition.value);
+          if (!selected) throw new Error("Choose a reusable definition from the model.");
+          const definitionLink = `[[${selected.path.replace(/\.md$/i, "")}]]`;
           const fields = {
-            definition: definition.value.trim()
+            definition: definitionLink
           };
           if (usage.value.trim() && usage.value.trim() !== "standard") fields.usage = usage.value.trim();
           if (multiplicity.value.trim()) fields.multiplicity = multiplicity.value.trim();
@@ -4859,7 +4869,7 @@ var LocalPartCreateModal = class extends import_obsidian3.Modal {
           this.staged = staged;
           this.renderReview(staged, {
             heading: heading.value.trim(),
-            definition: definition.value.trim(),
+            definition: definitionLink,
             usage: usage.value.trim() || "standard",
             multiplicity: multiplicity.value.trim()
           });
@@ -6087,10 +6097,11 @@ var LocalConnectionDefinitionEditModal = class extends import_obsidian3.Modal {
   }
 };
 var LocalPartDefinitionEditModal = class extends import_obsidian3.Modal {
-  constructor(app, ownerName, part, stage, apply, cancel, onApplied) {
+  constructor(app, ownerName, part, definitions, stage, apply, cancel, onApplied) {
     super(app);
     this.ownerName = ownerName;
     this.part = part;
+    this.definitions = definitions;
     this.stage = stage;
     this.apply = apply;
     this.cancel = cancel;
@@ -6104,21 +6115,23 @@ var LocalPartDefinitionEditModal = class extends import_obsidian3.Modal {
     this.contentEl.createEl("p", { text: `Change only the reusable definition link for ${this.part.identifier}. Part identity, usage, multiplicity, and attached endpoints remain unchanged.` });
     const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
     row.createEl("label", { text: "Reusable definition" });
-    const input = row.createEl("input", {
-      type: "text",
-      cls: "mdse-detail-input",
-      value: this.part.definition?.text ?? ""
-    });
-    input.setAttr("placeholder", "[[Main Contactor]]");
-    input.onkeydown = (e) => e.stopPropagation();
+    const input = row.createEl("select", { cls: "mdse-detail-input" });
+    input.createEl("option", { text: "Choose a model definition\u2026", value: "" });
+    const currentTarget = this.part.definition?.target ?? "";
+    for (const option of this.definitions) {
+      const item = input.createEl("option", { text: `${option.name} \u2014 ${option.type ?? "model"}`, value: option.path });
+      const stem = option.path.replace(/\.md$/i, "");
+      if (currentTarget === stem || currentTarget === option.name) item.selected = true;
+    }
     const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
     buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
     const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
     review.onclick = () => void (async () => {
       review.disabled = true;
       try {
-        const value = input.value.trim();
-        if (!value) throw new Error("Part occurrences require a reusable definition.");
+        const selected = this.definitions.find((option) => option.path === input.value);
+        if (!selected) throw new Error("Choose a reusable definition from the model.");
+        const value = `[[${selected.path.replace(/\.md$/i, "")}]]`;
         const staged = await this.stage(value);
         this.staged = staged;
         this.renderReview(staged, value);
@@ -7022,6 +7035,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         this.app,
         file.basename,
         part,
+        this.host.elements(file.path),
         (definition) => editor.stageAndReviewLocalRecordPatch(file.path, part.localId, {
           fields: { definition }
         }),
@@ -7213,10 +7227,13 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       if (fm?.type !== "Object") throw new Error("Part occurrences can only be created in an Object owner.");
       const ownerUid = typeof fm?.uid === "string" ? fm.uid : "";
       const localId = nextAvailableLocalId("part", ownerUid, region?.records.map((record) => record.localId) ?? []);
+      const definitions = this.host.elements(file.path);
+      if (!definitions.length) throw new Error("No reusable model definitions are available.");
       new LocalPartCreateModal(
         this.app,
         file.basename,
         localId,
+        definitions,
         (input) => editor.stageAndReviewLocalRecordCreate(file.path, input),
         (transactionId) => editor.applyLocalCreate(transactionId),
         (transactionId) => {
