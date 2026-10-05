@@ -1916,3 +1916,116 @@ export class LocalFlowRolesEditModal extends Modal {
     })();
   }
 }
+
+
+export class LocalFlowConnectionMoveModal extends Modal {
+  private staged: StagedLocalPatch | null = null;
+  private applied = false;
+
+  constructor(
+    app: App,
+    private readonly ownerName: string,
+    private readonly flow: LocalRecord,
+    private readonly connections: LocalRecord[],
+    private readonly stage: (connection: LocalRecord) => Promise<StagedLocalPatch>,
+    private readonly apply: (id: string) => Promise<void>,
+    private readonly cancel: (id: string) => void,
+    private readonly onApplied: () => void,
+  ) { super(app); }
+
+  onOpen(): void {
+    this.titleEl.setText("Move flow to connection");
+    this.contentEl.empty();
+    this.contentEl.createEl("p", {
+      text: `Move ${this.flow.identifier} to another connection in this Local Model. Flow identity, definition, and endpoint roles remain unchanged.`,
+    });
+
+    const row = this.contentEl.createDiv({ cls: "mdse-create-field" });
+    row.createEl("label", { text: "Owning connection" });
+    const select = row.createEl("select", { cls: "mdse-detail-input" });
+    select.createEl("option", { text: "Choose a connection…", value: "" });
+    for (const connection of this.connections) {
+      select.createEl("option", { text: connection.identifier, value: connection.localId });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => this.close();
+    const review = buttons.createEl("button", { text: "Review", cls: "mod-cta" });
+    review.onclick = () => void (async () => {
+      review.disabled = true;
+      try {
+        const connection = this.connections.find((candidate) => candidate.localId === select.value);
+        if (!connection) throw new Error("Choose a target connection.");
+        const staged = await this.stage(connection);
+        this.staged = staged;
+        this.renderReview(staged, connection);
+      } catch (e) {
+        new Notice(`Cannot stage flow move: ${(e as Error).message}`, 12000);
+        review.disabled = false;
+      }
+    })();
+  }
+
+  onClose(): void {
+    const staged = this.staged;
+    this.staged = null;
+    this.contentEl.empty();
+    if (staged && !this.applied) try { this.cancel(staged.transaction.id); } catch {}
+  }
+
+  private renderReview(staged: StagedLocalPatch, connection: LocalRecord): void {
+    this.titleEl.setText("Review flow connection move");
+    this.contentEl.empty();
+    const table = this.contentEl.createEl("table", { cls: "mdse-diagnostics" });
+    const rows: [string, string][] = [
+      ["Owner", this.ownerName],
+      ["Flow", this.flow.identifier],
+      ["Reusable definition", this.flow.definition?.text ?? "none"],
+      ["Connection", `${this.flow.connectionId ?? "none"} → ${connection.localId}`],
+      ["Endpoint A role", this.flow.roleA ?? "none"],
+      ["Endpoint B role", this.flow.roleB ?? "none"],
+      ["Transaction", staged.transaction.label],
+      ["Scope", staged.transaction.scope],
+    ];
+    for (const [key, val] of rows) {
+      const tr = table.createEl("tr");
+      tr.createEl("td", { text: key });
+      tr.createEl("td", { text: val });
+    }
+
+    const blocking = staged.plan.findings.filter((finding) => finding.severity === "error");
+    for (const finding of staged.plan.findings) {
+      this.contentEl.createEl("p", {
+        text: `${finding.severity.toUpperCase()}: ${finding.message}`,
+        cls: finding.severity === "error" ? "mdse-warn" : undefined,
+      });
+    }
+    if (!staged.plan.findings.length) {
+      this.contentEl.createEl("p", {
+        cls: "mdse-muted",
+        text: "Validation passed. Apply will move this flow under the selected connection without changing its identity or flow fields.",
+      });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).onclick = () => {
+      try { this.cancel(staged.transaction.id); } finally { this.staged = null; this.close(); }
+    };
+    const apply = buttons.createEl("button", { text: "Apply", cls: "mod-cta" });
+    apply.disabled = blocking.length > 0;
+    apply.onclick = () => void (async () => {
+      apply.disabled = true;
+      try {
+        await this.apply(staged.transaction.id);
+        this.applied = true;
+        this.staged = null;
+        this.close();
+        this.onApplied();
+        new Notice(`Moved flow ${this.flow.identifier} to ${connection.identifier}.`, 5000);
+      } catch (e) {
+        new Notice(`Not applied: ${(e as Error).message}`, 12000);
+        apply.disabled = false;
+      }
+    })();
+  }
+}
