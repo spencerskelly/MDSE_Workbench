@@ -95,7 +95,7 @@ export default class MdseWorkbench extends Plugin {
   schema: Schema | null = null;
   indexer: Indexer | null = null;
   writer: RelationshipWriter | null = null;
-  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, and new Local Model identities retry collisions at +1 ms. */
+  /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, and empty Object owners can create their first part occurrence directly. */
   modelEditor: ModelEditService | null = null;
   /** One semantic history stack for every Workbench model writer (WB-114). */
   private readonly transactions = new TransactionManager();
