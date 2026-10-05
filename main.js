@@ -14790,12 +14790,15 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
       if (f instanceof import_obsidian4.TFile) void this.show(f, false);
     };
     head.createDiv({ cls: "mdse-detail-title", text: file.basename }).setAttr("title", file.path);
-    if (this.definitionReturn?.definitionPath === file.path) {
+    const modelType = typeof fm?.type === "string" && this.host.schema()?.classNames.has(fm.type) ? fm.type : null;
+    if (modelType) {
       const impact = head.createEl("button", { text: "Review impact", cls: "mdse-detail-btn" });
-      impact.setAttr("title", "Review note-level and occurrence-level uses of this reusable definition before changing it.");
+      impact.setAttr("title", "Review note-level and occurrence-level uses before changing this canonical model definition.");
       impact.onclick = () => {
         void this.reviewDefinitionImpact(file);
       };
+    }
+    if (this.definitionReturn?.definitionPath === file.path) {
       const returnToOccurrence = head.createEl("button", { text: "Back to occurrence", cls: "mdse-detail-btn" });
       returnToOccurrence.setAttr("title", "Return to the contextual Local Model occurrence without changing its storage.");
       returnToOccurrence.onclick = () => {
@@ -14874,7 +14877,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
         }).open();
         return;
       }
-      if (!this.editing && this.definitionReturn?.definitionPath === file.path) {
+      if (!this.editing && modelType) {
         void this.enterDefinitionEdit(file);
         return;
       }
@@ -15215,15 +15218,11 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     if (md.trim()) await import_obsidian4.MarkdownRenderer.render(this.app, md, body, definitionFile.path, this);
     else body.createEl("p", { cls: "mdse-detail-empty", text: "This definition has no text." });
   }
-  definitionEditFromOccurrence(file) {
-    return this.definitionReturn?.definitionPath === file.path;
-  }
   /**
    * Impact review is consumed by one canonical-definition mutation. This makes the gate apply
    * immediately before Apply rather than only when edit mode was entered.
    */
   async ensureDefinitionImpactReviewed(file) {
-    if (!this.definitionEditFromOccurrence(file)) return true;
     const impact = await this.host.definitionImpact(file.path);
     if (impact.notes + impact.occurrences === 0) return true;
     if (this.definitionImpactReviewedPath === file.path) return true;
@@ -15234,7 +15233,7 @@ var NoteDetailPanel = class extends import_obsidian4.Component {
     return false;
   }
   consumeDefinitionImpactReview(file) {
-    if (this.definitionEditFromOccurrence(file)) this.definitionImpactReviewedPath = null;
+    if (this.definitionImpactReviewedPath === file.path) this.definitionImpactReviewedPath = null;
   }
   async reviewDefinitionImpact(file) {
     try {
@@ -16771,7 +16770,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI now also lets an engineer select, review, and apply one note-level relationship migration as a separate stale-guarded structural transaction that preserves paired/symmetric inverses. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, definition mode exposes blocker-complete deletion review, non-destructive retirement is runtime-integrated, definition mode exposes preserved-use retirement review, reusable-definition supersession is runtime-integrated with complete migration evidence, definition mode offers same-class replacement selection plus full migration review, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI also supports one stale-guarded note-level relationship migration at a time. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
