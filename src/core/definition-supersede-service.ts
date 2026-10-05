@@ -135,6 +135,23 @@ export class DefinitionSupersessionService {
     if (!(await this.store.exists(request.replacedPath))) throw new Error(`${request.replacedPath} does not exist.`);
     if (!(await this.store.exists(request.replacementPath))) throw new Error(`${request.replacementPath} does not exist.`);
 
+    const replacedBefore = await this.store.read(request.replacedPath);
+    const replacementBefore = await this.store.read(request.replacementPath);
+    const sourceUid = (text: string, path: string): string => {
+      const parsed = frontmatter(text);
+      const doc = parseDocument(parsed.yaml);
+      if (doc.errors.length) throw new Error(`${path} frontmatter is invalid YAML.`);
+      return String(doc.get("uid") ?? "").trim();
+    };
+    const replacedSourceUid = sourceUid(replacedBefore, request.replacedPath);
+    if (!replacedSourceUid || replacedSourceUid !== request.replacedUid) {
+      throw new Error(`Cannot stage supersession: expected ${request.replacedPath} uid ${request.replacedUid}, found ${replacedSourceUid || "none"}.`);
+    }
+    const replacementSourceUid = sourceUid(replacementBefore, request.replacementPath);
+    if (!replacementSourceUid || replacementSourceUid !== request.replacementUid) {
+      throw new Error(`Cannot stage supersession: expected ${request.replacementPath} uid ${request.replacementUid}, found ${replacementSourceUid || "none"}.`);
+    }
+
     const impact = await this.impactFor(request.replacedPath);
     const plan = planDefinitionSupersession({
       replacedPath: request.replacedPath,
@@ -146,8 +163,6 @@ export class DefinitionSupersessionService {
     });
     if (!plan.valid) throw new Error(plan.blockers.join(" "));
 
-    const replacedBefore = await this.store.read(request.replacedPath);
-    const replacementBefore = await this.store.read(request.replacementPath);
     const replacementAfter = withRelationship(
       replacementBefore, request.replacementPath, "supersedes", request.replacedPath, this.resolve, this.linkText,
     );
