@@ -16,6 +16,7 @@ import type { StagedDefinitionCreation } from "../core/definition-create";
 import type { StagedDefinitionDelete } from "../core/definition-delete";
 import type { StagedDefinitionRetirement } from "../core/definition-retire";
 import type { StagedDefinitionSupersession } from "../core/definition-supersede-service";
+import type { StagedDefinitionNoteMigration } from "../core/definition-note-migrate-service";
 import type { Schema } from "../core/schema";
 import type { RelationshipWriter } from "./writer";
 import { ConfirmModal, DefinitionCreateFromOccurrenceModal, DefinitionDeleteModal, DefinitionRetireModal, DefinitionSupersedeModal, ElementPicker, LocalConnectionCreateModal, LocalConnectionDefinitionEditModal, LocalConnectionEndpointRewireModal, LocalEndpointCreateModal, LocalEndpointDefinitionEditModal, LocalEndpointEqualsEditModal, LocalEndpointExposureEditModal, LocalEndpointParentReassignModal, LocalEndpointPartReassignModal, LocalFlowConnectionMoveModal, LocalFlowCreateModal, LocalFlowDefinitionEditModal, LocalFlowRolesEditModal, LocalOccurrenceDeleteModal, LocalPartCreateModal, LocalPartDefinitionEditModal, ReportModal } from "./ui";
@@ -52,6 +53,9 @@ export interface DetailHost {
   stageDefinitionOccurrenceMigration(ownerPath: string, localId: string, replacedPath: string, replacementPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
   applyDefinitionOccurrenceMigration(transactionId: string): Promise<void>;
   cancelDefinitionOccurrenceMigration(transactionId: string): void;
+  stageDefinitionNoteMigration(ownerPath: string, field: string, replacedPath: string, replacementPath: string): Promise<StagedDefinitionNoteMigration>;
+  applyDefinitionNoteMigration(transactionId: string): Promise<void>;
+  cancelDefinitionNoteMigration(transactionId: string): void;
   stageOccurrenceDefinitionBinding(ownerPath: string, localId: string, definitionPath: string): Promise<import("../core/model-edit").StagedLocalPatch>;
   applyOccurrenceDefinitionBinding(transactionId: string): Promise<void>;
   cancelOccurrenceDefinitionBinding(transactionId: string): void;
@@ -196,6 +200,9 @@ export class NoteDetailPanel extends Component {
               (ownerPath, localId, replacedPath, replacementPath) => this.host.stageDefinitionOccurrenceMigration(ownerPath, localId, replacedPath, replacementPath),
               (transactionId) => this.host.applyDefinitionOccurrenceMigration(transactionId),
               (transactionId) => this.host.cancelDefinitionOccurrenceMigration(transactionId),
+              (ownerPath, field, replacedPath, replacementPath) => this.host.stageDefinitionNoteMigration(ownerPath, field, replacedPath, replacementPath),
+              (transactionId) => this.host.applyDefinitionNoteMigration(transactionId),
+              (transactionId) => this.host.cancelDefinitionNoteMigration(transactionId),
               () => { void this.show(file, false); },
             ).open();
           };
