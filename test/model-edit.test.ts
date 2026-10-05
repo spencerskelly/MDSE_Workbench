@@ -534,3 +534,110 @@ test("cancelled endpoint deletion leaves source and history untouched", async ()
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
+
+
+function noteWithTwoEndpoints(): string {
+  const endpointA = "ep-20261005000200000skellyspencer";
+  const endpointB = "ep-20261005000200001skellyspencer";
+  return [
+    "---",
+    "type: Object",
+    "uid: " + ownerUid,
+    "---",
+    "",
+    "# Assembly",
+    "",
+    "## Local Model",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "### Local Interfaces",
+    "#### J1",
+    "- definition: [[CAN Port]]",
+    "^" + endpointA,
+    "",
+    "#### J2",
+    "- definition: [[CAN Port]]",
+    "^" + endpointB,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+}
+
+test("staged connection creation stays unwritten until Apply and supports undo/redo", async () => {
+  const endpointA = "ep-20261005000200000skellyspencer";
+  const endpointB = "ep-20261005000200001skellyspencer";
+  const connectionId = "conn-20261005000200002skellyspencer";
+  const original = noteWithTwoEndpoints();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "connection",
+    localId: connectionId,
+    heading: "Harness",
+    fields: {
+      endpointA: "[[#^" + endpointA + "|J1]]",
+      endpointB: "[[#^" + endpointB + "|J2]]",
+    },
+  });
+
+  assert.equal(staged.transaction.scope, "structural");
+  assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
+  assert.equal(store.text, original);
+
+  await service.applyLocalCreate(staged.transaction.id);
+  assert.match(store.text, /#### Harness/);
+  assert.ok(store.text.includes("- endpointA: [[#^" + endpointA + "|J1]]"));
+  assert.ok(store.text.includes("- endpointB: [[#^" + endpointB + "|J2]]"));
+  assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.create");
+
+  await transactions.undo();
+  assert.equal(store.text, original);
+  await transactions.redo();
+  assert.match(store.text, /#### Harness/);
+});
+
+test("staged connection creation with a missing endpoint is blocked at Apply", async () => {
+  const endpointA = "ep-20261005000200000skellyspencer";
+  const connectionId = "conn-20261005000300002skellyspencer";
+  const store = new MemoryStore(noteWithTwoEndpoints());
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "connection",
+    localId: connectionId,
+    heading: "Broken Harness",
+    fields: {
+      endpointA: "[[#^" + endpointA + "|J1]]",
+      endpointB: "[[#^ep-20261005000300099skellyspencer|Missing]]",
+    },
+  });
+
+  assert.ok(staged.plan.findings.some((finding) => finding.severity === "error"));
+  await assert.rejects(service.applyLocalCreate(staged.transaction.id), /blocking Local Model finding/);
+  assert.doesNotMatch(store.text, /#### Broken Harness/);
+  service.cancelLocalCreate(staged.transaction.id);
+});
+
+test("cancelled connection creation leaves source and history untouched", async () => {
+  const endpointA = "ep-20261005000200000skellyspencer";
+  const endpointB = "ep-20261005000200001skellyspencer";
+  const original = noteWithTwoEndpoints();
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+
+  const staged = await service.stageLocalRecordCreate("Assembly.md", {
+    kind: "connection",
+    localId: "conn-20261005000400000skellyspencer",
+    heading: "Harness",
+    fields: {
+      endpointA: "[[#^" + endpointA + "|J1]]",
+      endpointB: "[[#^" + endpointB + "|J2]]",
+    },
+  });
+  service.cancelLocalCreate(staged.transaction.id);
+
+  assert.equal(store.text, original);
+  assert.equal(transactions.history().length, 0);
+});
