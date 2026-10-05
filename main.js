@@ -8380,15 +8380,20 @@ function planDefinitionNoteMigration(request) {
   if (!field) throw new Error("Relationship field is required.");
   if (!replacedPath || !replacementPath) throw new Error("Both superseded and replacement definition paths are required.");
   if (replacedPath === replacementPath) throw new Error("Superseded and replacement definitions must be different.");
-  if (request.relationship.field !== field) throw new Error(`Relationship schema mismatch: expected ${request.relationship.field}, got ${field}.`);
+  const symmetric = request.relationship.kind === "symmetric";
+  const authoredAsForward = request.relationship.field === field;
+  const authoredAsInverse = !symmetric && !!request.relationship.inverse && request.relationship.inverse === field;
+  if (!authoredAsForward && !authoredAsInverse) {
+    const expected = request.relationship.inverse ? `${request.relationship.field} or ${request.relationship.inverse}` : request.relationship.field;
+    throw new Error(`Relationship schema mismatch: expected ${expected}, got ${field}.`);
+  }
   if (!currentTargets.includes(replacedPath)) {
     throw new Error(`Relationship changed from the superseded definition; ${field} no longer targets ${replacedPath}.`);
   }
   if (currentTargets.includes(replacementPath)) {
     throw new Error(`Relationship already targets replacement definition ${replacementPath}.`);
   }
-  const symmetric = request.relationship.kind === "symmetric";
-  const inverseField = symmetric ? field : request.relationship.inverse ?? null;
+  const inverseField = symmetric ? field : authoredAsInverse ? request.relationship.field : request.relationship.inverse ?? null;
   const inverseMutations = [];
   if (inverseField) {
     inverseMutations.push({
@@ -8409,6 +8414,7 @@ function planDefinitionNoteMigration(request) {
     replacementPath,
     inverseField,
     symmetric,
+    authoredAsInverse,
     sourceMutation: { removeTarget: replacedPath, addTarget: replacementPath },
     inverseMutations
   };
@@ -16808,7 +16814,7 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     this.schema = null;
     this.indexer = null;
     this.writer = null;
-    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service, and the supersession UI also supports one stale-guarded note-level relationship migration at a time. */
+    /** Context edits apply atomically; structural Local Model edits require service-enforced Review before Apply, new Local Model identities retry collisions at +1 ms, empty Object owners can create their first part occurrence directly, all current Local Model definitions use indexed model-note pickers, endpoint part assignment clears parent atomically, flow endpoint-role edits are staged, a flow can move between existing connections through one reviewed structural transaction without changing its identity, occurrence details expose the canonical reusable definition lazily, definition editing launched from an occurrence uses the canonical note editor with an explicit return to that occurrence, complete note/occurrence impact evidence is available, each used-definition mutation consumes one explicit impact review before Apply regardless of whether the canonical definition was opened from an occurrence or directly, direct canonical model notes expose the same Review impact entry point before edit mode, retirement/supersession/deletion lifecycle actions are available from any canonical reusable-definition view while retaining the same guarded lifecycle services, new reusable definitions have a pure governed creation planner, definition-note creation uses structural Review/Apply/Cancel with guarded history, creator identity is explicit, the definition creation service is bound to real vault storage plus shared semantic history, missing part/endpoint/flow definition workflows stage and visibly review both definition creation and occurrence binding before either Apply begins, a failed second-stage binding exposes a guarded rollback that can only undo the still-latest definition creation, destructive reusable-definition deletion is blocked by active references, deletion uses structural Review/Apply/Cancel with guarded history, the deletion service is bound to real vault storage plus fully hydrated impact evidence, non-destructive retirement is runtime-integrated, reusable-definition supersession is runtime-integrated with complete migration evidence and semantic link resolution prevents duplicate alternate-link relationships, guided Local Model migration verifies the expected old definition from fresh source before staging, the supersession UI supports one reviewed occurrence migration at a time, note-level guided migration has a relationship-safe planner and governed runtime service with forward- and inverse-authored paired relationship support, and the supersession UI also supports one stale-guarded note-level relationship migration at a time. */
     this.modelEditor = null;
     /** Canonical reusable-definition creation shares the same semantic transaction history. */
     this.definitionCreator = null;
@@ -17153,8 +17159,8 @@ var MdseWorkbench = class extends import_obsidian8.Plugin {
     if (!migrator || !schema4 || !indexer || !this.isReady()) {
       throw new Error("Definition relationship migration is unavailable while Workbench is starting.");
     }
-    const relationship = schema4.byField.get(field);
-    if (!relationship) throw new Error(`${field} is not an authored governed relationship field.`);
+    const relationship = schema4.byField.get(field) ?? schema4.byInverse.get(field);
+    if (!relationship) throw new Error(`${field} is not a governed relationship field.`);
     const normalizedOwner = (0, import_obsidian8.normalizePath)(ownerPath);
     const normalizedReplaced = (0, import_obsidian8.normalizePath)(replacedPath);
     const normalizedReplacement = (0, import_obsidian8.normalizePath)(replacementPath);
