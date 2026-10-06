@@ -107,6 +107,20 @@ Each milestone has an exit criterion. A milestone is not done until its exit cri
 
 **WB-106 v0.8 keepability prerequisite before R1.** Workbench 0.1.15 is still frontmatter/note/path-only. It now refuses ordinary body editing when a governed Local Model marker exists, but before the first potentially keepable v0.8 import is accepted it must load `local-model.yaml`, read both schema 0.1 and 0.2, index durable note/local ModelRefs, preserve `#^local-id` fragments, expose the Local Model surface, add local model-health findings, and make Structure, Interfaces, Where Used and Requirements occurrence-aware. Repeated relationship entries are duplicate evidence, not quantity. Structured Local Model authoring is deliberately later than this read/navigation gate.
 
+**HIGH PRIORITY — WB-128 importer v0.8.19 compatibility gate.** The importer now emits and has real-source acceptance evidence for Local Model 0.4. Before Workbench structured Local Model editing is promoted, Workbench must prove compatibility with that actual output, not only its 0.2 fixtures. This gate covers: `Parts`, `Interfaces`, `Connections`, connection-owned flows, Connection-owned `exposes`, stable native local block IDs/fragments, occurrence-aware navigation/editing, lowest-common-context Connection ownership, and protection of the importer-managed Local Model region. First-class Port notes and `hasPort` must not be reintroduced.
+
+**WB-128 exit criteria:**
+- parse/index a real v0.8.19 whole-model output without changing it;
+- preserve every `part-`, `ep-`, `conn-` and `flow-` identity and every valid `#^local-id` target;
+- Internal/Structure/Interfaces/Where Used/Requirements distinguish occurrences from reusable definitions;
+- render `Connection.exposes -> boundary Interface` correctly;
+- structured edits go only through the Local Model planner/transaction service; ordinary body/property editing cannot rewrite the governed region;
+- unsupported/newer Local Model semantics fail closed for editing;
+- no-op round trip produces no semantic or formatting drift in importer-managed Local Model content;
+- run the compatibility suite against the accepted v0.8.19 scale fixture (27,709 notes; 2,055 Parts; 4,387 Interfaces; 552 Connections; 72 flows).
+
+Do not promote Workbench structured Local Model authoring until this gate passes. Read-only compatibility may ship earlier only where the parser can prove the affected records are understood safely.
+
 ### M0 — Spike and feasibility (Phase 0)
 
 Purpose: replace the riskiest assumptions with measurements before building more.
