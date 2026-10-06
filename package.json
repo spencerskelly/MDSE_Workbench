@@ -1,6 +1,6 @@
 {
   "name": "mdse-workbench",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Everyday engineer interface to the MDSE model vault (Create / Explore / Review). Phase 0 spike.",
   "main": "main.js",
   "private": true,
@@ -13,7 +13,11 @@
     "bench": "tsx bench/run-bench.ts",
     "bench:cache": "tsx bench/cache-bench.ts",
     "bench:startup": "tsx bench/startup-bench.ts",
-    "bench:relationships": "tsx bench/relationship-reresolution-bench.ts"
+    "bench:relationships": "tsx bench/relationship-reresolution-bench.ts",
+    "accept:real-vault": "tsx scripts/real-vault-acceptance.ts",
+    "accept:real-vault:scan": "tsx scripts/real-vault-readonly-scan.ts",
+    "accept:real-vault:views": "tsx scripts/real-vault-view-check.ts",
+    "accept:real-vault:edits": "tsx scripts/real-vault-edit-check.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {

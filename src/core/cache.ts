@@ -11,7 +11,7 @@ import { schemaSignature, type Schema } from "./schema";
 
 export const CACHE_FORMAT_VERSION = 2;
 /** Bump when semantic parsing/resolution meaning changes even if the JSON shape does not. */
-export const CACHE_SEMANTIC_VERSION = 3;
+export const CACHE_SEMANTIC_VERSION = 4;
 
 export interface CacheScope {
   /** Binds disposable state to one initialized MDSE vault identity. */
@@ -49,6 +49,7 @@ interface CachedNoteRecord {
   name: string;
   authoredLinks: Array<{ field: string; link: string; linkpath: string }>;
   type?: string;
+  subtype?: string;
   id?: string;
   uid?: string;
   fields: Array<[string, string[]]>;
@@ -207,6 +208,7 @@ function serializeNote(n: NoteRecord): CachedNoteRecord {
     path: n.path,
     name: n.name,
     ...(n.type !== undefined ? { type: n.type } : {}),
+    ...(n.subtype !== undefined ? { subtype: n.subtype } : {}),
     ...(n.id !== undefined ? { id: n.id } : {}),
     ...(n.uid !== undefined ? { uid: n.uid } : {}),
     authoredLinks: (n.authoredLinks ?? []).map((x) => ({ ...x })),
@@ -233,6 +235,7 @@ function deserializeNote(raw: unknown): NoteRecord {
   }
   const repeat = raw.repeat === undefined ? undefined : pairsNumber(raw.repeat, "repeat");
   const type = optionalString(raw, "type");
+  const subtype = optionalString(raw, "subtype");
   const id = optionalString(raw, "id");
   const uid = optionalString(raw, "uid");
   let broken: Array<{ field: string; link: string }> | undefined;
@@ -251,6 +254,7 @@ function deserializeNote(raw: unknown): NoteRecord {
     path: raw.path,
     name: raw.name,
     ...(type !== undefined ? { type } : {}),
+    ...(subtype !== undefined ? { subtype } : {}),
     ...(id !== undefined ? { id } : {}),
     ...(uid !== undefined ? { uid } : {}),
     authoredLinks: raw.authoredLinks.map((x) => ({ ...x })),

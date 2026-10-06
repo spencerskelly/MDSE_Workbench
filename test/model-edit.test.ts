@@ -18,8 +18,8 @@ function note(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
     "- identifier: K1",
@@ -246,13 +246,13 @@ function noteWithEndpointDependency(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
     "^" + localId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- part: [[#^" + localId + "|K1]]",
@@ -430,8 +430,8 @@ function noteWithCleanEndpoint(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### Service Port",
     "- definition: [[CAN Port]]",
     "^" + endpointId,
@@ -476,8 +476,8 @@ test("same-note connection dependency blocks endpoint deletion", async () => {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointId,
@@ -549,8 +549,8 @@ function noteWithTwoEndpoints(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -658,8 +658,8 @@ function noteWithCleanConnection(includeFlow = false): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -926,8 +926,8 @@ function noteWithReassignableEndpoint(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
     "^" + partA,
@@ -936,7 +936,7 @@ function noteWithReassignableEndpoint(): string {
     "- definition: [[Main Contactor]]",
     "^" + partB,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- part: [[#^" + partA + "|K1]]",
@@ -1039,13 +1039,13 @@ function noteWithParentableEndpoints(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
     "^" + partId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- parent: [[#^" + endpointB + "|J2]]",
@@ -1145,9 +1145,11 @@ test("cancelled endpoint parent reassignment leaves source and history untouched
 
 
 function noteWithEditableExposures(): string {
-  const source = "ep-20261005008000000skellyspencer";
-  const exposedA = "ep-20261005008000001skellyspencer";
-  const exposedB = "ep-20261005008000002skellyspencer";
+  const endpointA = "ep-20261005008000000skellyspencer";
+  const endpointB = "ep-20261005008000001skellyspencer";
+  const exposedA = "ep-20261005008000002skellyspencer";
+  const exposedB = "ep-20261005008000003skellyspencer";
+  const connection = "conn-20261005008000004skellyspencer";
   return [
     "---",
     "type: Object",
@@ -1157,35 +1159,33 @@ function noteWithEditableExposures(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
-    "#### Boundary",
-    "- definition: [[CAN Port]]",
-    "- exposes: [[#^" + exposedA + "|J1]]",
-    "^" + source,
-    "",
-    "#### J1",
-    "- definition: [[CAN Port]]",
-    "^" + exposedA,
-    "",
-    "#### J2",
-    "- definition: [[CAN Port]]",
-    "^" + exposedB,
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
+    "#### J1", "^" + endpointA, "",
+    "#### J2", "^" + endpointB, "",
+    "#### Boundary A", "^" + exposedA, "",
+    "#### Boundary B", "^" + exposedB, "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "- exposes: [[#^" + exposedA + "|Boundary A]]",
+    "^" + connection,
     "<!-- MDSE:LOCAL-MODEL END -->",
   ].join("\n");
 }
 
-test("staged endpoint exposure add stays unwritten until Apply and supports undo/redo", async () => {
-  const sourceId = "ep-20261005008000000skellyspencer";
-  const firstId = "ep-20261005008000001skellyspencer";
-  const secondId = "ep-20261005008000002skellyspencer";
+test("staged Connection exposure add stays unwritten until Apply and supports undo/redo", async () => {
+  const connectionId = "conn-20261005008000004skellyspencer";
+  const firstId = "ep-20261005008000002skellyspencer";
+  const secondId = "ep-20261005008000003skellyspencer";
   const original = noteWithEditableExposures();
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
-    fields: { exposes: "[[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]" },
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { exposes: "[[#^" + firstId + "|Boundary A]] [[#^" + secondId + "|Boundary B]]" },
   });
 
   assert.equal(staged.transaction.scope, "structural");
@@ -1193,23 +1193,23 @@ test("staged endpoint exposure add stays unwritten until Apply and supports undo
   assert.equal(staged.plan.findings.filter((finding) => finding.severity === "error").length, 0);
 
   await service.applyLocalPatch(staged.transaction.id);
-  assert.ok(store.text.includes("- exposes: [[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]"));
+  assert.ok(store.text.includes("- exposes: [[#^" + firstId + "|Boundary A]] [[#^" + secondId + "|Boundary B]]"));
   assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
 
   await transactions.undo();
   assert.equal(store.text, original);
   await transactions.redo();
-  assert.ok(store.text.includes("- exposes: [[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]"));
+  assert.ok(store.text.includes("- exposes: [[#^" + firstId + "|Boundary A]] [[#^" + secondId + "|Boundary B]]"));
 });
 
-test("staged endpoint exposure removal can clear the field entirely", async () => {
-  const sourceId = "ep-20261005008000000skellyspencer";
+test("staged Connection exposure removal can clear the field entirely", async () => {
+  const connectionId = "conn-20261005008000004skellyspencer";
   const original = noteWithEditableExposures();
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { exposes: null },
   });
 
@@ -1219,14 +1219,14 @@ test("staged endpoint exposure removal can clear the field entirely", async () =
   assert.equal(store.text, original);
 });
 
-test("staged endpoint exposure edit blocks missing target at Apply", async () => {
-  const sourceId = "ep-20261005008000000skellyspencer";
+test("staged Connection exposure edit blocks missing target at Apply", async () => {
+  const connectionId = "conn-20261005008000004skellyspencer";
   const original = noteWithEditableExposures();
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
     fields: { exposes: "[[#^ep-20261005008100099skellyspencer|Missing]]" },
   });
 
@@ -1237,23 +1237,22 @@ test("staged endpoint exposure edit blocks missing target at Apply", async () =>
   service.cancelLocalPatch(staged.transaction.id);
 });
 
-test("cancelled endpoint exposure edit leaves source and history untouched", async () => {
-  const sourceId = "ep-20261005008000000skellyspencer";
-  const secondId = "ep-20261005008000002skellyspencer";
+test("cancelled Connection exposure edit leaves source and history untouched", async () => {
+  const connectionId = "conn-20261005008000004skellyspencer";
+  const secondId = "ep-20261005008000003skellyspencer";
   const original = noteWithEditableExposures();
   const store = new MemoryStore(original);
   const transactions = new TransactionManager();
   const service = new ModelEditService(store, () => ownerUid, transactions);
 
-  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", sourceId, {
-    fields: { exposes: "[[#^" + secondId + "|J2]]" },
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", connectionId, {
+    fields: { exposes: "[[#^" + secondId + "|Boundary B]]" },
   });
   service.cancelLocalPatch(staged.transaction.id);
 
   assert.equal(store.text, original);
   assert.equal(transactions.history().length, 0);
 });
-
 
 function noteWithEditableEquals(): string {
   const source = "ep-20261005010000000skellyspencer";
@@ -1268,8 +1267,8 @@ function noteWithEditableEquals(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### Boundary",
     "- definition: [[CAN Port]]",
     "- equals: [[#^" + equalA + "|J1]]",
@@ -1381,8 +1380,8 @@ function noteWithRewirableConnection(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -1594,15 +1593,15 @@ function noteWithDefinedPartAndEndpoint(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Old Contactor]]",
     "- usage: option",
     "- multiplicity: 2",
     "^" + partId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- part: [[#^" + partId + "|K1]]",
@@ -1710,19 +1709,18 @@ function noteWithDefinedEndpointAndConnection(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Contactor]]",
     "^" + partId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[Old Port]]",
     "- usage: option",
     "- multiplicity: 2",
     "- part: [[#^" + partId + "|K1]]",
-    "- exposes: [[#^" + exposureId + "|J3]]",
     "- equals: [[#^" + equalsId + "|J4]]",
     "^" + endpointId,
     "",
@@ -1742,6 +1740,7 @@ function noteWithDefinedEndpointAndConnection(): string {
     "#### Harness",
     "- endpointA: [[#^" + endpointId + "|J1]]",
     "- endpointB: [[#^" + peerId + "|J2]]",
+    "- exposes: [[#^" + exposureId + "|J3]]",
     "^" + connectionId,
     "<!-- MDSE:LOCAL-MODEL END -->",
   ].join("\n");
@@ -2010,8 +2009,8 @@ test("first part occurrence can create the governed Local Model region on an emp
   assert.equal(staged.transaction.status, "reviewed");
   assert.equal(store.text, original, "Review must not write the owner note");
   assert.match(staged.plan.after, /## Local Model/);
-  assert.match(staged.plan.after, /<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->/);
-  assert.match(staged.plan.after, /### Part Occurrences/);
+  assert.match(staged.plan.after, /<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->/);
+  assert.match(staged.plan.after, /### Parts/);
   assert.match(staged.plan.after, /#### K1/);
   assert.ok(staged.plan.after.includes("^" + partId));
 
@@ -2155,8 +2154,8 @@ function noteWithMovableFlow(): string {
   const flowId = "flow-20261005025000004skellyspencer";
   return [
     "---", "type: Object", "uid: " + ownerUid, "---", "", "# Assembly", "",
-    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1", "- definition: [[CAN Port]]", "^" + endpointA, "",
     "#### J2", "- definition: [[CAN Port]]", "^" + endpointB, "",
     "### Connections",

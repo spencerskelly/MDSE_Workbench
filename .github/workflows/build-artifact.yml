@@ -48,7 +48,7 @@ jobs:
             echo "Artifact already current."
             exit 0
           fi
-          git commit -m "Build Workbench 0.1.17 artifact"
+          git commit -m "Build Workbench artifact"
           git push
 
 # Triggered for WB-106 artifact refresh.

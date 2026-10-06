@@ -1,5 +1,5 @@
 /**
- * Structured Local Model 0.2 mutation planner (WB-114/WB-116).
+ * Structured Local Model 0.4 mutation planner (WB-114/WB-116).
  *
  * Pure TypeScript. It never writes vault files. It plans a minimal record-level text replacement,
  * reparses the result with the governed reader, and returns proposed text plus validation findings.
@@ -16,8 +16,8 @@ import {
 
 const FIELD_ORDER: Record<LocalKind, readonly string[]> = {
   part: ["definition", "usage", "identifier", "multiplicity"],
-  endpoint: ["definition", "usage", "identifier", "part", "parent", "exposes", "equals", "multiplicity", "kind"],
-  connection: ["endpointA", "endpointB", "definition", "identifier"],
+  endpoint: ["definition", "usage", "identifier", "part", "parent", "equals", "multiplicity", "kind"],
+  connection: ["endpointA", "endpointB", "definition", "identifier", "exposes"],
   flow: ["definition", "identifier", "endpointA", "endpointB"],
 };
 
@@ -286,8 +286,8 @@ export interface NewLocalRecord {
 }
 
 const SECTION_TITLE: Record<Exclude<LocalKind, "flow">, string> = {
-  part: "Part Occurrences",
-  endpoint: "Local Interfaces",
+  part: "Parts",
+  endpoint: "Interfaces",
   connection: "Connections",
 };
 
@@ -306,7 +306,7 @@ export function planLocalRecordCreate(text: string, input: NewLocalRecord): Plan
     const block = renderRecord(input.kind, input.heading.trim(), input.localId, normalizedFields(input.kind, input.fields));
     const regionLines = [
       "## Local Model",
-      "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+      "<!-- MDSE:LOCAL-MODEL START schema=" + WRITABLE_VERSION + " -->",
       "",
       "### " + SECTION_TITLE[input.kind],
       "",
@@ -364,8 +364,11 @@ function validateNewRecord(input: NewLocalRecord): void {
   for (const key of Object.keys(input.fields)) {
     if (!FIELD_ORDER[input.kind].includes(key)) throw new Error(key + " is not a governed field on a " + input.kind + " record.");
   }
-  if ((input.kind === "part" || input.kind === "endpoint" || input.kind === "flow") && !input.fields.definition?.trim()) {
+  if ((input.kind === "part" || input.kind === "flow") && !input.fields.definition?.trim()) {
     throw new Error("A " + input.kind + " record requires a definition.");
+  }
+  if (input.kind === "endpoint" && input.fields.usage?.trim() && !input.fields.definition?.trim()) {
+    throw new Error("An Interface occurrence requires a definition when usage is set.");
   }
   if (input.kind === "connection" && (!input.fields.endpointA?.trim() || !input.fields.endpointB?.trim())) {
     throw new Error("A connection requires endpointA and endpointB.");

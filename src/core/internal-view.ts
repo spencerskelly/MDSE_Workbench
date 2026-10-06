@@ -83,14 +83,23 @@ export function buildInternalView(
     pos.set(r.localId,{x,y,width:PART_W,height:PART_H});
   });
 
+  const boundarySide=new Map<string,"left"|"right">();
+  boundary.forEach((r,i)=>boundarySide.set(r.localId,i%2===0?"left":"right"));
+
   const exposureSide=new Map<string,"left"|"right">();
-  boundary.forEach((r,i)=>{
-    const side:iSide=i%2===0?"left":"right";
-    for(const link of r.exposes){
-      const t=linkedLocal(local,resolve,ownerPath,link);
-      if(t?.record.kind==="endpoint") exposureSide.set(t.record.localId,side);
+  for(const connection of connections){
+    if(connection.sourceSchemaVersion!=="0.4") continue;
+    for(const link of connection.exposes){
+      const outer=linkedLocal(local,resolve,ownerPath,link);
+      if(!outer||outer.record.kind!=="endpoint"||outer.record.part||outer.record.parent) continue;
+      const side=boundarySide.get(outer.record.localId);
+      if(!side) continue;
+      for(const end of [connection.endpointA,connection.endpointB]){
+        const inner=linkedLocal(local,resolve,ownerPath,end);
+        if(inner?.record.kind==="endpoint"&&(inner.record.part||inner.record.parent)) exposureSide.set(inner.record.localId,side);
+      }
     }
-  });
+  }
 
   const partEndpointCount=new Map<string,number>();
   for(const r of internal){
@@ -119,7 +128,9 @@ export function buildInternalView(
   placeBoundary(left,"left",contentW,contentH,nodes,pos,ownerLink);
   placeBoundary(right,"right",contentW,contentH,nodes,pos,ownerLink);
 
+  // Historical 0.1-0.3 regions retain endpoint-owned exposure semantics.
   for(const r of boundary){
+    if(r.sourceSchemaVersion==="0.4") continue;
     const from=nodeId(r);
     for(const link of r.exposes){
       const t=linkedLocal(local,resolve,ownerPath,link);
@@ -127,7 +138,7 @@ export function buildInternalView(
       const to=nodeId(t.record);
       if(!pos.has(r.localId)||!pos.has(t.record.localId)) continue;
       edges.push(edge(
-        "expose:"+r.localId+":"+t.record.localId,
+        "legacy-expose:"+r.localId+":"+t.record.localId,
         from,to,
         sideToward(pos.get(r.localId)!,pos.get(t.record.localId)!),
         sideToward(pos.get(t.record.localId)!,pos.get(r.localId)!),
@@ -159,6 +170,34 @@ export function buildInternalView(
       label||"connection",
       "none",
     ));
+
+    if(r.sourceSchemaVersion==="0.4"){
+      const innerCandidates=[a.record,b.record].filter((x)=>x.part||x.parent);
+      for(const link of r.exposes){
+        const outer=linkedLocal(local,resolve,ownerPath,link);
+        if(!outer||outer.record.kind!=="endpoint"||outer.record.part||outer.record.parent) continue;
+        const outerPos=pos.get(outer.record.localId);
+        if(!outerPos) continue;
+        const inner=innerCandidates
+          .map((record)=>({record,p:pos.get(record.localId)}))
+          .filter((x):x is {record:LocalRecord;p:{x:number;y:number;width:number;height:number}}=>!!x.p)
+          .sort((x,y)=>{
+            const dx=(x.p.x+x.p.width/2)-(outerPos.x+outerPos.width/2);
+            const dy=(x.p.y+x.p.height/2)-(outerPos.y+outerPos.height/2);
+            const ex=(y.p.x+y.p.width/2)-(outerPos.x+outerPos.width/2);
+            const ey=(y.p.y+y.p.height/2)-(outerPos.y+outerPos.height/2);
+            return dx*dx+dy*dy-(ex*ex+ey*ey);
+          })[0];
+        if(!inner) continue;
+        edges.push(edge(
+          "expose:"+r.localId+":"+outer.record.localId,
+          nodeId(inner.record),nodeId(outer.record),
+          sideToward(inner.p,outerPos),sideToward(outerPos,inner.p),
+          (r.identifier||"connection")+" exposes",
+          "none",
+        ));
+      }
+    }
   }
 
   return {

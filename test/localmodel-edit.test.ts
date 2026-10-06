@@ -9,7 +9,7 @@ const tokenC = "20261003133512744skellyspencer";
 const tokenD = "20261003133512745skellyspencer";
 const tokenE = "20261003133512746skellyspencer";
 
-function note(version = "0.2"): string {
+function note(version = "0.4"): string {
   return [
     "---",
     "type: Object",
@@ -22,7 +22,7 @@ function note(version = "0.2"): string {
     "",
     "## Local Model",
     "<!-- MDSE:LOCAL-MODEL START schema=" + version + " -->",
-    "### Part Occurrences",
+    "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
     "- identifier: K1",
@@ -34,7 +34,7 @@ function note(version = "0.2"): string {
     "- identifier: K2",
     "^part-" + tokenB,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- part: [[#^part-" + tokenA + "|K1]]",
@@ -80,7 +80,7 @@ test("standard usage is canonically omitted", () => {
   const record = parseLocalModel(result.after)?.records.find((r) => r.localId === id);
   assert.equal(record?.usage, "standard");
   assert.equal(record?.usageExplicit, false);
-  const block = result.after.slice(result.after.indexOf("#### K2"), result.after.indexOf("### Local Interfaces"));
+  const block = result.after.slice(result.after.indexOf("#### K2"), result.after.indexOf("### Interfaces"));
   assert.doesNotMatch(block, /- usage:/);
 });
 
@@ -127,8 +127,8 @@ test("creates a first governed region using importer-compatible section formatti
     heading: "K1",
     fields: { definition: "[[Main Contactor]]", identifier: "K1", usage: "standard" },
   });
-  assert.match(result.after, /## Local Model\n<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->/);
-  assert.match(result.after, /### Part Occurrences\n\n#### K1\n- definition: \[\[Main Contactor\]\]\n- identifier: K1\n\^part-/);
+  assert.match(result.after, /## Local Model\n<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->/);
+  assert.match(result.after, /### Parts\n\n#### K1\n- definition: \[\[Main Contactor\]\]\n- identifier: K1\n\^part-/);
   assert.doesNotMatch(result.after, /- usage: standard/);
   assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === id)?.kind, "part");
 });
@@ -142,7 +142,7 @@ test("creates a missing section in canonical order", () => {
     heading: "J2",
     fields: { definition: "[[CAN Port]]", part: "[[#^part-" + tokenA + "|K1]]" },
   });
-  assert.ok(result.after.indexOf("### Local Interfaces") < result.after.indexOf("### Connections"));
+  assert.ok(result.after.indexOf("### Interfaces") < result.after.indexOf("### Connections"));
   assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === endpointId)?.kind, "endpoint");
   assert.ok(id.length > 0);
 });
@@ -336,8 +336,8 @@ test("endpoint deletion reports parent exposes and equals dependencies", () => {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J-A",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -372,8 +372,8 @@ test("clean endpoint deletion is allowed when nothing targets the endpoint", () 
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### Service Port",
     "- definition: [[CAN Port]]",
     "^" + endpointId,
@@ -400,8 +400,8 @@ test("creates a connection between two existing endpoint occurrences", () => {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -443,8 +443,8 @@ test("connection creation surfaces a missing endpoint target as blocking validat
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -483,8 +483,8 @@ test("connection deletion reports child flow dependency", () => {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -528,8 +528,8 @@ test("clean connection deletion is allowed when it has no child flows or externa
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -567,8 +567,8 @@ test("creates a flow under the addressed connection with reviewed endpoint roles
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -658,7 +658,7 @@ test("clean flow deletion removes only the addressed flow and keeps its connecti
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
     "### Connections",
     "#### Harness",
     "- endpointA: [[#^ep-20261005003000010skellyspencer|J1]]",
@@ -698,7 +698,7 @@ test("flow deletion still reports local block references when present", () => {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
     "### Connections",
     "#### Harness",
     "- endpointA: [[#^ep-20261005003100010skellyspencer|J1]]",
@@ -774,13 +774,13 @@ test("plans endpoint parent reassignment by clearing direct part ownership", () 
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
     "^" + partId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- part: [[#^" + partId + "|K1]]",
@@ -820,12 +820,12 @@ test("plans clearing an endpoint parent while preserving other endpoint topology
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- parent: [[#^" + parentId + "|J2]]",
-    "- exposes: [[#^" + exposedId + "|J3]]",
+    "- equals: [[#^" + exposedId + "|J3]]",
     "^" + endpointId,
     "",
     "#### J2",
@@ -847,7 +847,7 @@ test("plans clearing an endpoint parent while preserving other endpoint topology
 
   const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
   assert.equal(endpoint?.parent, null);
-  assert.equal(endpoint?.exposes[0]?.blockId, exposedId);
+  assert.equal(endpoint?.equals[0]?.blockId, exposedId);
 });
 
 test("endpoint parent reassignment surfaces a missing target as blocking validation", () => {
@@ -867,109 +867,90 @@ test("endpoint parent reassignment surfaces a missing target as blocking validat
 });
 
 
-test("plans adding one endpoint exposure while preserving existing exposure links", () => {
-  const sourceId = "ep-20261005007000000skellyspencer";
-  const existingId = "ep-20261005007000001skellyspencer";
-  const addId = "ep-20261005007000002skellyspencer";
+test("plans adding one Connection exposure while preserving existing exposure links", () => {
+  const endpointA = "ep-20261005007000000skellyspencer";
+  const endpointB = "ep-20261005007000001skellyspencer";
+  const existingId = "ep-20261005007000002skellyspencer";
+  const addId = "ep-20261005007000003skellyspencer";
+  const connectionId = "conn-20261005007000004skellyspencer";
   const text = [
-    "---",
-    "type: Object",
-    "uid: 20261003130000000skellyspencer",
-    "---",
-    "",
-    "# Assembly",
-    "",
-    "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
-    "#### Boundary",
-    "- definition: [[CAN Port]]",
-    "- exposes: [[#^" + existingId + "|J1]] [[External#^ep-20261005007000009skellyspencer|Remote]]",
-    "^" + sourceId,
-    "",
-    "#### J1",
-    "- definition: [[CAN Port]]",
-    "^" + existingId,
-    "",
-    "#### J2",
-    "- definition: [[CAN Port]]",
-    "^" + addId,
+    "---", "type: Object", "uid: 20261003130000000skellyspencer", "---", "", "# Assembly", "",
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
+    "#### J1", "^" + endpointA, "",
+    "#### J2", "^" + endpointB, "",
+    "#### Boundary A", "^" + existingId, "",
+    "#### Boundary B", "^" + addId, "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "- exposes: [[#^" + existingId + "|Boundary A]]",
+    "^" + connectionId,
     "<!-- MDSE:LOCAL-MODEL END -->",
   ].join("\n");
 
   const result = planLocalRecordPatch(
     text,
-    sourceId,
-    { fields: { exposes: "[[#^" + existingId + "|J1]] [[External#^ep-20261005007000009skellyspencer|Remote]] [[#^" + addId + "|J2]]" } },
+    connectionId,
+    { fields: { exposes: "[[#^" + existingId + "|Boundary A]] [[#^" + addId + "|Boundary B]]" } },
     { allowInvalidTarget: true },
   );
 
-  const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
-  assert.deepEqual(source?.exposes.map((link) => [link.target, link.blockId]), [
-    ["", existingId],
-    ["External", "ep-20261005007000009skellyspencer"],
-    ["", addId],
-  ]);
+  const connection = parseLocalModel(result.after)?.records.find((record) => record.localId === connectionId);
+  assert.deepEqual(connection?.exposes.map((link) => link.blockId), [existingId, addId]);
   assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
 });
 
-test("plans removing one endpoint exposure without changing other exposures", () => {
-  const sourceId = "ep-20261005007100000skellyspencer";
-  const removeId = "ep-20261005007100001skellyspencer";
-  const keepId = "ep-20261005007100002skellyspencer";
+test("plans removing one Connection exposure without changing the remaining exposure", () => {
+  const endpointA = "ep-20261005007100000skellyspencer";
+  const endpointB = "ep-20261005007100001skellyspencer";
+  const removeId = "ep-20261005007100002skellyspencer";
+  const keepId = "ep-20261005007100003skellyspencer";
+  const connectionId = "conn-20261005007100004skellyspencer";
   const text = [
-    "---",
-    "type: Object",
-    "uid: 20261003130000000skellyspencer",
-    "---",
-    "",
-    "# Assembly",
-    "",
-    "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
-    "#### Boundary",
-    "- definition: [[CAN Port]]",
-    "- exposes: [[#^" + removeId + "|J1]] [[#^" + keepId + "|J2]]",
-    "^" + sourceId,
-    "",
-    "#### J1",
-    "- definition: [[CAN Port]]",
-    "^" + removeId,
-    "",
-    "#### J2",
-    "- definition: [[CAN Port]]",
-    "^" + keepId,
+    "---", "type: Object", "uid: 20261003130000000skellyspencer", "---", "", "# Assembly", "",
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
+    "#### J1", "^" + endpointA, "",
+    "#### J2", "^" + endpointB, "",
+    "#### Boundary A", "^" + removeId, "",
+    "#### Boundary B", "^" + keepId, "",
+    "### Connections",
+    "#### Harness",
+    "- endpointA: [[#^" + endpointA + "|J1]]",
+    "- endpointB: [[#^" + endpointB + "|J2]]",
+    "- exposes: [[#^" + removeId + "|Boundary A]] [[#^" + keepId + "|Boundary B]]",
+    "^" + connectionId,
     "<!-- MDSE:LOCAL-MODEL END -->",
   ].join("\n");
 
   const result = planLocalRecordPatch(
     text,
-    sourceId,
-    { fields: { exposes: "[[#^" + keepId + "|J2]]" } },
+    connectionId,
+    { fields: { exposes: "[[#^" + keepId + "|Boundary B]]" } },
     { allowInvalidTarget: true },
   );
 
-  const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
-  assert.deepEqual(source?.exposes.map((link) => link.blockId), [keepId]);
+  const connection = parseLocalModel(result.after)?.records.find((record) => record.localId === connectionId);
+  assert.deepEqual(connection?.exposes.map((link) => link.blockId), [keepId]);
 });
 
-test("endpoint exposes edit surfaces a missing same-note target as blocking validation", () => {
-  const endpointId = "ep-" + tokenC;
+test("Connection exposes edit surfaces a missing same-note target as blocking validation", () => {
+  const connectionId = "conn-" + tokenD;
   const result = planLocalRecordPatch(
     note(),
-    endpointId,
+    connectionId,
     { fields: { exposes: "[[#^ep-20261005007200099skellyspencer|Missing]]" } },
     { allowInvalidTarget: true },
   );
 
   assert.ok(result.findings.some((finding) =>
-    finding.localId === endpointId &&
+    finding.localId === connectionId &&
     finding.code === "ref.local-missing" &&
     finding.severity === "error"
   ));
 });
-
 
 test("plans adding one endpoint equals target while preserving existing equals links", () => {
   const sourceId = "ep-20261005009000000skellyspencer";
@@ -984,8 +965,8 @@ test("plans adding one endpoint equals target while preserving existing equals l
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### Boundary",
     "- definition: [[CAN Port]]",
     "- equals: [[#^" + existingId + "|J1]] [[External#^ep-20261005009000009skellyspencer|Remote]]",
@@ -1030,8 +1011,8 @@ test("plans removing one endpoint equals target without changing the others", ()
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### Boundary",
     "- definition: [[CAN Port]]",
     "- equals: [[#^" + removeId + "|J1]] [[#^" + keepId + "|J2]]",
@@ -1090,8 +1071,8 @@ test("plans rewiring one connection endpoint while preserving the opposite end a
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -1182,8 +1163,8 @@ test("plans connection definition change while preserving endpoints and child fl
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -1269,15 +1250,15 @@ test("plans part definition change while preserving attached endpoint topology",
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Old Contactor]]",
     "- usage: option",
     "- multiplicity: 2",
     "^" + partId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "- part: [[#^" + partId + "|K1]]",
@@ -1351,19 +1332,18 @@ test("plans endpoint definition change while preserving endpoint topology and co
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Contactor]]",
     "^" + partId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### J1",
     "- definition: [[Old Port]]",
     "- usage: option",
     "- multiplicity: 2",
     "- part: [[#^" + partId + "|K1]]",
-    "- exposes: [[#^" + exposureId + "|J3]]",
     "- equals: [[#^" + equalsId + "|J4]]",
     "^" + endpointId,
     "",
@@ -1383,6 +1363,7 @@ test("plans endpoint definition change while preserving endpoint topology and co
     "#### Harness",
     "- endpointA: [[#^" + endpointId + "|J1]]",
     "- endpointB: [[#^" + peerId + "|J2]]",
+    "- exposes: [[#^" + exposureId + "|J3]]",
     "^" + connectionId,
     "<!-- MDSE:LOCAL-MODEL END -->",
   ].join("\n");
@@ -1401,14 +1382,14 @@ test("plans endpoint definition change while preserving endpoint topology and co
   assert.equal(endpoint?.usage, "option");
   assert.equal(endpoint?.multiplicity, "2");
   assert.equal(endpoint?.part?.blockId, partId);
-  assert.equal(endpoint?.exposes[0]?.blockId, exposureId);
   assert.equal(endpoint?.equals[0]?.blockId, equalsId);
+  assert.equal(connection?.exposes[0]?.blockId, exposureId);
   assert.equal(connection?.endpointA?.blockId, endpointId);
   assert.equal(connection?.endpointB?.blockId, peerId);
   assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
 });
 
-test("endpoint definition cannot be cleared because the definition is required", () => {
+test("0.4 Interface definition may be cleared when usage is not set", () => {
   const endpointId = "ep-" + tokenC;
   const result = planLocalRecordPatch(
     note(),
@@ -1417,6 +1398,22 @@ test("endpoint definition cannot be cleared because the definition is required",
     { allowInvalidTarget: true },
   );
 
+  const endpoint = parseLocalModel(result.after)?.records.find((record) => record.localId === endpointId);
+  assert.equal(endpoint?.definition, null);
+  assert.ok(!result.findings.some((finding) =>
+    finding.localId === endpointId && finding.code === "record.missing-definition"
+  ));
+});
+
+test("0.4 Interface with usage still requires a definition", () => {
+  const endpointId = "ep-" + tokenC;
+  const withUsage = planLocalRecordPatch(note(), endpointId, { fields: { usage: "option" } }).after;
+  const result = planLocalRecordPatch(
+    withUsage,
+    endpointId,
+    { fields: { definition: null } },
+    { allowInvalidTarget: true },
+  );
   assert.ok(result.findings.some((finding) =>
     finding.localId === endpointId &&
     finding.code === "record.missing-definition" &&
@@ -1455,8 +1452,8 @@ test("plans flow definition change while preserving owning connection and endpoi
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -1539,13 +1536,13 @@ test("plans endpoint part assignment by clearing an existing parent in the same 
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Part Occurrences",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
     "^" + partId,
     "",
-    "### Local Interfaces",
+    "### Interfaces",
     "#### Parent",
     "- definition: [[CAN Port]]",
     "- part: [[#^" + partId + "|K1]]",
@@ -1591,8 +1588,8 @@ test("plans flow endpoint-role change while preserving definition and owning con
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
     "^" + endpointA,
@@ -1654,8 +1651,8 @@ test("moves a flow between existing connections while preserving flow identity a
   const flowId = "flow-20261005024000004skellyspencer";
   const text = [
     "---", "type: Object", "uid: 20261003130000000skellyspencer", "---", "", "# Assembly", "",
-    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
-    "### Local Interfaces",
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "### Interfaces",
     "#### J1", "- definition: [[CAN Port]]", "^" + endpointA, "",
     "#### J2", "- definition: [[CAN Port]]", "^" + endpointB, "",
     "### Connections",
@@ -1680,5 +1677,14 @@ test("flow move refuses a missing target connection", () => {
   assert.throws(
     () => planLocalFlowMove(note(), flowId, "conn-20261005024000099skellyspencer"),
     /Target connection .* does not exist/,
+  );
+});
+
+
+test("older Local Model regions remain read-only for structured mutation", () => {
+  const legacy = note().replace("schema=0.4", "schema=0.3").replace("### Parts", "### Part Occurrences").replace("### Interfaces", "### Local Interfaces");
+  assert.throws(
+    () => planLocalRecordPatch(legacy, "part-" + tokenA, { heading: "Renamed" }),
+    /read-only.*schema 0\.4/i,
   );
 });

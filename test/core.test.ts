@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fixtureSchema, indexOf, note } from "./helpers";
+import { currentFixtureSchema, fixtureSchema, indexOf, note } from "./helpers";
 import { allows, optionsBetween } from "../src/core/rules";
 import { addLink, canonicalOrder, linkTarget, orderProperties, removeLink } from "../src/core/frontmatter";
 import { FUNCTIONAL_PROFILE, INTERFACES_PROFILE, INTERNAL_PROFILE, PROFILES, REQUIREMENTS_PROFILE, profileNeedsLocalOccurrences, signature, STRUCTURE_PROFILE, toCanvas, traverse, WHERE_USED_PROFILE, withLocalInterfaces, withLocalOccurrences, withLocalRequirements, withLocalStructure, withLocalWhereUsed, type ViewProfile } from "../src/core/views";
@@ -9,6 +9,7 @@ import { LocalModelIndex, parseLocalModel } from "../src/core/localmodel";
 import { editingBlocked, parseSchema } from "../src/core/schema";
 
 const schema = fixtureSchema();
+const currentSchema = currentFixtureSchema();
 
 test("the vault schema parses without warnings", () => {
   assert.deepEqual(schema.warnings, []);
@@ -437,7 +438,7 @@ test("functional view: a missing function shows as undefined, a missing child of
 });
 
 test("functional view: starts only from an Object or a Function; stale signature differs between profiles", () => {
-  assert.deepEqual(FUNCTIONAL_PROFILE.startTypes, ["Object", "Function"]);
+  assert.deepEqual(FUNCTIONAL_PROFILE.startTypes, ["Object", "Behavior"]);
   const idx = functionalIndex();
   assert.notEqual(signature(traverse(idx, ["Pump.md"], FUNCTIONAL_PROFILE)), signature(traverse(idx, ["Pump.md"], STRUCTURE_PROFILE)));
 });
@@ -596,8 +597,8 @@ test("every view uses only relationship fields and classes that exist in the sch
   for (const [name, profile] of Object.entries(PROFILES)) {
     assert.ok(profile.description, `${name} has a description for the picker`);
     for (const st of profile.steps) {
-      assert.ok(schema.byField.has(st.field), `${name}: ${st.field} is a forward relationship field`);
-      for (const c of [...(st.from ?? []), ...(st.to ?? []), ...(profile.startTypes ?? [])]) assert.ok(schema.classNames.has(c), `${name}: class ${c} exists`);
+      assert.ok(currentSchema.byField.has(st.field), `${name}: ${st.field} is a forward relationship field`);
+      for (const c of [...(st.from ?? []), ...(st.to ?? []), ...(profile.startTypes ?? [])]) assert.ok(currentSchema.classNames.has(c), `${name}: class ${c} exists`);
     }
   }
   assert.deepEqual(Object.keys(PROFILES).sort(), ["Behavior", "Design", "Evidence", "Failure and risk", "Functional", "Interfaces", "Internal", "Requirements", "Scenario", "Structure", "Verification", "Where Used"]);
@@ -618,27 +619,20 @@ test("where used: parents, owners, performers and dependants, followed upward, a
   assert.deepEqual(keysOf(idx, "Wire.md", "Where Used"), ["Box.md", "Cable.md", "Other.md", "Product.md", "UC.md", "Wire.md"], "three levels up through assemblies");
   assert.equal(arrow(idx, "Wire.md", "Where Used")("Cable.md", "Wire.md")?.label, "hasPart", "the assembly points at its part");
   assert.deepEqual(keysOf(idx, "Fn.md", "Where Used"), ["Fn.md", "UC.md", "Wire2.md"]);
-  assert.deepEqual(keysOf(idx, "P.md", "Where Used"), ["Cable.md", "P.md", "Product.md"], "a port's owner and the owner's assembly");
+  assert.deepEqual(keysOf(idx, "P.md", "Where Used"), ["P.md"], "legacy first-class Port ownership is no longer part of the current Where Used profile");
 });
 
-test("interfaces: ports, the other end and its owner, outer and inner ports, flows; symmetric links have no arrowhead (WB-102)", () => {
+test("Interfaces profile does not reinterpret legacy first-class Port relationships after W-384", () => {
   const idx = indexOf(schema, [
-    note("A.md", "Object", { hasPort: ["PA.md", "PA2.md"] }),
-    note("PA.md", "Port", { interfaces: ["PB.md"], transmits: ["Flow.md"], exposes: ["PIn.md"] }),
-    note("PA2.md", "Port", { hasFlow: ["Flow2.md"] }),
+    note("A.md", "Object", { hasPort: ["PA.md"] }),
+    note("PA.md", "Port", { interfaces: ["PB.md"], transmits: ["Flow.md"] }),
     note("PB.md", "Port", { interfaces: ["PA.md"] }),
-    note("B.md", "Object", { hasPort: ["PB.md"] }),
-    note("PIn.md", "Port"),
     note("Flow.md", "Item Flow"),
-    note("Flow2.md", "Item Flow"),
   ]);
-  assert.deepEqual(keysOf(idx, "A.md", "Interfaces"), ["A.md", "B.md", "Flow.md", "Flow2.md", "PA.md", "PA2.md", "PB.md", "PIn.md"]);
-  const c = toCanvas(idx, traverse(idx, ["A.md"], INTERFACES_PROFILE), INTERFACES_PROFILE);
-  const iface = c.edges.find((e) => e.label === "interfaces")!;
-  assert.equal(iface.toEnd, "none");
-  assert.equal(c.edges.find((e) => e.label === "transmits")?.toEnd, undefined);
-  assert.deepEqual(keysOf(idx, "PB.md", "Interfaces"), ["A.md", "B.md", "Flow.md", "PA.md", "PA2.md", "PB.md", "PIn.md"], "from a port: its owner, the port it faces, that port's owner and flows, then the owner's other ports (three levels)");
-  assert.deepEqual(keysOf(idx, "Flow.md", "Interfaces"), ["A.md", "B.md", "Flow.md", "PA.md", "PA2.md", "PB.md", "PIn.md"], "from an item flow: the port that transmits it, its owner, what the port faces and exposes");
+
+  assert.deepEqual(keysOf(idx, "A.md", "Interfaces"), ["A.md"]);
+  assert.deepEqual(keysOf(idx, "PA.md", "Interfaces"), ["PA.md"]);
+  assert.deepEqual(keysOf(idx, "Flow.md", "Interfaces"), ["Flow.md"]);
 });
 
 test("verification, design, scenario (WB-102)", () => {
@@ -707,7 +701,7 @@ test("behavior, failure and risk, evidence (WB-102)", () => {
 test("Internal view uses the owner as a group boundary and keeps interfaces simple", () => {
   const idx=indexOf(schema,[
     {...note("Assembly.md","Object"),uid:"20261003123456789assemblyowner"},
-    note("Pump.md","Object"),note("PortDef.md","Port"),note("FlowDef.md","Item Flow"),
+    note("Pump.md","Object"),{...note("PortDef.md","Object"),subtype:"interface"},note("FlowDef.md","Item Flow"),
   ]);
   const local=new LocalModelIndex();
   const p="20261003123456789ppppppppppppp";
@@ -716,11 +710,11 @@ test("Internal view uses the owner as a group boundary and keeps interfaces simp
   const conn="20261003123456789ccccccccccccc";
   const flow="20261003123456789fffffffffffff";
   local.set("Assembly.md",parseLocalModel([
-    "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->","## Local Model",
-    "### Part Occurrences","#### Pump A","- definition: [[Pump]]","^part-"+p,
-    "### Local Interfaces","#### P1","- definition: [[PortDef]]","- part: [[#^part-"+p+"|Pump A]]","^ep-"+inner,
-    "#### J1","- definition: [[PortDef]]","- exposes: [[#^ep-"+inner+"|P1]]","^ep-"+outer,
-    "### Connections","#### Harness","- endpointA: [[#^ep-"+outer+"|J1]]","- endpointB: [[#^ep-"+inner+"|P1]]","^conn-"+conn,
+    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->","## Local Model",
+    "### Parts","#### Pump A","- definition: [[Pump]]","^part-"+p,
+    "### Interfaces","#### P1","- definition: [[PortDef]]","- part: [[#^part-"+p+"|Pump A]]","^ep-"+inner,
+    "#### J1","- definition: [[PortDef]]","^ep-"+outer,
+    "### Connections","#### Harness","- endpointA: [[#^ep-"+outer+"|J1]]","- endpointB: [[#^ep-"+inner+"|P1]]","- exposes: [[#^ep-"+outer+"|J1]]","^conn-"+conn,
     "##### Power","- definition: [[FlowDef]]","- endpointA: transmit","- endpointB: receive","^flow-"+flow,
     "<!-- MDSE:LOCAL-MODEL END -->",
   ].join("\n")));
@@ -730,7 +724,7 @@ test("Internal view uses the owner as a group boundary and keeps interfaces simp
   assert.ok(result.canvas.nodes.some((n)=>n.id==="local:part-"+p));
   const boundary=result.canvas.nodes.find((n)=>n.id==="local:ep-"+outer)!;
   assert.ok(boundary.x<0 || boundary.x+boundary.width>group!.width,"boundary interface straddles the owner boundary");
-  assert.ok(result.canvas.edges.some((e)=>e.id==="expose:ep-"+outer+":ep-"+inner && e.label==="exposes"));
+  assert.ok(result.canvas.edges.some((e)=>e.id==="expose:conn-"+conn+":ep-"+outer && e.label==="Harness exposes"));
   assert.ok(result.canvas.edges.some((e)=>e.id==="connection:conn-"+conn && e.label?.includes("Harness") && e.label?.includes("Power")));
   assert.equal(PROFILES.Internal,INTERNAL_PROFILE);
 });

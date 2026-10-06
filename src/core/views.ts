@@ -80,21 +80,21 @@ export const INTERNAL_PROFILE: ViewProfile = {
 export const FUNCTIONAL_PROFILE: ViewProfile = {
   name: "Functional",
   description: "Functions of an Object, or a Function with its performer, parent, sub-functions and order.",
-  startTypes: ["Object", "Function"],
+  startTypes: ["Object", "Behavior"],
   steps: [
-    { field: "performs", direction: "out", from: ["Object"], to: ["Function"], atStartOnly: true, undefinedOk: true },
-    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
-    { field: "hasChild", direction: "in", from: ["Function"], to: ["Function"], atStartOnly: true },
-    { field: "hasChild", direction: "out", from: ["Function"], to: ["Function"] },
-    { field: "precedes", direction: "in", from: ["Function"], to: ["Function"], undefinedOk: false },
-    { field: "precedes", direction: "out", from: ["Function"], to: ["Function"], undefinedOk: true },
+    { field: "performs", direction: "out", from: ["Object"], to: ["Behavior"], atStartOnly: true, undefinedOk: true },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] },
+    { field: "hasChild", direction: "in", from: ["Behavior"], to: ["Behavior"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Behavior"], to: ["Behavior"] },
+    { field: "precedes", direction: "in", from: ["Behavior"], to: ["Behavior"], undefinedOk: false },
+    { field: "precedes", direction: "out", from: ["Behavior"], to: ["Behavior"], undefinedOk: true },
   ],
   depth: 2,
   nodeCap: 80,
   perParent: 12,
 };
 
-const REQ_HOLDERS = ["Object", "Function", "Design", "State", "Use Case", "Verification"];
+const REQ_HOLDERS = ["Object", "Behavior", "Condition", "Use Case", "Verification"];
 
 /**
  * Requirements view (WB-098): from a Requirement, where it sits (owner element, parent requirement), its
@@ -108,16 +108,16 @@ export const REQUIREMENTS_PROFILE: ViewProfile = {
   description: "A requirement with its parents, children, derivation, satisfiers and verifiers; or an element with its requirements.",
   startTypes: ["Requirement", ...REQ_HOLDERS],
   steps: [
-    { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Function", "Design"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Behavior", "Condition"], atStartOnly: true },
     { field: "hasChild", direction: "out", from: ["Requirement"], to: ["Requirement"] },
-    { field: "hasChild", direction: "out", from: ["Object", "Function", "Design"], to: ["Requirement"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Object", "Behavior", "Condition"], to: ["Requirement"], atStartOnly: true },
     { field: "derivedFrom", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "derivedFrom", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "refines", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "refines", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "references", direction: "out", from: ["Requirement"], to: ["Requirement", "Document"] },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Behavior", "Condition"] },
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "appliesTo", direction: "out", from: ["Requirement"] },
@@ -140,11 +140,10 @@ export const WHERE_USED_PROFILE: ViewProfile = {
     { field: "includes", direction: "in" },
     { field: "hasChild", direction: "in" },
     { field: "hasState", direction: "in" },
-    { field: "hasPort", direction: "in" },
-    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
-    { field: "hasDesign", direction: "in", from: ["Design"] },
-    { field: "realizedBy", direction: "in", from: ["Function", "Design"], to: ["Use Case"] },
-    { field: "participants", direction: "in", from: ["Object", "Actor", "Function", "Port", "Document"], to: ["Use Case"] },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] },
+    { field: "hasDesign", direction: "in", from: ["Condition"] },
+    { field: "realizedBy", direction: "in", from: ["Behavior", "Condition"], to: ["Use Case"] },
+    { field: "participants", direction: "in", from: ["Object", "Actor", "Behavior", "Document"], to: ["Use Case"] },
     { field: "dependsOn", direction: "in" },
   ],
   depth: 3,
@@ -153,26 +152,12 @@ export const WHERE_USED_PROFILE: ViewProfile = {
   needsLocalOccurrences: true,
 };
 
-/** Interfaces (WB-102): ports, what they connect to, outer and inner ports, and the item flows. */
+/** Interfaces (WB-128): contextual Interfaces, Connections, exposures and Item Flows come from Local Model. */
 export const INTERFACES_PROFILE: ViewProfile = {
   name: "Interfaces",
-  description: "Ports, what each connects to and who owns the other end, exposed ports, item flows.",
-  startTypes: ["Object", "Port", "Item Flow"],
-  steps: [
-    { field: "hasPort", direction: "out", from: ["Object"], to: ["Port"], undefinedOk: true },
-    { field: "hasPort", direction: "in", from: ["Port"], to: ["Object"] },
-    { field: "interfaces", direction: "out", from: ["Port"], to: ["Port"], noArrow: true, undefinedOk: true },
-    { field: "exposes", direction: "out", from: ["Port"], to: ["Port"], undefinedOk: true },
-    { field: "exposes", direction: "in", from: ["Port"], to: ["Port"] },
-    { field: "transmits", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "receives", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "exchanges", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "hasFlow", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "transmits", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "receives", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "exchanges", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "hasFlow", direction: "in", from: ["Item Flow"], to: ["Port"] },
-  ],
+  description: "Local Interface occurrences, their Connections, exposed boundary Interfaces and carried Item Flows.",
+  startTypes: ["Object", "Item Flow"],
+  steps: [],
   depth: 3,
   nodeCap: 80,
   perParent: 12,
@@ -183,13 +168,13 @@ export const INTERFACES_PROFILE: ViewProfile = {
 export const VERIFICATION_PROFILE: ViewProfile = {
   name: "Verification",
   description: "What verifies a requirement, what else a verification covers, and what satisfies those requirements.",
-  startTypes: ["Requirement", "Verification", "Function", "Design", "State"],
+  startTypes: ["Requirement", "Verification", "Behavior", "Condition"],
   steps: [
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], undefinedOk: true },
-    { field: "appliesTo", direction: "in", from: ["State"], to: ["Requirement"], atStartOnly: true },
-    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
+    { field: "appliesTo", direction: "in", from: ["Condition"], to: ["Requirement"], atStartOnly: true },
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Behavior", "Condition"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -200,13 +185,13 @@ export const VERIFICATION_PROFILE: ViewProfile = {
 export const DESIGN_PROFILE: ViewProfile = {
   name: "Design",
   description: "The designs of an Object or Document, sub-designs, and the requirements each satisfies.",
-  startTypes: ["Object", "Document", "Design"],
+  startTypes: ["Object", "Document", "Condition"],
   steps: [
-    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Design"], undefinedOk: true },
-    { field: "hasDesign", direction: "in", from: ["Design"], to: ["Object", "Document"], atStartOnly: true },
-    { field: "hasChild", direction: "in", from: ["Design"], to: ["Design"], atStartOnly: true },
-    { field: "hasChild", direction: "out", from: ["Design"], to: ["Design"] },
-    { field: "satisfies", direction: "out", from: ["Design"], to: ["Requirement"], undefinedOk: true },
+    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Condition"], undefinedOk: true },
+    { field: "hasDesign", direction: "in", from: ["Condition"], to: ["Object", "Document"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Condition"], to: ["Condition"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Condition"], to: ["Condition"] },
+    { field: "satisfies", direction: "out", from: ["Condition"], to: ["Requirement"], undefinedOk: true },
   ],
   depth: 2,
   nodeCap: 80,
@@ -219,15 +204,15 @@ export const SCENARIO_PROFILE: ViewProfile = {
   description: "A use case: participants, the functions and designs that realize it, included and optional use cases, the order of its steps.",
   startTypes: ["Use Case"],
   steps: [
-    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Function", "Port", "Document"], undefinedOk: true },
-    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Function", "Design"], undefinedOk: true },
+    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Behavior", "Document"], undefinedOk: true },
+    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Behavior", "Condition"], undefinedOk: true },
     { field: "hasChild", direction: "out", from: ["Use Case"], to: ["Use Case"] },
     { field: "hasChild", direction: "in", from: ["Use Case"], to: ["Use Case"], atStartOnly: true },
     { field: "optionOf", direction: "out", from: ["Use Case"], to: ["Use Case"], undefinedOk: true },
     { field: "optionOf", direction: "in", from: ["Use Case"], to: ["Use Case"] },
     { field: "drives", direction: "out", from: ["Use Case"], to: ["Requirement"] },
-    { field: "precedes", direction: "in", from: ["Function"], to: ["Function"] },
-    { field: "precedes", direction: "out", from: ["Function"], to: ["Function"] },
+    { field: "precedes", direction: "in", from: ["Behavior"], to: ["Behavior"] },
+    { field: "precedes", direction: "out", from: ["Behavior"], to: ["Behavior"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -238,18 +223,18 @@ export const SCENARIO_PROFILE: ViewProfile = {
 export const BEHAVIOR_PROFILE: ViewProfile = {
   name: "Behavior",
   description: "State machines and states: who has them, initial and final states, order, nesting, what triggers them.",
-  startTypes: ["State Machine", "State", "Object"],
+  startTypes: ["Condition", "Object"],
   steps: [
-    { field: "hasState", direction: "out", from: ["Object", "State Machine"], to: ["State", "State Machine"], undefinedOk: true },
-    { field: "hasState", direction: "in", from: ["State", "State Machine"], to: ["Object", "State Machine"], atStartOnly: true },
-    { field: "initialState", direction: "out", from: ["State Machine"], to: ["State"], undefinedOk: true },
-    { field: "finalState", direction: "out", from: ["State Machine"], to: ["State"], undefinedOk: true },
-    { field: "hasChild", direction: "out", from: ["State"], to: ["State"] },
-    { field: "hasChild", direction: "in", from: ["State"], to: ["State"], atStartOnly: true },
-    { field: "precedes", direction: "in", from: ["State"], to: ["State"] },
-    { field: "precedes", direction: "out", from: ["State"], to: ["State"], undefinedOk: true },
-    { field: "triggeredBy", direction: "out", from: ["State"], to: ["Function", "Design", "State", "Item Flow"] },
-    { field: "triggeredBy", direction: "in", from: ["State"], to: ["Function", "Design", "State"] },
+    { field: "hasState", direction: "out", from: ["Object", "Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "hasState", direction: "in", from: ["Condition"], to: ["Object", "Condition"], atStartOnly: true },
+    { field: "initialState", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "finalState", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "hasChild", direction: "out", from: ["Condition"], to: ["Condition"] },
+    { field: "hasChild", direction: "in", from: ["Condition"], to: ["Condition"], atStartOnly: true },
+    { field: "precedes", direction: "in", from: ["Condition"], to: ["Condition"] },
+    { field: "precedes", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "triggeredBy", direction: "out", from: ["Condition"], to: ["Behavior", "Condition", "Item Flow"] },
+    { field: "triggeredBy", direction: "in", from: ["Condition"], to: ["Behavior", "Condition"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -265,8 +250,8 @@ export const FAILURE_PROFILE: ViewProfile = {
     { field: "affects", direction: "in", to: ["Issue", "Failure Mode", "Use Case"] },
     { field: "drives", direction: "out", from: ["Issue", "Failure Mode"] },
     { field: "drives", direction: "in", from: ["Issue", "Failure Mode"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], undefinedOk: true },
-    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], undefinedOk: true },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] },
   ],
   depth: 2,
   nodeCap: 80,
@@ -304,8 +289,21 @@ export const PROFILES: Record<string, ViewProfile> = {
   [EVIDENCE_PROFILE.name]: EVIDENCE_PROFILE,
 };
 
+/**
+ * Read-side compatibility only. Older vaults may still contain pre-W-384
+ * first-class behavior/condition types. Treat them as their W-384 semantic
+ * class for view filtering without changing or rewriting the source note.
+ */
+export function semanticViewType(type: string | undefined): string | undefined {
+  if (type === "Function" || type === "Step" || type === "Action") return "Behavior";
+  if (type === "Design" || type === "State" || type === "State Machine" || type === "Mode") return "Condition";
+  return type;
+}
+
 /** Does a step apply to a note of type `cur` reaching a note of type `nbr`? */
 function stepAllows(step: ViewStep, cur: string | undefined, nbr: string | undefined): boolean {
+  cur = semanticViewType(cur);
+  nbr = semanticViewType(nbr);
   if (step.from && !(cur && step.from.includes(cur))) return false;
   if (step.to && !(nbr && step.to.includes(nbr))) return false;
   return true;
@@ -365,7 +363,7 @@ export function traverse(index: ModelIndex, starts: string[], profile: ViewProfi
   for (const s of frontier) depthOf.set(s, 0);
 
   type Nb = { node: string; field: string; direction: Direction; count?: number };
-  const typeOf = (p: string) => index.notes.get(p)?.type;
+  const typeOf = (p: string) => semanticViewType(index.notes.get(p)?.type);
   const neighbours = (p: string, dist: number): Nb[] => {
     const seen = new Set<string>();
     const out: Nb[] = [];
@@ -615,7 +613,7 @@ export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, r
       const a = localKeyFor(index, local, ownerPath, r);
       if (!a || !m.depthOf.has(a)) continue;
       const groups: Array<[string, LinkRef[]]> = [
-        ["exposes", r.exposes],
+        ...(r.sourceSchemaVersion==="0.4" ? [] : [["exposes", r.exposes] as [string, LinkRef[]]]),
         ["equals", r.equals],
         ["parent", r.parent ? [r.parent] : []],
       ];
@@ -645,12 +643,27 @@ export function withLocalInterfaces(index: ModelIndex, local: LocalModelIndex, r
         if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
         else m.tree.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
       }
+      if(r.sourceSchemaVersion==="0.4"){
+        for(const link of r.exposes){
+          const t=linkedLocal(index,local,resolve,ownerPath,link);
+          if(!t) continue;
+          const alreadyPlaced=m.depthOf.has(t.key);
+          addLocalNode(index,local,m,t.path,t.record,ownerDepth+1,profile);
+          if(!m.depthOf.has(t.key)) continue;
+          if(alreadyPlaced) m.localEdges.push({parent:a,child:t.key,field:"exposes",direction:"out",count:1});
+          else m.tree.push({parent:a,child:t.key,field:"exposes",direction:"out",count:1});
+        }
+      }
     }
   }
 
-  for (const definitionPath of starts.filter((p) => ["Port", "Item Flow"].includes(index.notes.get(p)?.type ?? ""))) {
+  for (const definitionPath of starts.filter((p) => {
+    const note=index.notes.get(p);
+    return note?.type==="Item Flow" || note?.type==="Port" || (note?.type==="Object"&&note.subtype==="interface");
+  })) {
     const d = m.depthOf.get(definitionPath) ?? 0;
-    const expected = index.notes.get(definitionPath)?.type === "Port" ? "endpoint" : "flow";
+    const note=index.notes.get(definitionPath);
+    const expected = note?.type==="Item Flow" ? "flow" : "endpoint";
     const occurrences = local.occurrencesOf(definitionPath, resolve)
       .filter(({ record }) => record.kind === expected)
       .sort((a, b) => a.path.localeCompare(b.path) || a.record.identifier.localeCompare(b.record.identifier));

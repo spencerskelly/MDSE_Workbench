@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fixtureSchema, indexOf, note } from "./helpers";
+import { currentFixtureSchema, fixtureSchema, indexOf, note } from "./helpers";
 import {
   LocalModelIndex, localModelSourceFingerprint, parseLinks, parseLocalModel, refForLink, refKey, renderFindingsReport, specializationCandidates, validateLocalModels, localRef, noteRef,
 } from "../src/core/localmodel";
@@ -10,6 +10,8 @@ import type { NoteRecord } from "../src/core/model";
 
 const T = (n: number) => `20260911143227${String(n).padStart(3, "0")}skellyspencer`; // 17 digits + 13 letters = 30 characters
 const START2 = "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->";
+const START3 = "<!-- MDSE:LOCAL-MODEL START schema=0.3 -->";
+const START4 = "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->";
 const END = "<!-- MDSE:LOCAL-MODEL END -->";
 const P1 = `part-${T(1)}`, P2 = `part-${T(2)}`, E1 = `ep-${T(3)}`, E2 = `ep-${T(4)}`, E3 = `ep-${T(5)}`, C1 = `conn-${T(6)}`, F1 = `flow-${T(7)}`, F2 = `flow-${T(8)}`;
 
@@ -93,7 +95,7 @@ test("marker errors: missing end, missing start, duplicate, nested, wrong order,
 });
 
 test("unsupported future schema: readable as Markdown, structured use off, no records guessed", () => {
-  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.3"))!;
+  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.5"))!;
   assert.ok(r.findings.some((f) => f.code === "schema.unsupported"));
   assert.equal(r.structured, false);
   assert.deepEqual(r.records, []);
@@ -279,7 +281,7 @@ test("addLink matches by the note a link resolves to, not by its text; removeLin
 
 test("the 0.2 schema fixture agrees with the parser's constants", () => {
   const yaml = readFileSync(new URL("./fixtures/local-model.yaml", import.meta.url), "utf8");
-  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.2 -->"/);
+  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->"/);
   for (const k of ["part-", "ep-", "conn-", "flow-"]) assert.ok(yaml.includes(`prefix: "${k}"`));
 });
 
@@ -367,4 +369,79 @@ test("removing a quarantined region leaves unrelated occurrence identity intact"
   local.remove("Bad.md");
   assert.equal(local.find(goodId).length, 1);
   assert.deepEqual(local.quarantinedPaths(), []);
+});
+
+test("0.3 remains readable with legacy headings and definitionless endpoints", () => {
+  const text = [
+    "## Local Model", START3,
+    "### Part Occurrences",
+    "#### Board", "- definition: [[Control Board]]", "^" + P1, "",
+    "### Local Interfaces",
+    "#### Service", "- part: [[#^" + P1 + "]]", "^" + E1, "",
+    "#### Boundary", "- exposes: [[#^" + E1 + "|Service]]", "^" + E3, "",
+    END,
+  ].join("\n");
+  const region = parseLocalModel(text)!;
+  assert.equal(region.schemaVersion, "0.3");
+  assert.equal(region.structured, true);
+  assert.ok(!region.findings.some((f) => f.code === "record.missing-definition"));
+  assert.equal(region.records.find((x) => x.localId === E3)?.exposes[0]?.blockId, E1);
+});
+
+test("0.4 uses Parts/Interfaces and Connection-owned exposes", () => {
+  const text = [
+    "## Local Model", START4,
+    "### Parts",
+    "#### Board", "- definition: [[Control Board]]", "^" + P1, "",
+    "### Interfaces",
+    "#### Internal", "- part: [[#^" + P1 + "]]", "^" + E1, "",
+    "#### Peer", "- part: [[#^" + P1 + "]]", "^" + E2, "",
+    "#### Boundary", "- definition: [[CAN Interface]]", "^" + E3, "",
+    "### Connections",
+    "#### Internal CAN", "- endpointA: [[#^" + E1 + "|Internal]]", "- endpointB: [[#^" + E2 + "|Peer]]", "- exposes: [[#^" + E3 + "|Boundary]]", "^" + C1, "",
+    END,
+  ].join("\n");
+  const region = parseLocalModel(text)!;
+  assert.equal(region.schemaVersion, "0.4");
+  assert.equal(region.structured, true);
+  assert.deepEqual(region.findings, []);
+  const connection = region.records.find((x) => x.localId === C1)!;
+  assert.equal(connection.exposes[0]?.blockId, E3);
+});
+
+test("0.4 rejects endpoint-owned exposure and exposure to a non-boundary Interface", () => {
+  const endpointOwned = [
+    "## Local Model", START4, "### Interfaces",
+    "#### Inner", "^" + E1, "",
+    "#### Boundary", "- exposes: [[#^" + E1 + "|Inner]]", "^" + E3, END,
+  ].join("\n");
+  assert.ok(codes(endpointOwned).includes("exposure.owner-invalid"));
+  const nonBoundary = [
+    "## Local Model", START4, "### Parts", "#### Board", "- definition: [[Control Board]]", "^" + P1, "",
+    "### Interfaces",
+    "#### A", "- part: [[#^" + P1 + "]]", "^" + E1, "",
+    "#### B", "- part: [[#^" + P1 + "]]", "^" + E2, "",
+    "### Connections",
+    "#### Link", "- endpointA: [[#^" + E1 + "]]", "- endpointB: [[#^" + E2 + "]]", "- exposes: [[#^" + E2 + "]]", "^" + C1, END,
+  ].join("\n");
+  assert.ok(codes(nonBoundary).includes("exposure.not-boundary"));
+});
+
+test("0.4 Interface definitions require Object/interface; definitionless Interfaces remain valid", () => {
+  const body = ["## Local Model", START4, "### Interfaces", "#### Boundary", "- definition: [[CAN Interface]]", "^" + E3, END].join("\n");
+  const good = vault({ "CAN Interface.md": { type: "Object", subtype: "interface" } }, [], { "Control Assembly.md": body });
+  assert.ok(!vcodes(good).includes("definition.incompatible"));
+  const bad = vault({ "CAN Interface.md": { type: "Object", subtype: "electrical" } }, [], { "Control Assembly.md": body });
+  assert.ok(vcodes(bad).includes("definition.incompatible"));
+  const none = vault({}, [], { "Control Assembly.md": body.replace("- definition: [[CAN Interface]]\n", "") });
+  assert.ok(!vcodes(none).includes("record.missing-definition"));
+});
+
+
+test("the current W-384 schema fixtures parse without warnings", () => {
+  const current = currentFixtureSchema();
+  assert.deepEqual(current.warnings, []);
+  assert.ok(current.byField.get("performs"));
+  assert.ok(!current.byField.get("hasPort"));
+  assert.ok(!current.byField.get("interfaces"));
 });
