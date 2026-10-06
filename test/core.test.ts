@@ -619,7 +619,7 @@ test("where used: parents, owners, performers and dependants, followed upward, a
   assert.deepEqual(keysOf(idx, "Wire.md", "Where Used"), ["Box.md", "Cable.md", "Other.md", "Product.md", "UC.md", "Wire.md"], "three levels up through assemblies");
   assert.equal(arrow(idx, "Wire.md", "Where Used")("Cable.md", "Wire.md")?.label, "hasPart", "the assembly points at its part");
   assert.deepEqual(keysOf(idx, "Fn.md", "Where Used"), ["Fn.md", "UC.md", "Wire2.md"]);
-  assert.deepEqual(keysOf(idx, "P.md", "Where Used"), ["Cable.md", "P.md", "Product.md"], "a port's owner and the owner's assembly");
+  assert.deepEqual(keysOf(idx, "P.md", "Where Used"), ["P.md"], "legacy first-class Port ownership is no longer part of the current Where Used profile");
 });
 
 test("Interfaces profile does not reinterpret legacy first-class Port relationships after W-384", () => {
