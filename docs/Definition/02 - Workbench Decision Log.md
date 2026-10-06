@@ -1208,15 +1208,38 @@ Together with the already-guarded Local Model mutation services, definition life
 Implementation commit: `a45bc089`. Release promotion remains unchanged; the controlled Base is still pinned separately and must not be updated merely because this standalone safety boundary is complete.
 
 
-### WB-128 — 2026-10-05 Local Model 0.4 compatibility and connection-owned exposure
-**Status:** High-priority required work; not implemented yet.
+### WB-128 — 2026-10-05 Local Model 0.4 / importer v0.8.19 compatibility gate
+**Status:** High-priority required work; importer contract proven, Workbench implementation not yet accepted.
 
-MDSE W-384 advances the governed Local Model write format to 0.4. Workbench must preserve existing 0.1/0.2/0.3 meaning while adding explicit 0.4 parsing, validation, views, and structured editing before an importer that emits 0.4 can be accepted.
+MDSE importer v0.8.19 has now completed two whole-model imports of the approved EA source with deterministic output. Workbench must therefore treat Local Model 0.4 as the next concrete compatibility target rather than a speculative future format.
 
-Local Model 0.4 changes the visible section headings from `Part Occurrences` / `Local Interfaces` to `Parts` / `Interfaces`, while `Connections` remains unchanged. Workbench must select section names by the region schema version; it must never reinterpret or silently rewrite a 0.3 region as 0.4.
+The accepted importer output contains:
 
-Reusable interface definitions are now first-class `Object / interface` notes rather than Port notes. A local Interface occurrence may optionally reference one of those reusable definitions. First-class Port notes and note-level Port topology are not part of the 0.4 model.
+- `Parts` — contextual occurrences typed by reusable Object definitions;
+- `Interfaces` — contextual boundary/internal interaction points, optionally typed by reusable `Object / interface` definitions;
+- `Connections` — contextual wiring/topology between Interface occurrences;
+- connection-owned flows;
+- `exposes` owned by a Connection and targeting an assembly-boundary Interface;
+- native Obsidian block IDs/local IDs (`part-`, `ep-`, `conn-`, `flow-`) whose 30-character identity token is stable and shares the governed identity namespace with note UIDs;
+- local links using native `#^local-id` fragments, including cross-note occurrence references;
+- no first-class Port notes and no note-level `hasPort` topology.
 
-Exposure ownership also changes in 0.4: `exposes` belongs to a **Connection** and points to the assembly-boundary Interface occurrence through which that internal/context-owned connection is made available externally. Workbench 0.4 views must render that meaning as internal connection → boundary Interface. Existing 0.3 endpoint-owned exposure remains readable under 0.3 semantics only.
+Workbench compatibility requirements are therefore:
 
-This is a compatibility/safety prerequisite, not optional UI polish. Required scope includes parser, in-memory model, validator, writer, Internal/Interfaces views, Review findings, test fixtures, and documentation. Unknown or partially supported 0.4 semantics must disable unsafe structured editing rather than guess.
+1. **Version-aware parser.** Read existing Local Model 0.1/0.2/0.3 meaning and explicit 0.4 syntax. Section headings are selected by region schema; a prior schema is never silently reinterpreted or rewritten as 0.4.
+2. **Occurrence identity.** Local IDs/block references are durable semantic identity. Views, selection, stale detection, editing, undo/redo and refresh must address occurrences by owner + local ID, never by display name or hierarchy alone.
+3. **Parts.** Treat a Part as an occurrence inside an owner context, separate from its reusable definition. Editing a definition and editing an occurrence remain visibly separate operations.
+4. **Interfaces.** Treat Interfaces as contextual occurrences. A reusable interface definition remains a normal first-class `Object / interface` note; Workbench must not recreate a standalone Port-note model.
+5. **Connections.** Connections are contextual records joining Interface occurrences. They are not ordinary note-level relationships and must be rendered/edited through the Local Model service.
+6. **Flows.** Conveyed flows remain owned by a Connection. Review-only importer evidence such as Part-terminated conveyed-flow findings must not be promoted into Local Model structure by Workbench.
+7. **`exposes`.** Under 0.4, `Connection.exposes -> boundary Interface` is authoritative. Workbench Internal/Interfaces views must render that direction and structured editing must preserve it. Older endpoint-owned exposure remains readable only under its older schema meaning.
+8. **Occurrence-aware views.** Internal, Structure, Interfaces, Where Used and Requirements must preserve the distinction between occurrence and reusable definition. Cross-component Connections may be owned at the lowest emitted common context.
+9. **Importer-managed region protection.** The region between `<!-- MDSE:LOCAL-MODEL START schema=... -->` and `<!-- MDSE:LOCAL-MODEL END -->` is governed structured content. Ordinary text/property editors may not replace or reformat it. All Local Model changes go through the parser/planner/transaction writer.
+10. **Fail closed.** Unknown fields, unsupported 0.4 semantics, broken local references, duplicate local identities or a schema newer than the Workbench writer understands disable unsafe structured edits. Reading and navigation should remain available where safe.
+11. **Round-trip preservation.** A no-op parse/write cycle must not change valid importer output. Structured edits preserve unrecognized governed fields unless the active schema explicitly owns their transformation.
+12. **Real-output acceptance.** Compatibility is not complete on fixtures alone. Workbench must be exercised against an actual v0.8.19 whole-model output containing Parts, Interfaces, Connections, flows, `exposes`, definitionless Interfaces and importer review evidence.
+
+The importer acceptance run establishes the scale Workbench must tolerate: 27,709 imported notes, 2,055 Local Parts, 4,387 Interfaces, 552 Connections and 72 Connection flows. Workbench should use these as the real compatibility/performance fixture rather than designing only against small synthetic examples.
+
+This is a **release safety gate**, not optional UI polish. Until WB-128 passes, Workbench may inspect supported 0.4 records only through explicitly safe/read-only paths; it must not claim full structured-editor compatibility with importer v0.8.19.
+
