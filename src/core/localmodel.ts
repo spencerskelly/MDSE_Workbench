@@ -332,7 +332,14 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       if (r.kind === "connection" || r.kind === "flow") add("record.usage-invalid", `${label}: usage is not valid on a ${r.kind}.`, r);
       else if (version !== "0.1" && !USAGES.includes(r.usage)) add("record.usage-invalid", `${label}: usage "${r.usage}" is not standard, variant or option.`, r);
     }
-    if ((r.kind === "part" || r.kind === "flow" || (r.kind === "endpoint" && (version === "0.1" || version === "0.2"))) && !r.definition) {
+    if (
+      !r.definition &&
+      (
+        r.kind === "part" ||
+        r.kind === "flow" ||
+        (r.kind === "endpoint" && (version === "0.1" || version === "0.2" || r.usageExplicit))
+      )
+    ) {
       add("record.missing-definition", `${label} has no definition link.`, r);
     }
     if (r.kind === "endpoint" && version === "0.4" && r.exposes.length) {
