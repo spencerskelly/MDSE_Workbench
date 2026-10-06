@@ -528,7 +528,10 @@ export function specializationCandidates(index: ModelIndex, root: string): Candi
 
 const COMPATIBLE: Record<LocalKind, string | null> = { part: "Object", endpoint: null, flow: "Item Flow", connection: null };
 function compatibleDefinition(record: LocalRecord, def: { type?: string; subtype?: string }): string | null {
-  if (record.kind !== "endpoint") return COMPATIBLE[record.kind];
+  if (record.kind !== "endpoint") {
+    const expected = COMPATIBLE[record.kind];
+    return expected && def.type !== expected ? expected : null;
+  }
   if (record.sourceSchemaVersion === "0.4") {
     return def.type === "Object" && def.subtype === "interface" ? null : "Object / interface";
   }
