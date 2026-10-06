@@ -89,6 +89,7 @@ function countCodes(findings: readonly LocalFinding[]): Record<string, number> {
   return Object.fromEntries(Object.entries(out).sort((a, b) => a[0].localeCompare(b[0])));
 }
 
+async function main(): Promise<void> {
 const abs = await markdownFiles(root);
 const files = abs.map((p) => posix(relative(root, p)));
 
@@ -308,4 +309,10 @@ if (reportPath) await writeFile(reportPath, json, "utf8");
 console.log("WB128_REAL_VAULT_READONLY_RESULT_BEGIN");
 console.log(json.trimEnd());
 console.log("WB128_REAL_VAULT_READONLY_RESULT_END");
-if (result.status !== "PASS") process.exit(1);
+if (result.status !== "PASS") process.exitCode = 1;
+}
+
+void main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+});
