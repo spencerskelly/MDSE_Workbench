@@ -7,9 +7,10 @@ import { resolveAuthoredRelationshipLinks } from "../src/core/relationship-resol
 import { LocalModelIndex, parseLocalModel, validateLocalModels, type LocalFinding } from "../src/core/localmodel";
 import { planLocalRecordPatch } from "../src/core/localmodel-edit";
 import {
-  INTERNAL_PROFILE, INTERFACES_PROFILE, REQUIREMENTS_PROFILE, STRUCTURE_PROFILE, WHERE_USED_PROFILE,
-  buildInternalView, traverse, withLocalInterfaces, withLocalRequirements, withLocalStructure, withLocalWhereUsed,
+  INTERFACES_PROFILE, REQUIREMENTS_PROFILE, STRUCTURE_PROFILE, WHERE_USED_PROFILE,
+  traverse, withLocalInterfaces, withLocalRequirements, withLocalStructure, withLocalWhereUsed,
 } from "../src/core/views";
+import { buildInternalView } from "../src/core/internal-view";
 
 type Obj = Record<string, unknown>;
 const root = process.argv[2], reportPath = process.argv[3];
