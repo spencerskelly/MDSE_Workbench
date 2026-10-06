@@ -319,10 +319,12 @@ function isBlocking(issue) {
 }
 
 // src/core/localmodel.ts
-var READABLE_VERSIONS = ["0.1", "0.2"];
-var WRITABLE_VERSION = "0.2";
+var READABLE_VERSIONS = ["0.1", "0.2", "0.3", "0.4"];
+var WRITABLE_VERSION = "0.4";
 var PREFIX = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
-var SECTION = { "part occurrences": "part", "local interfaces": "endpoint", connections: "connection" };
+var SECTION_LEGACY = { "part occurrences": "part", "local interfaces": "endpoint", connections: "connection" };
+var SECTION_04 = { parts: "part", interfaces: "endpoint", connections: "connection" };
+var sectionFor = (version, title) => (version === "0.4" ? SECTION_04 : SECTION_LEGACY)[title.toLowerCase()] ?? null;
 var FLOW_ROLES = ["transmit", "receive", "exchange", "unspecified"];
 var USAGES = ["standard", "variant", "option"];
 var TOKEN_30 = /^\d{17}[a-z-]{13}$/;
@@ -403,12 +405,19 @@ function finish(r) {
   r.multiplicity = (f.get("multiplicity") ?? "").trim() || null;
   r.endpointKind = (f.get("kind") ?? "").trim() || null;
 }
-var ALLOWED_FIELDS = {
+var ALLOWED_FIELDS_LEGACY = {
   part: ["definition", "usage", "identifier", "multiplicity"],
   endpoint: ["definition", "usage", "identifier", "part", "parent", "exposes", "equals", "multiplicity", "kind"],
   connection: ["endpointA", "endpointB", "definition", "identifier"],
   flow: ["definition", "identifier", "endpointA", "endpointB"]
 };
+var ALLOWED_FIELDS_04 = {
+  part: ["definition", "usage", "identifier", "multiplicity"],
+  endpoint: ["definition", "usage", "identifier", "part", "parent", "equals", "multiplicity", "kind"],
+  connection: ["endpointA", "endpointB", "definition", "identifier", "exposes"],
+  flow: ["definition", "identifier", "endpointA", "endpointB"]
+};
+var allowedFields = (version, kind) => (version === "0.4" ? ALLOWED_FIELDS_04 : ALLOWED_FIELDS_LEGACY)[kind];
 function localModelSourceFingerprint(text) {
   const lines = text.split(/\r?\n/);
   const markerLines = [];
@@ -482,7 +491,7 @@ function parseLocalModel(text) {
       done(current);
       current = null;
       if (level === 3) {
-        section = SECTION[title.toLowerCase()] ?? null;
+        section = sectionFor(version, title);
         if (!section) region.findings.push({ code: "record.unknown-section", severity: "warning", message: `Unknown Local Model section "${title}".`, line: i + 1 });
         continue;
       }
@@ -551,17 +560,22 @@ function validateRegion(region) {
       const k = kindOfId(r.localId);
       if (!k) add("record.block-id-malformed", `${label}: block ID ${r.localId} does not start with a record prefix (part-, ep-, conn-, flow-).`, r);
       else if (k !== r.kind) add("record.block-id-malformed", `${label}: block ID ${r.localId} is for a ${k}.`, r);
-      else if (version === "0.2" && !TOKEN_30.test(r.localId.slice(PREFIX[k].length))) add("record.block-id-malformed", `${label}: block ID ${r.localId} does not end in a 30-character identity token.`, r);
+      else if (version !== "0.1" && !TOKEN_30.test(r.localId.slice(PREFIX[k].length))) add("record.block-id-malformed", `${label}: block ID ${r.localId} does not end in a 30-character identity token.`, r);
     }
     for (const key2 of r.fields.keys()) {
       if (key2 === "usage" && version === "0.1") add("record.unknown-field", `${label}: usage is not part of schema 0.1.`, r, "warning");
-      else if (!ALLOWED_FIELDS[r.kind].includes(key2) && key2 !== "usage") add("record.unknown-field", `${label}: unknown field ${key2}.`, r, "warning");
+      else if (!allowedFields(version, r.kind).includes(key2) && key2 !== "usage") add("record.unknown-field", `${label}: unknown field ${key2}.`, r, "warning");
     }
     if (r.fields.has("usage")) {
       if (r.kind === "connection" || r.kind === "flow") add("record.usage-invalid", `${label}: usage is not valid on a ${r.kind}.`, r);
-      else if (version === "0.2" && !USAGES.includes(r.usage)) add("record.usage-invalid", `${label}: usage "${r.usage}" is not standard, variant or option.`, r);
+      else if (version !== "0.1" && !USAGES.includes(r.usage)) add("record.usage-invalid", `${label}: usage "${r.usage}" is not standard, variant or option.`, r);
     }
-    if ((r.kind === "part" || r.kind === "endpoint" || r.kind === "flow") && !r.definition) add("record.missing-definition", `${label} has no definition link.`, r);
+    if (!r.definition && (r.kind === "part" || r.kind === "flow" || r.kind === "endpoint" && (version === "0.1" || version === "0.2" || r.usageExplicit))) {
+      add("record.missing-definition", `${label} has no definition link.`, r);
+    }
+    if (r.kind === "endpoint" && version === "0.4" && r.exposes.length) {
+      add("exposure.owner-invalid", `${label}: exposes belongs to a Connection in schema 0.4.`, r);
+    }
     if (r.definition && r.definition.blockId) add("definition.incompatible", `${label}: the definition must link to a note, not a block.`, r);
   }
   for (const [id, list2] of byId) if (list2.length > 1) add("record.duplicate-id", `Block ID ${id} is used by ${list2.length} records.`, list2[1]);
@@ -588,6 +602,19 @@ function validateRegion(region) {
       if (!r.endpointA || !r.endpointB) add("ref.endpoint-count", `connection "${r.identifier}" needs exactly two endpoints (endpointA and endpointB).`, r);
       needLocal(r, r.endpointA, "endpointA", "endpoint");
       needLocal(r, r.endpointB, "endpointB", "endpoint");
+      if (version === "0.4") {
+        for (const l of r.exposes) {
+          if (l.target) {
+            add("exposure.cross-context", `connection "${r.identifier}": exposes must target a boundary Interface in this Local Model context.`, r);
+            continue;
+          }
+          needLocal(r, l, "exposes", "endpoint");
+          const target = sameNote(l);
+          if (target?.kind === "endpoint" && (target.part || target.parent)) {
+            add("exposure.not-boundary", `connection "${r.identifier}": exposes target "${target.identifier}" is not a boundary Interface.`, r);
+          }
+        }
+      }
     }
     if (r.kind === "flow") {
       for (const [f, v] of [["endpointA", r.roleA], ["endpointB", r.roleB]]) {
@@ -709,7 +736,17 @@ function specializationCandidates(index, root) {
   }
   return { candidates: [...byKey.values()], cycle };
 }
-var COMPATIBLE = { part: "Object", endpoint: "Port", flow: "Item Flow", connection: null };
+var COMPATIBLE = { part: "Object", endpoint: null, flow: "Item Flow", connection: null };
+function compatibleDefinition(record, def) {
+  if (record.kind !== "endpoint") {
+    const expected = COMPATIBLE[record.kind];
+    return expected && def.type !== expected ? expected : null;
+  }
+  if (record.sourceSchemaVersion === "0.4") {
+    return def.type === "Object" && def.subtype === "interface" ? null : "Object / interface";
+  }
+  return def.type === "Port" ? null : "Port";
+}
 function validateLocalModels(input) {
   const { index, local, resolve } = input;
   const out = [];
@@ -723,7 +760,7 @@ function validateLocalModels(input) {
   };
   for (const n of index.notes.values()) if (n.uid && TOKEN_30.test(n.uid)) claim(n.uid, `note ${n.path}`);
   for (const [path, region] of local.regions) {
-    if (region.schemaVersion !== "0.2") continue;
+    if (region.schemaVersion === "0.1") continue;
     for (const r of region.records) {
       const k = kindOfId(r.localId);
       if (!k) continue;
@@ -767,8 +804,8 @@ function validateLocalModels(input) {
         add(path, "definition.unresolved", `${label}: definition "${r.definition.target}" does not resolve to a note.`, r);
         continue;
       }
-      const want = COMPATIBLE[r.kind];
-      if (want && def.type !== want) add(path, "definition.incompatible", `${label}: definition ${def.name} is ${def.type ? `a ${def.type}` : "not a model note"}, expected a ${want}.`, r);
+      const want = compatibleDefinition(r, def);
+      if (want) add(path, "definition.incompatible", `${label}: definition ${def.name} is ${def.type ? `a ${def.type}${def.subtype ? " / " + def.subtype : ""}` : "not a model note"}, expected ${want}.`, r);
       if ((r.kind === "part" || r.kind === "endpoint") && USAGES.includes(r.usage)) {
         if (r.usage === "standard" && def.abstract === true) add(path, "definition.abstract-standard", `${label}: a standard occurrence points at abstract definition ${def.name}.`, r);
         if (r.usage === "variant" || r.usage === "option") {
@@ -831,8 +868,8 @@ function renderFindingsReport(findings, stats, opts = {}) {
 // src/core/localmodel-edit.ts
 var FIELD_ORDER = {
   part: ["definition", "usage", "identifier", "multiplicity"],
-  endpoint: ["definition", "usage", "identifier", "part", "parent", "exposes", "equals", "multiplicity", "kind"],
-  connection: ["endpointA", "endpointB", "definition", "identifier"],
+  endpoint: ["definition", "usage", "identifier", "part", "parent", "equals", "multiplicity", "kind"],
+  connection: ["endpointA", "endpointB", "definition", "identifier", "exposes"],
   flow: ["definition", "identifier", "endpointA", "endpointB"]
 };
 function editableLocalRegion(text) {
@@ -1014,8 +1051,8 @@ function planLocalFlowMove(text, flowId, connectionId) {
   };
 }
 var SECTION_TITLE = {
-  part: "Part Occurrences",
-  endpoint: "Local Interfaces",
+  part: "Parts",
+  endpoint: "Interfaces",
   connection: "Connections"
 };
 var SECTION_ORDER = ["part", "endpoint", "connection"];
@@ -1031,7 +1068,7 @@ function planLocalRecordCreate(text, input) {
     const block2 = renderRecord(input.kind, input.heading.trim(), input.localId, normalizedFields(input.kind, input.fields));
     const regionLines = [
       "## Local Model",
-      "<!-- MDSE:LOCAL-MODEL START schema=0.2 -->",
+      "<!-- MDSE:LOCAL-MODEL START schema=" + WRITABLE_VERSION + " -->",
       "",
       "### " + SECTION_TITLE[input.kind],
       "",
@@ -1083,8 +1120,11 @@ function validateNewRecord(input) {
   for (const key2 of Object.keys(input.fields)) {
     if (!FIELD_ORDER[input.kind].includes(key2)) throw new Error(key2 + " is not a governed field on a " + input.kind + " record.");
   }
-  if ((input.kind === "part" || input.kind === "endpoint" || input.kind === "flow") && !input.fields.definition?.trim()) {
+  if ((input.kind === "part" || input.kind === "flow") && !input.fields.definition?.trim()) {
     throw new Error("A " + input.kind + " record requires a definition.");
+  }
+  if (input.kind === "endpoint" && input.fields.usage?.trim() && !input.fields.definition?.trim()) {
+    throw new Error("An Interface occurrence requires a definition when usage is set.");
   }
   if (input.kind === "connection" && (!input.fields.endpointA?.trim() || !input.fields.endpointB?.trim())) {
     throw new Error("A connection requires endpointA and endpointB.");
@@ -9195,7 +9235,7 @@ function schemaSignature(schema4) {
 
 // src/core/cache.ts
 var CACHE_FORMAT_VERSION = 2;
-var CACHE_SEMANTIC_VERSION = 3;
+var CACHE_SEMANTIC_VERSION = 4;
 function expectedCompatibility(schema4, scope) {
   return {
     formatVersion: CACHE_FORMAT_VERSION,
@@ -9270,6 +9310,7 @@ function serializeNote(n) {
     path: n.path,
     name: n.name,
     ...n.type !== void 0 ? { type: n.type } : {},
+    ...n.subtype !== void 0 ? { subtype: n.subtype } : {},
     ...n.id !== void 0 ? { id: n.id } : {},
     ...n.uid !== void 0 ? { uid: n.uid } : {},
     authoredLinks: (n.authoredLinks ?? []).map((x) => ({ ...x })),
@@ -9295,6 +9336,7 @@ function deserializeNote(raw) {
   }
   const repeat = raw.repeat === void 0 ? void 0 : pairsNumber(raw.repeat, "repeat");
   const type = optionalString(raw, "type");
+  const subtype = optionalString(raw, "subtype");
   const id = optionalString(raw, "id");
   const uid = optionalString(raw, "uid");
   let broken;
@@ -9313,6 +9355,7 @@ function deserializeNote(raw) {
     path: raw.path,
     name: raw.name,
     ...type !== void 0 ? { type } : {},
+    ...subtype !== void 0 ? { subtype } : {},
     ...id !== void 0 ? { id } : {},
     ...uid !== void 0 ? { uid } : {},
     authoredLinks: raw.authoredLinks.map((x) => ({ ...x })),
@@ -9869,14 +9912,22 @@ function buildInternalView(index, local, ownerPath, resolve) {
     nodes.push({ id, type: "text", text, x, y, width: PART_W, height: PART_H });
     pos.set(r.localId, { x, y, width: PART_W, height: PART_H });
   });
+  const boundarySide = /* @__PURE__ */ new Map();
+  boundary.forEach((r, i) => boundarySide.set(r.localId, i % 2 === 0 ? "left" : "right"));
   const exposureSide = /* @__PURE__ */ new Map();
-  boundary.forEach((r, i) => {
-    const side = i % 2 === 0 ? "left" : "right";
-    for (const link of r.exposes) {
-      const t = linkedLocal(local, resolve, ownerPath, link);
-      if (t?.record.kind === "endpoint") exposureSide.set(t.record.localId, side);
+  for (const connection of connections) {
+    if (connection.sourceSchemaVersion !== "0.4") continue;
+    for (const link of connection.exposes) {
+      const outer = linkedLocal(local, resolve, ownerPath, link);
+      if (!outer || outer.record.kind !== "endpoint" || outer.record.part || outer.record.parent) continue;
+      const side = boundarySide.get(outer.record.localId);
+      if (!side) continue;
+      for (const end of [connection.endpointA, connection.endpointB]) {
+        const inner = linkedLocal(local, resolve, ownerPath, end);
+        if (inner?.record.kind === "endpoint" && (inner.record.part || inner.record.parent)) exposureSide.set(inner.record.localId, side);
+      }
     }
-  });
+  }
   const partEndpointCount = /* @__PURE__ */ new Map();
   for (const r of internal) {
     const parent = linkedLocal(local, resolve, ownerPath, r.part ?? r.parent);
@@ -9903,6 +9954,7 @@ function buildInternalView(index, local, ownerPath, resolve) {
   placeBoundary(left, "left", contentW, contentH, nodes, pos, ownerLink);
   placeBoundary(right, "right", contentW, contentH, nodes, pos, ownerLink);
   for (const r of boundary) {
+    if (r.sourceSchemaVersion === "0.4") continue;
     const from = nodeId(r);
     for (const link of r.exposes) {
       const t = linkedLocal(local, resolve, ownerPath, link);
@@ -9910,7 +9962,7 @@ function buildInternalView(index, local, ownerPath, resolve) {
       const to = nodeId(t.record);
       if (!pos.has(r.localId) || !pos.has(t.record.localId)) continue;
       edges.push(edge(
-        "expose:" + r.localId + ":" + t.record.localId,
+        "legacy-expose:" + r.localId + ":" + t.record.localId,
         from,
         to,
         sideToward(pos.get(r.localId), pos.get(t.record.localId)),
@@ -9944,6 +9996,32 @@ function buildInternalView(index, local, ownerPath, resolve) {
       label || "connection",
       "none"
     ));
+    if (r.sourceSchemaVersion === "0.4") {
+      const innerCandidates = [a.record, b.record].filter((x) => x.part || x.parent);
+      for (const link of r.exposes) {
+        const outer = linkedLocal(local, resolve, ownerPath, link);
+        if (!outer || outer.record.kind !== "endpoint" || outer.record.part || outer.record.parent) continue;
+        const outerPos = pos.get(outer.record.localId);
+        if (!outerPos) continue;
+        const inner = innerCandidates.map((record) => ({ record, p: pos.get(record.localId) })).filter((x) => !!x.p).sort((x, y) => {
+          const dx = x.p.x + x.p.width / 2 - (outerPos.x + outerPos.width / 2);
+          const dy = x.p.y + x.p.height / 2 - (outerPos.y + outerPos.height / 2);
+          const ex = y.p.x + y.p.width / 2 - (outerPos.x + outerPos.width / 2);
+          const ey = y.p.y + y.p.height / 2 - (outerPos.y + outerPos.height / 2);
+          return dx * dx + dy * dy - (ex * ex + ey * ey);
+        })[0];
+        if (!inner) continue;
+        edges.push(edge(
+          "expose:" + r.localId + ":" + outer.record.localId,
+          nodeId(inner.record),
+          nodeId(outer.record),
+          sideToward(inner.p, outerPos),
+          sideToward(outerPos, inner.p),
+          (r.identifier || "connection") + " exposes",
+          "none"
+        ));
+      }
+    }
   }
   return {
     ownerPath,
@@ -10024,35 +10102,35 @@ var INTERNAL_PROFILE = {
 var FUNCTIONAL_PROFILE = {
   name: "Functional",
   description: "Functions of an Object, or a Function with its performer, parent, sub-functions and order.",
-  startTypes: ["Object", "Function"],
+  startTypes: ["Object", "Behavior"],
   steps: [
-    { field: "performs", direction: "out", from: ["Object"], to: ["Function"], atStartOnly: true, undefinedOk: true },
-    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
-    { field: "hasChild", direction: "in", from: ["Function"], to: ["Function"], atStartOnly: true },
-    { field: "hasChild", direction: "out", from: ["Function"], to: ["Function"] },
-    { field: "precedes", direction: "in", from: ["Function"], to: ["Function"], undefinedOk: false },
-    { field: "precedes", direction: "out", from: ["Function"], to: ["Function"], undefinedOk: true }
+    { field: "performs", direction: "out", from: ["Object"], to: ["Behavior"], atStartOnly: true, undefinedOk: true },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] },
+    { field: "hasChild", direction: "in", from: ["Behavior"], to: ["Behavior"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Behavior"], to: ["Behavior"] },
+    { field: "precedes", direction: "in", from: ["Behavior"], to: ["Behavior"], undefinedOk: false },
+    { field: "precedes", direction: "out", from: ["Behavior"], to: ["Behavior"], undefinedOk: true }
   ],
   depth: 2,
   nodeCap: 80,
   perParent: 12
 };
-var REQ_HOLDERS = ["Object", "Function", "Design", "State", "Use Case", "Verification"];
+var REQ_HOLDERS = ["Object", "Behavior", "Condition", "Use Case", "Verification"];
 var REQUIREMENTS_PROFILE = {
   name: "Requirements",
   description: "A requirement with its parents, children, derivation, satisfiers and verifiers; or an element with its requirements.",
   startTypes: ["Requirement", ...REQ_HOLDERS],
   steps: [
-    { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Function", "Design"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Requirement"], to: ["Requirement", "Object", "Behavior", "Condition"], atStartOnly: true },
     { field: "hasChild", direction: "out", from: ["Requirement"], to: ["Requirement"] },
-    { field: "hasChild", direction: "out", from: ["Object", "Function", "Design"], to: ["Requirement"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Object", "Behavior", "Condition"], to: ["Requirement"], atStartOnly: true },
     { field: "derivedFrom", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "derivedFrom", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "refines", direction: "out", from: ["Requirement"], to: ["Requirement"], undefinedOk: true },
     { field: "refines", direction: "in", from: ["Requirement"], to: ["Requirement"] },
     { field: "references", direction: "out", from: ["Requirement"], to: ["Requirement", "Document"] },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Behavior", "Condition"] },
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
     { field: "appliesTo", direction: "out", from: ["Requirement"] },
@@ -10073,11 +10151,10 @@ var WHERE_USED_PROFILE = {
     { field: "includes", direction: "in" },
     { field: "hasChild", direction: "in" },
     { field: "hasState", direction: "in" },
-    { field: "hasPort", direction: "in" },
-    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] },
-    { field: "hasDesign", direction: "in", from: ["Design"] },
-    { field: "realizedBy", direction: "in", from: ["Function", "Design"], to: ["Use Case"] },
-    { field: "participants", direction: "in", from: ["Object", "Actor", "Function", "Port", "Document"], to: ["Use Case"] },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] },
+    { field: "hasDesign", direction: "in", from: ["Condition"] },
+    { field: "realizedBy", direction: "in", from: ["Behavior", "Condition"], to: ["Use Case"] },
+    { field: "participants", direction: "in", from: ["Object", "Actor", "Behavior", "Document"], to: ["Use Case"] },
     { field: "dependsOn", direction: "in" }
   ],
   depth: 3,
@@ -10087,23 +10164,9 @@ var WHERE_USED_PROFILE = {
 };
 var INTERFACES_PROFILE = {
   name: "Interfaces",
-  description: "Ports, what each connects to and who owns the other end, exposed ports, item flows.",
-  startTypes: ["Object", "Port", "Item Flow"],
-  steps: [
-    { field: "hasPort", direction: "out", from: ["Object"], to: ["Port"], undefinedOk: true },
-    { field: "hasPort", direction: "in", from: ["Port"], to: ["Object"] },
-    { field: "interfaces", direction: "out", from: ["Port"], to: ["Port"], noArrow: true, undefinedOk: true },
-    { field: "exposes", direction: "out", from: ["Port"], to: ["Port"], undefinedOk: true },
-    { field: "exposes", direction: "in", from: ["Port"], to: ["Port"] },
-    { field: "transmits", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "receives", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "exchanges", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "hasFlow", direction: "out", from: ["Port"], to: ["Item Flow"], undefinedOk: true },
-    { field: "transmits", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "receives", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "exchanges", direction: "in", from: ["Item Flow"], to: ["Port"] },
-    { field: "hasFlow", direction: "in", from: ["Item Flow"], to: ["Port"] }
-  ],
+  description: "Local Interface occurrences, their Connections, exposed boundary Interfaces and carried Item Flows.",
+  startTypes: ["Object", "Item Flow"],
+  steps: [],
   depth: 3,
   nodeCap: 80,
   perParent: 12,
@@ -10112,13 +10175,13 @@ var INTERFACES_PROFILE = {
 var VERIFICATION_PROFILE = {
   name: "Verification",
   description: "What verifies a requirement, what else a verification covers, and what satisfies those requirements.",
-  startTypes: ["Requirement", "Verification", "Function", "Design", "State"],
+  startTypes: ["Requirement", "Verification", "Behavior", "Condition"],
   steps: [
     { field: "verifies", direction: "in", from: ["Requirement"], to: ["Verification"] },
     { field: "verifies", direction: "out", from: ["Verification"], to: ["Requirement"], undefinedOk: true },
-    { field: "appliesTo", direction: "in", from: ["State"], to: ["Requirement"], atStartOnly: true },
-    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
-    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Function", "Design"] }
+    { field: "appliesTo", direction: "in", from: ["Condition"], to: ["Requirement"], atStartOnly: true },
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], atStartOnly: true, undefinedOk: true },
+    { field: "satisfies", direction: "in", from: ["Requirement"], to: ["Behavior", "Condition"] }
   ],
   depth: 2,
   nodeCap: 80,
@@ -10127,13 +10190,13 @@ var VERIFICATION_PROFILE = {
 var DESIGN_PROFILE = {
   name: "Design",
   description: "The designs of an Object or Document, sub-designs, and the requirements each satisfies.",
-  startTypes: ["Object", "Document", "Design"],
+  startTypes: ["Object", "Document", "Condition"],
   steps: [
-    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Design"], undefinedOk: true },
-    { field: "hasDesign", direction: "in", from: ["Design"], to: ["Object", "Document"], atStartOnly: true },
-    { field: "hasChild", direction: "in", from: ["Design"], to: ["Design"], atStartOnly: true },
-    { field: "hasChild", direction: "out", from: ["Design"], to: ["Design"] },
-    { field: "satisfies", direction: "out", from: ["Design"], to: ["Requirement"], undefinedOk: true }
+    { field: "hasDesign", direction: "out", from: ["Object", "Document"], to: ["Condition"], undefinedOk: true },
+    { field: "hasDesign", direction: "in", from: ["Condition"], to: ["Object", "Document"], atStartOnly: true },
+    { field: "hasChild", direction: "in", from: ["Condition"], to: ["Condition"], atStartOnly: true },
+    { field: "hasChild", direction: "out", from: ["Condition"], to: ["Condition"] },
+    { field: "satisfies", direction: "out", from: ["Condition"], to: ["Requirement"], undefinedOk: true }
   ],
   depth: 2,
   nodeCap: 80,
@@ -10144,15 +10207,15 @@ var SCENARIO_PROFILE = {
   description: "A use case: participants, the functions and designs that realize it, included and optional use cases, the order of its steps.",
   startTypes: ["Use Case"],
   steps: [
-    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Function", "Port", "Document"], undefinedOk: true },
-    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Function", "Design"], undefinedOk: true },
+    { field: "participants", direction: "out", from: ["Use Case"], to: ["Object", "Actor", "Behavior", "Document"], undefinedOk: true },
+    { field: "realizedBy", direction: "out", from: ["Use Case"], to: ["Behavior", "Condition"], undefinedOk: true },
     { field: "hasChild", direction: "out", from: ["Use Case"], to: ["Use Case"] },
     { field: "hasChild", direction: "in", from: ["Use Case"], to: ["Use Case"], atStartOnly: true },
     { field: "optionOf", direction: "out", from: ["Use Case"], to: ["Use Case"], undefinedOk: true },
     { field: "optionOf", direction: "in", from: ["Use Case"], to: ["Use Case"] },
     { field: "drives", direction: "out", from: ["Use Case"], to: ["Requirement"] },
-    { field: "precedes", direction: "in", from: ["Function"], to: ["Function"] },
-    { field: "precedes", direction: "out", from: ["Function"], to: ["Function"] }
+    { field: "precedes", direction: "in", from: ["Behavior"], to: ["Behavior"] },
+    { field: "precedes", direction: "out", from: ["Behavior"], to: ["Behavior"] }
   ],
   depth: 2,
   nodeCap: 80,
@@ -10161,18 +10224,18 @@ var SCENARIO_PROFILE = {
 var BEHAVIOR_PROFILE = {
   name: "Behavior",
   description: "State machines and states: who has them, initial and final states, order, nesting, what triggers them.",
-  startTypes: ["State Machine", "State", "Object"],
+  startTypes: ["Condition", "Object"],
   steps: [
-    { field: "hasState", direction: "out", from: ["Object", "State Machine"], to: ["State", "State Machine"], undefinedOk: true },
-    { field: "hasState", direction: "in", from: ["State", "State Machine"], to: ["Object", "State Machine"], atStartOnly: true },
-    { field: "initialState", direction: "out", from: ["State Machine"], to: ["State"], undefinedOk: true },
-    { field: "finalState", direction: "out", from: ["State Machine"], to: ["State"], undefinedOk: true },
-    { field: "hasChild", direction: "out", from: ["State"], to: ["State"] },
-    { field: "hasChild", direction: "in", from: ["State"], to: ["State"], atStartOnly: true },
-    { field: "precedes", direction: "in", from: ["State"], to: ["State"] },
-    { field: "precedes", direction: "out", from: ["State"], to: ["State"], undefinedOk: true },
-    { field: "triggeredBy", direction: "out", from: ["State"], to: ["Function", "Design", "State", "Item Flow"] },
-    { field: "triggeredBy", direction: "in", from: ["State"], to: ["Function", "Design", "State"] }
+    { field: "hasState", direction: "out", from: ["Object", "Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "hasState", direction: "in", from: ["Condition"], to: ["Object", "Condition"], atStartOnly: true },
+    { field: "initialState", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "finalState", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "hasChild", direction: "out", from: ["Condition"], to: ["Condition"] },
+    { field: "hasChild", direction: "in", from: ["Condition"], to: ["Condition"], atStartOnly: true },
+    { field: "precedes", direction: "in", from: ["Condition"], to: ["Condition"] },
+    { field: "precedes", direction: "out", from: ["Condition"], to: ["Condition"], undefinedOk: true },
+    { field: "triggeredBy", direction: "out", from: ["Condition"], to: ["Behavior", "Condition", "Item Flow"] },
+    { field: "triggeredBy", direction: "in", from: ["Condition"], to: ["Behavior", "Condition"] }
   ],
   depth: 2,
   nodeCap: 80,
@@ -10186,8 +10249,8 @@ var FAILURE_PROFILE = {
     { field: "affects", direction: "in", to: ["Issue", "Failure Mode", "Use Case"] },
     { field: "drives", direction: "out", from: ["Issue", "Failure Mode"] },
     { field: "drives", direction: "in", from: ["Issue", "Failure Mode"] },
-    { field: "satisfies", direction: "out", from: ["Function", "Design"], to: ["Requirement"], undefinedOk: true },
-    { field: "performs", direction: "in", from: ["Function"], to: ["Object"] }
+    { field: "satisfies", direction: "out", from: ["Behavior", "Condition"], to: ["Requirement"], undefinedOk: true },
+    { field: "performs", direction: "in", from: ["Behavior"], to: ["Object"] }
   ],
   depth: 2,
   nodeCap: 80,
@@ -10221,7 +10284,14 @@ var PROFILES = {
   [FAILURE_PROFILE.name]: FAILURE_PROFILE,
   [EVIDENCE_PROFILE.name]: EVIDENCE_PROFILE
 };
+function semanticViewType(type) {
+  if (type === "Function" || type === "Step" || type === "Action") return "Behavior";
+  if (type === "Design" || type === "State" || type === "State Machine" || type === "Mode") return "Condition";
+  return type;
+}
 function stepAllows(step, cur, nbr) {
+  cur = semanticViewType(cur);
+  nbr = semanticViewType(nbr);
   if (step.from && !(cur && step.from.includes(cur))) return false;
   if (step.to && !(nbr && step.to.includes(nbr))) return false;
   return true;
@@ -10235,7 +10305,7 @@ function traverse(index, starts, profile) {
   let capReached = false;
   let frontier = [...new Set(starts)].filter((s) => index.notes.has(s));
   for (const s of frontier) depthOf.set(s, 0);
-  const typeOf = (p) => index.notes.get(p)?.type;
+  const typeOf = (p) => semanticViewType(index.notes.get(p)?.type);
   const neighbours = (p, dist) => {
     const seen = /* @__PURE__ */ new Set();
     const out = [];
@@ -10434,7 +10504,7 @@ function withLocalInterfaces(index, local, resolve, base3, profile = INTERFACES_
       const a = localKeyFor(index, local, ownerPath, r);
       if (!a || !m.depthOf.has(a)) continue;
       const groups = [
-        ["exposes", r.exposes],
+        ...r.sourceSchemaVersion === "0.4" ? [] : [["exposes", r.exposes]],
         ["equals", r.equals],
         ["parent", r.parent ? [r.parent] : []]
       ];
@@ -10463,11 +10533,26 @@ function withLocalInterfaces(index, local, resolve, base3, profile = INTERFACES_
         if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
         else m.tree.push({ parent: a, child: t.key, field, direction: "out", count: 1 });
       }
+      if (r.sourceSchemaVersion === "0.4") {
+        for (const link of r.exposes) {
+          const t = linkedLocal2(index, local, resolve, ownerPath, link);
+          if (!t) continue;
+          const alreadyPlaced = m.depthOf.has(t.key);
+          addLocalNode(index, local, m, t.path, t.record, ownerDepth + 1, profile);
+          if (!m.depthOf.has(t.key)) continue;
+          if (alreadyPlaced) m.localEdges.push({ parent: a, child: t.key, field: "exposes", direction: "out", count: 1 });
+          else m.tree.push({ parent: a, child: t.key, field: "exposes", direction: "out", count: 1 });
+        }
+      }
     }
   }
-  for (const definitionPath of starts.filter((p) => ["Port", "Item Flow"].includes(index.notes.get(p)?.type ?? ""))) {
+  for (const definitionPath of starts.filter((p) => {
+    const note = index.notes.get(p);
+    return note?.type === "Item Flow" || note?.type === "Port" || note?.type === "Object" && note.subtype === "interface";
+  })) {
     const d = m.depthOf.get(definitionPath) ?? 0;
-    const expected = index.notes.get(definitionPath)?.type === "Port" ? "endpoint" : "flow";
+    const note = index.notes.get(definitionPath);
+    const expected = note?.type === "Item Flow" ? "flow" : "endpoint";
     const occurrences = local.occurrencesOf(definitionPath, resolve).filter(({ record }) => record.kind === expected).sort((a, b) => a.path.localeCompare(b.path) || a.record.identifier.localeCompare(b.record.identifier));
     for (const { path, record } of occurrences) {
       const k = addLocalNode(index, local, m, path, record, d + 1, profile);
@@ -11608,6 +11693,7 @@ var Indexer = class {
       path: file.path,
       name: file.basename,
       type: str(fm.type),
+      subtype: str(fm.subtype),
       id: str(fm.id),
       uid: str(fm.uid),
       authoredLinks,
