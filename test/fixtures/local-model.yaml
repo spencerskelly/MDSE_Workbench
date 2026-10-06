@@ -124,6 +124,8 @@ records:
       - "exposes points from this internal/context-owned connection to the assembly-boundary Interface occurrence through which the connection is made available externally."
       - "an exposed Interface is an endpoint occurrence, not a second connection; one connection may expose through more than one boundary Interface when the source model explicitly supports that topology."
       - "usage is not valid on a connection."
+      - "exposes identifies one or more boundary Interface occurrences through which this internal connection is made available outside the current context."
+      - "exposes is not an electrical/logical connection by itself; it is an exposure relationship between the internal connection and the owning context boundary Interface."
 
   flow:
     headingLevel: 5
