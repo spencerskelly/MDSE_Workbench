@@ -2,21 +2,16 @@ name: Exact candidate startup acceptance
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/integration-candidate-startup.yml"
-      - "bench/obsidian-e2e-activate.mjs"
-      - "bench/obsidian-plugin-overlap-probe.mjs"
-      - "artifact-sha256.txt"
-      - "main.js"
-      - "manifest.json"
-      - "styles.css"
+  workflow_run:
+    workflows: ["Build Workbench artifact"]
+    types: [completed]
 
 permissions:
   contents: read
 
 jobs:
   startup-acceptance:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -26,6 +21,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-node@v4
         with:
