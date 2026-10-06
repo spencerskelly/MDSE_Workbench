@@ -1,6 +1,6 @@
 # MDSE Workbench User Guide
 
-**Status:** living guide for the MDSE v0.8 pre-release Workbench. Check `99_System/01_Admin/Enabled Plugin Stack.md` in an engineering vault for the exact pinned Workbench version. Features marked **Candidate** are part of the current WB-106 development line but are not considered released until the controlled Base Vault release process promotes them.
+**Status:** living guide for the MDSE v0.8 controlled Workbench. Workbench 0.1.18 is the first WB-106-capable Local Model 0.4 release accepted for the pre-release MDSE 0.8 base. Check `99_System/01_Admin/Enabled Plugin Stack.md` in an engineering vault for the exact pinned version. Features explicitly marked **Candidate** remain preview capabilities and are not part of the 0.1.18 release acceptance.
 
 ## What Workbench is
 
@@ -33,7 +33,7 @@ Workbench normally updates its semantic index incrementally as files change. The
 
 ### Runtime status
 
-Candidate Workbench builds expose staged startup state in the status bar:
+Workbench 0.1.18 exposes staged startup state in the status bar:
 
 - **starting** — schemas/runtime are being prepared;
 - **waiting for vault** — Workbench is deliberately giving Obsidian its own startup lane;
@@ -51,11 +51,9 @@ Core readiness does not mean every derived capability must already be complete. 
 
 A missing or invalid Workbench cache is a performance/recovery condition, not a model failure. Workbench must be able to rebuild from the vault. **Clear semantic cache** is the supported reset path; engineers should not delete arbitrary files under `.obsidian`.
 
-### Semantic cache candidate
+### Semantic cache and warm-cache preview
 
-**Candidate — W-343/W-345 / RTA-2 and RTA-3.**
-
-The development line writes a local, Git-ignored semantic cache after Workbench is already Ready. The cache is bound to the vault identity and schema/parser contract and uses two crash-safe A/B slots. It may be deleted at any time.
+Workbench writes a local, Git-ignored semantic cache after it is already Ready. The cache is bound to the vault identity and schema/parser contract and uses two crash-safe A/B slots. It may be deleted at any time.
 
 **Warm cache preview** is an explicit pre-release setting and is OFF by default. When enabled in an integration vault, Workbench may restore a validated cache and reconcile a bounded set of changed, added, deleted or renamed files. Semantic-cache v3 retains authored relationship-link evidence and uses Obsidian ctime + mtime + size fingerprints. A path-set change can therefore re-resolve otherwise unchanged relationship links through Obsidian's current metadata without rereading those note bodies, while suspicious file-stat changes force reconciliation. Large change sets still deliberately use the full chunked rebuild path.
 
@@ -100,8 +98,6 @@ A useful view should remain readable. If a view becomes a dense graph, switch to
 
 ## 4. Internal view for occurrence-based assemblies
 
-**Candidate — WB-123.**
-
 Use **Internal** when a note owns Local Model occurrences and you want to understand what is inside that context.
 
 The selected Object/note is the visual boundary.
@@ -113,7 +109,7 @@ Inside the boundary Workbench shows:
 - context-owned connections;
 - connection-owned flows.
 
-Assembly boundary interfaces are intentionally shown as small text boxes on the outer edge of the boundary. An `exposes` path connects an outer boundary endpoint to the internal endpoint it exposes.
+Assembly boundary Interfaces are intentionally shown as small text boxes on the outer edge of the boundary. In Local Model 0.4, `Connection.exposes` links an internal/context Connection to the boundary Interface through which that Connection is made available externally; the Interface does not own the `exposes` relationship.
 
 Internal view follows the Local Model ownership rule: it shows topology owned by the current context. It does not flatten every reusable definition's internals into one giant picture.
 
@@ -157,8 +153,6 @@ Do not create duplicate definition notes merely because a product contains sever
 
 ## 6. Occurrence details and Definition
 
-**Candidate editor direction — WB-114.**
-
 Occurrence details show occurrence-owned/context-local information first.
 
 Reusable information belongs under **Definition**. Expanding Definition should show the canonical reusable note, not a copied snapshot.
@@ -195,7 +189,7 @@ A staged transaction may be temporarily incomplete while it is being assembled, 
 
 ### Do not edit the governed Local Model region as ordinary text
 
-New Local Model writes use schema 0.2. Workbench reads 0.1 for compatibility but does not use ordinary body editing to rewrite governed Local Model records.
+New structured Local Model writes use schema 0.4 with `Parts`, `Interfaces`, and `Connections`. Workbench reads schemas 0.1 through 0.4, but schemas 0.1–0.3 are read-only for structured mutation so historical meaning is never silently upgraded. In 0.4, a reusable Interface definition is an `Object / interface`; a contextual Interface may be definitionless when no reusable definition exists, but an Interface with explicit `usage` requires a definition. Boundary exposure is owned by `Connection.exposes`.
 
 Use structured Workbench controls for Local Model changes.
 
@@ -277,4 +271,4 @@ Try these in order:
 
 The engineering Base Vault may still pin an older Workbench while a newer candidate is being developed. The pinned version shown in **Enabled Plugin Stack** is the runtime truth.
 
-The current WB-106 development line adds structured Local Model editing, the Internal occurrence-native view, and the W-343/W-345 runtime architecture. Save-only semantic-cache behavior and opt-in warm-cache preview are candidate capabilities, not released merely because their source exists. Promotion still requires the Workbench test/typecheck/build gate, runtime acceptance on representative vaults, controlled payload/lock/release updates, and release-checker success.
+Workbench 0.1.18 is the accepted WB-106-capable Local Model 0.4 release: structured Local Model editing and the Internal occurrence-native view are release capabilities. The save-only semantic cache is disposable runtime infrastructure; **Warm cache preview** remains opt-in pre-release behavior and must not be enabled in a controlled vault merely because the setting exists. A later Workbench version still requires the same test/typecheck/build, representative-vault acceptance, controlled payload/lock update, and release-checker gates before promotion.
