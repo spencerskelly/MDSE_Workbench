@@ -152,7 +152,7 @@ for (let i = 0; i < files.length; i++) {
   const authored = authoredLinks(fm, relationFields);
   const resolved = resolveAuthoredRelationshipLinks(authored, file, schema, resolveTarget);
   authoredRelationshipLinks += authored.length;
-  unresolvedRelationshipLinks += resolved.unresolved.length;
+  unresolvedRelationshipLinks += resolved.unresolved;
   brokenRelationshipLinks += resolved.broken.length;
 
   const abstractValue = fm.abstract;
