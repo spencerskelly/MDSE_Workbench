@@ -14,7 +14,8 @@
     "bench:cache": "tsx bench/cache-bench.ts",
     "bench:startup": "tsx bench/startup-bench.ts",
     "bench:relationships": "tsx bench/relationship-reresolution-bench.ts",
-    "accept:real-vault": "tsx scripts/real-vault-acceptance.ts"
+    "accept:real-vault": "tsx scripts/real-vault-acceptance.ts",
+    "accept:real-vault:scan": "tsx scripts/real-vault-readonly-scan.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {
