@@ -187,7 +187,7 @@ MDSE WORKBENCH
 
 CREATE
 [ Object ] [ Requirement ] [ Function ] [ Design ]
-[ Port ] [ Verification ] [ Plan ] [ Issue ] ...
+[ Verification ] [ Plan ] [ Issue ] [ Interface Definition ] ...
 
 EXPLORE
 [ Search for one or more elements... ]
@@ -210,6 +210,8 @@ Broken References       2
 ```
 
 Exact labels and supported create actions should follow the current vault schema rather than be hard-coded from this mockup.
+
+Under Local Model 0.4, an EA-style Port is **not** a first-class Workbench note type. A reusable interface definition is an `Object / interface` note; a contextual Interface occurrence is created/edited inside its owner's Local Model through the structured editor.
 
 ### Create area
 
@@ -604,7 +606,7 @@ In View mode these sections are inspectable. In Edit mode:
 - Local Model content uses structured occurrence/context controls through the Workbench model-edit service;
 - reusable-definition editing is a separate mode/surface that writes the canonical note, even when launched from an occurrence.
 
-W-319 advances the canonical v0.8.0 Local Model writer boundary to `<!-- MDSE:LOCAL-MODEL START schema=0.2 -->` through `<!-- MDSE:LOCAL-MODEL END -->`. Workbench must read both 0.1 and 0.2; structured writes use 0.2 only. The comments are parser/editor boundaries, not engineering semantics. Raw text editing must never rewrite the governed region. The record/local-ID contract is governed by `local-model.yaml`.
+The Local Model marker pair `<!-- MDSE:LOCAL-MODEL START schema=... -->` through `<!-- MDSE:LOCAL-MODEL END -->` is a governed parser/editor boundary, not engineering semantics. Raw text/property editing must never rewrite that region. WB-128 is the high-priority compatibility gate for importer v0.8.19 / Local Model 0.4: Workbench must preserve stable local block IDs and `#^local-id` references, understand Parts / Interfaces / Connections / connection-owned flows / Connection-owned `exposes`, and remain version-aware for older Local Model schemas. Structured writing uses only a schema version explicitly supported by the active writer; unsupported/newer semantics fail closed. The record/local-ID contract remains governed by `local-model.yaml`.
 
 WB-114 expands WB-106 from its completed read/navigation baseline into a structured editor. Occurrence-local data remains visually and semantically separate from reusable-definition data.
 
