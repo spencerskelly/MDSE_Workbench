@@ -369,6 +369,8 @@ function deserializeLocalRecord(raw: unknown): LocalRecord {
     roleA: strictNullableString(raw.roleA, "roleA"),
     roleB: strictNullableString(raw.roleB, "roleB"),
     multiplicity: strictNullableString(raw.multiplicity, "multiplicity"),
+    quantity: strictNullableString(raw.quantity ?? null, "quantity"),
+    unitOfMeasure: strictNullableString(raw.unitOfMeasure ?? null, "unitOfMeasure"),
     endpointKind: strictNullableString(raw.endpointKind, "endpointKind"),
     connectionId: strictNullableString(raw.connectionId, "connectionId"),
     sourceSchemaVersion: raw.sourceSchemaVersion,
