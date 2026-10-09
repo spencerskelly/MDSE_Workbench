@@ -342,7 +342,7 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       const rawQty = r.fields.get("quantity");
       const rawUom = r.fields.get("unitOfMeasure");
       if (rawQty !== undefined) {
-        if (!/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(rawQty.trim()) || !/[1-9]/.test(rawQty)) {
+        if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(rawQty.trim()) || !/[1-9]/.test(rawQty)) {
           add("part.quantity-invalid", `${label}: quantity must be a positive plain decimal without exponent or sign.`, r);
         }
         if (rawUom === undefined || !rawUom.trim()) {
