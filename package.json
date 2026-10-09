@@ -17,7 +17,8 @@
     "accept:real-vault": "tsx scripts/real-vault-acceptance.ts",
     "accept:real-vault:scan": "tsx scripts/real-vault-readonly-scan.ts",
     "accept:real-vault:views": "tsx scripts/real-vault-view-check.ts",
-    "accept:real-vault:edits": "tsx scripts/real-vault-edit-check.ts"
+    "accept:real-vault:edits": "tsx scripts/real-vault-edit-check.ts",
+    "accept:real-vault:05": "tsx scripts/real-vault-05-acceptance.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {
