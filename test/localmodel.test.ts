@@ -482,6 +482,37 @@ test("0.5 canonical equals requires reciprocal same-owner Interface links", () =
     "0.4 temporary review equals is not silently reinterpreted as 0.5 canonical binding");
 });
 
+test("0.5 source validator rejects self, duplicate, and malformed equals without changing 0.4 semantics", () => {
+  const build = (version: "0.4" | "0.5", raw: string, reciprocal = true) => [
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=" + version + " -->",
+    "### Interfaces",
+    "#### A", "- equals: " + raw, "^" + E1, "",
+    "#### B", ...(reciprocal ? ["- equals: [[#^" + E1 + "|A]]"] : []), "^" + E2,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+  const duplicate = "[[#^" + E2 + "|B]] [[#^" + E2 + "|B again]]";
+  const examples: Array<[string, string, string]> = [
+    ["self", "[[#^" + E1 + "|A]]", "equals.self"],
+    ["duplicate same ID with different aliases", duplicate, "equals.duplicate"],
+    ["text outside links", "[[#^" + E2 + "|B]] stray-text", "equals.malformed"],
+    ["note-only reference", "[[CAN Interface]]", "equals.malformed"],
+    ["unterminated wikilink", "[[#^" + E2 + "|B]", "equals.malformed"],
+    ["empty value", "", "equals.malformed"],
+    ["malformed local fragment", "[[#^]]", "equals.malformed"],
+  ];
+  for (const [name, value, code] of examples) {
+    const bad = parseLocalModel(build("0.5", value))!;
+    assert.ok(bad.findings.some((f) => f.code === code && f.severity === "error" && f.localId === E1),
+      name + " must be a blocking source finding for 0.5");
+    const historical = parseLocalModel(build("0.4", value))!;
+    assert.ok(!historical.findings.some((f) => ["equals.self", "equals.duplicate", "equals.malformed"].includes(f.code)),
+      name + " must not redefine 0.4 temporary equals semantics");
+  }
+  const good = parseLocalModel(build("0.5", "[[#^" + E2 + "|B]]"))!;
+  assert.equal(good.findings.filter((f) => f.code.startsWith("equals.")).length, 0,
+    "a valid reciprocal 0.5 binding remains free of equals findings");
+});
+
 test("the current W-384 schema fixtures parse without warnings", () => {
   const current = currentFixtureSchema();
   assert.deepEqual(current.warnings, []);
