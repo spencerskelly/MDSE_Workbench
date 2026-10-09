@@ -438,6 +438,24 @@ test("0.4 Interface definitions require Object/interface; definitionless Interfa
 });
 
 
+test("0.5 Interface definitions require Object/interface rather than legacy Port", () => {
+  const body = ["## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->", "### Interfaces",
+    "#### Boundary", "- definition: [[CAN Interface]]", "^" + E3, END].join("\n");
+  const check = (def: Partial<NoteRecord>) =>
+    vcodes(vault({ "CAN Interface.md": def }, [], { "Control Assembly.md": body }));
+  assert.ok(!check({ type: "Object", subtype: "interface" }).includes("definition.incompatible"),
+    "0.5 accepts the governed Object / interface definition");
+  assert.ok(check({ type: "Port" }).includes("definition.incompatible"),
+    "0.5 does not silently accept legacy Port definitions");
+  assert.ok(check({ type: "Object", subtype: "electrical" }).includes("definition.incompatible"),
+    "0.5 rejects a non-interface Object subtype");
+  assert.ok(check({ type: "Object", subtype: undefined }).includes("definition.incompatible"),
+    "0.5 requires the interface subtype");
+  const definitionless = body.replace("- definition: [[CAN Interface]]\\n", "");
+  assert.ok(!vcodes(vault({}, [], { "Control Assembly.md": definitionless })).includes("record.missing-definition"),
+    "0.5 retains supported definitionless contextual Interfaces");
+});
+
 test("the current W-384 schema fixtures parse without warnings", () => {
   const current = currentFixtureSchema();
   assert.deepEqual(current.warnings, []);
