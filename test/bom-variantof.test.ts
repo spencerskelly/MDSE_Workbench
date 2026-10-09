@@ -1,3 +1,4 @@
+import { toFindings, countByCategory } from "../src/core/review";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ModelIndex } from "../src/core/model";
@@ -30,4 +31,14 @@ test("variantOf: self link, multiple targets and cycles",()=>{
  assert.ok(graph([["A","Object",["B","C"]],["B","Object"],["C","Object"]]).codes.includes("variant.multiple"));
  const c=graph([["A","Object",["B"]],["B","Object",["C"]],["C","Object",["A"]]]);
  assert.equal(c.codes.filter(x=>x==="variant.cycle").length,3);
+});
+
+test("variantOf issues appear as stable Review findings",()=>{
+ const {index}=graph([["A","Object",["Missing"]]]);
+ const {index: valid}=graph([["A","Object",["Family"]],["Family","Object"]]);
+ const issues=validateVariantOf(index);
+ const review=toFindings(index.findings(), [], issues);
+ assert.ok(review.some(x=>x.category==="variantOf" && x.field==="variantOf" && x.reason==="variant.target-missing"));
+ assert.equal(countByCategory(review).variantOf,1);
+ assert.equal(toFindings(valid.findings(),[],validateVariantOf(valid)).filter(x=>x.category==="variantOf").length,0);
 });
