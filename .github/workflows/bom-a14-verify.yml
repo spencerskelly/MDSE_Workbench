@@ -17,4 +17,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: BOM 0.6 focused tests
+        run: node --import tsx --test test/bom-localmodel-06.test.ts
+      - name: Full historical suite (baseline drift tracked)
+        run: npm test
