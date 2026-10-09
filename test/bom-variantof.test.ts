@@ -1,3 +1,4 @@
+import { resolveAuthoredRelationshipLinks } from "../src/core/relationship-resolution";
 import { variantOfFormatError } from "../src/core/variantof-format";
 import { toFindings, countByCategory } from "../src/core/review";
 import { test } from "node:test";
@@ -72,4 +73,15 @@ test("raw YAML format issues survive into Review findings", () => {
   const issues=validateVariantOf(index);
   assert.ok(issues.some(x=>x.code==="variant.format"));
   assert.ok(toFindings(index.findings(),[],issues).some(x=>x.category==="variantOf" && x.reason==="variant.format"));
+});
+
+test("reresolution retains raw format diagnosis while updating link evidence", () => {
+ const {index}=graph([["A","Object"],["Family","Object"]]);
+ const original=index.notes.get("A")!;
+ original.variantOfFormatError="variantOf must contain exactly one note-level [[Target]] link.";
+ const authored=[{field:"variantOf",link:"[[Family]]",linkpath:"Family"}];
+ const resolved=resolveAuthoredRelationshipLinks(authored,"A",schema,(target)=>target==="Family"?"Family":undefined);
+ index.upsert({...original,fields:resolved.fields,unresolved:resolved.unresolved,broken:resolved.broken,repeat:resolved.repeat});
+ assert.equal(index.notes.get("A")?.variantOfFormatError,original.variantOfFormatError);
+ assert.ok(validateVariantOf(index).some(x=>x.code==="variant.format"));
 });
