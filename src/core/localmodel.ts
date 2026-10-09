@@ -363,6 +363,7 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
   };
   for (const r of region.records) {
     if (r.kind === "endpoint") {
+      const label = `endpoint "${r.identifier}"`;
       for (const [field, , want] of refTargetsKind) needLocal(r, r[field], field, want);
       if (r.part && r.parent) add("ref.part-and-parent", `endpoint "${r.identifier}" has both part and parent; they are mutually exclusive.`, r);
       for (const l of r.exposes) needLocal(r, l, "exposes", "endpoint");
