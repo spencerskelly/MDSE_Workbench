@@ -42,3 +42,19 @@ test("variantOf issues appear as stable Review findings",()=>{
  assert.equal(countByCategory(review).variantOf,1);
  assert.equal(toFindings(valid.findings(),[],validateVariantOf(valid)).filter(x=>x.category==="variantOf").length,0);
 });
+
+test("variantOf retains duplicate resolved links and unresolved YAML evidence", () => {
+  const index = new ModelIndex(schema);
+  index.upsert({path:"Family", name:"Family", type:"Object", fields:new Map(), unresolved:0});
+  index.upsert({path:"A",name:"A",type:"Object",fields:new Map([["variantOf",["Family"]]]),
+    unresolved:1, broken:[{field:"variantOf",link:"[[Not Found]]"}],
+    repeat:new Map([["variantOf|Family",2]])});
+  const codes=validateVariantOf(index).map(x=>x.code);
+  assert.ok(codes.includes("variant.duplicate"));
+  assert.ok(codes.includes("variant.unresolved"));
+  assert.ok(codes.includes("variant.multiple"));
+  const review=toFindings(index.findings(),[],validateVariantOf(index));
+  assert.ok(review.some(x=>x.category==="variantOf" && x.reason==="variant.duplicate"));
+  assert.ok(review.some(x=>x.category==="variantOf" && x.reason==="variant.unresolved"));
+  assert.ok(review.some(x=>x.category==="broken" && x.field==="variantOf"));
+});
