@@ -969,11 +969,12 @@ test("plans adding one endpoint equals target while preserving existing equals l
     "### Interfaces",
     "#### Boundary",
     "- definition: [[CAN Port]]",
-    "- equals: [[#^" + existingId + "|J1]] [[External#^ep-20261005009000009skellyspencer|Remote]]",
+    "- equals: [[#^" + existingId + "|J1]]",
     "^" + sourceId,
     "",
     "#### J1",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + sourceId + "]]",
     "^" + existingId,
     "",
     "#### J2",
@@ -985,16 +986,17 @@ test("plans adding one endpoint equals target while preserving existing equals l
   const result = planLocalRecordPatch(
     text,
     sourceId,
-    { fields: { equals: "[[#^" + existingId + "|J1]] [[External#^ep-20261005009000009skellyspencer|Remote]] [[#^" + addId + "|J2]]" } },
+    { fields: { equals: "[[#^" + existingId + "|J1]] [[#^" + addId + "|J2]]" } },
     { allowInvalidTarget: true },
   );
 
   const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
   assert.deepEqual(source?.equals.map((link) => [link.target, link.blockId]), [
     ["", existingId],
-    ["External", "ep-20261005009000009skellyspencer"],
     ["", addId],
   ]);
+  assert.ok(parseLocalModel(result.after)?.records.find((r) => r.localId === addId)?.equals.some((l) => l.blockId === sourceId),
+    "new equals peer receives the reciprocal edge");
   assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
 });
 
@@ -1020,10 +1022,12 @@ test("plans removing one endpoint equals target without changing the others", ()
     "",
     "#### J1",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + sourceId + "]]",
     "^" + removeId,
     "",
     "#### J2",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + sourceId + "]]",
     "^" + keepId,
     "<!-- MDSE:LOCAL-MODEL END -->",
   ].join("\n");
@@ -1037,6 +1041,9 @@ test("plans removing one endpoint equals target without changing the others", ()
 
   const source = parseLocalModel(result.after)?.records.find((record) => record.localId === sourceId);
   assert.deepEqual(source?.equals.map((link) => link.blockId), [keepId]);
+  assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === removeId)?.equals.length, 0);
+  assert.equal(parseLocalModel(result.after)?.records.find((r) => r.localId === keepId)?.equals[0]?.blockId, sourceId);
+  assert.equal(result.findings.filter((finding) => finding.severity === "error").length, 0);
 });
 
 test("endpoint equals edit surfaces a missing same-note target as blocking validation", () => {
@@ -1357,6 +1364,7 @@ test("plans endpoint definition change while preserving endpoint topology and co
     "",
     "#### J4",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + endpointId + "]]",
     "^" + equalsId,
     "",
     "### Connections",
