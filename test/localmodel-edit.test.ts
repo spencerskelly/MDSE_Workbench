@@ -1689,6 +1689,42 @@ test("flow move refuses a missing target connection", () => {
 });
 
 
+test("0.5 equals rejects self, duplicate, cross-owner and malformed binding proposals", () => {
+  const source = "ep-20261005010000000skellyspencer";
+  const target = "ep-20261005010000001skellyspencer";
+  const body = [
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->", "### Interfaces",
+    "#### A", "^" + source, "", "#### B", "^" + target,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+  const invalid: Array<[string, string, RegExp]> = [
+    ["self-link", "[[#^" + source + "]]", /cannot equal itself/],
+    ["duplicate target", "[[#^" + target + "]] [[#^" + target + "|B]]", /duplicate equals target/i],
+    ["cross-owner note", "[[Other Assembly#^" + target + "]]", /same Local Model owner/],
+    ["note-only link", "[[Other Assembly]]", /same Local Model owner/],
+    ["plain text", "not a block link", /only governed Interface block links/],
+  ];
+  for (const [name, value, message] of invalid) {
+    assert.throws(
+      () => planLocalRecordPatch(body, source, { fields: { equals: value } }),
+      message,
+      name + ": invalid BindingConnector must fail planning",
+    );
+  }
+  const badTarget = planLocalRecordPatch(
+    body, source, { fields: { equals: "[[#^ep-20261005010000999skellyspencer]]" } },
+    { allowInvalidTarget: true },
+  );
+  assert.ok(badTarget.findings.some((finding) =>
+    finding.localId === source && finding.code === "ref.local-missing" && finding.severity === "error"
+  ), "missing same-owner block produces a blocking finding in staged Review");
+  assert.throws(
+    () => planLocalRecordPatch(body, source, { fields: { equals: "[[#^ep-20261005010000999skellyspencer]]" } }),
+    /invalid.*points at/i,
+    "an atomic edit must refuse a missing target",
+  );
+});
+
 test("older Local Model regions remain read-only for structured mutation", () => {
   const legacy = note().replace("schema=0.5", "schema=0.3").replace("### Parts", "### Part Occurrences").replace("### Interfaces", "### Local Interfaces");
   assert.throws(
