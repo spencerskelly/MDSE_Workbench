@@ -1276,6 +1276,7 @@ function noteWithEditableEquals(): string {
     "",
     "#### J1",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + source + "]]",
     "^" + equalA,
     "",
     "#### J2",
@@ -1304,6 +1305,8 @@ test("staged endpoint equals add stays unwritten until Apply and supports undo/r
 
   await service.applyLocalPatch(staged.transaction.id);
   assert.ok(store.text.includes("- equals: [[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]"));
+  assert.ok(parseLocalModel(store.text)?.records.find((r) => r.localId === secondId)?.equals.some((l) => l.blockId === sourceId),
+    "new peer receives the reciprocal edge in the same apply");
   assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
 
   await transactions.undo();
@@ -1734,6 +1737,7 @@ function noteWithDefinedEndpointAndConnection(): string {
     "",
     "#### J4",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + endpointId + "]]",
     "^" + equalsId,
     "",
     "### Connections",
