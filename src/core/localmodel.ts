@@ -367,6 +367,22 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       if (r.part && r.parent) add("ref.part-and-parent", `endpoint "${r.identifier}" has both part and parent; they are mutually exclusive.`, r);
       for (const l of r.exposes) needLocal(r, l, "exposes", "endpoint");
       for (const l of r.equals) needLocal(r, l, "equals", "endpoint");
+      // In 0.5 only, explicit source BindingConnector equals is a symmetric,
+      // same-owner edge. Earlier versions retain their original review semantics.
+      if (version === "0.5") {
+        for (const l of r.equals) {
+          if (l.target) {
+            add("equals.cross-context", `${label}: equals must target an Interface in the same Local Model owner.`, r);
+            continue;
+          }
+          if (!l.blockId) continue; // missing/malformed links are checked by needLocal
+          const target = sameNote(l);
+          if (!target || target.kind !== "endpoint" || !r.localId) continue;
+          if (!target.equals.some((back) => !back.target && back.blockId === r.localId)) {
+            add("equals.asymmetric", `${label}: equals with Interface "${target.identifier}" must be reciprocal.`, r);
+          }
+        }
+      }
     }
     if (r.kind === "connection") {
       if (!r.endpointA || !r.endpointB) add("ref.endpoint-count", `connection "${r.identifier}" needs exactly two endpoints (endpointA and endpointB).`, r);
