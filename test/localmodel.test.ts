@@ -495,6 +495,9 @@ test("0.5 source validator rejects self, duplicate, and malformed equals without
     ["self", "[[#^" + E1 + "|A]]", "equals.self"],
     ["duplicate same ID with different aliases", duplicate, "equals.duplicate"],
     ["text outside links", "[[#^" + E2 + "|B]] stray-text", "equals.malformed"],
+    ["trailing comma", "[[#^" + E2 + "|B]],", "equals.malformed"],
+    ["empty comma entry", "[[#^" + E2 + "|B]],, [[#^" + E2 + "|B]]", "equals.malformed"],
+    ["semicolon separator", "[[#^" + E2 + "|B]]; [[#^" + E2 + "|B]]", "equals.malformed"],
     ["note-only reference", "[[CAN Interface]]", "equals.malformed"],
     ["unterminated wikilink", "[[#^" + E2 + "|B]", "equals.malformed"],
     ["empty value", "", "equals.malformed"],
@@ -511,6 +514,18 @@ test("0.5 source validator rejects self, duplicate, and malformed equals without
   const good = parseLocalModel(build("0.5", "[[#^" + E2 + "|B]]"))!;
   assert.equal(good.findings.filter((f) => f.code.startsWith("equals.")).length, 0,
     "a valid reciprocal 0.5 binding remains free of equals findings");
+  const canonicalMultiple = [
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
+    "### Interfaces", "#### A",
+    "- equals: [[#^" + E2 + "|B]], [[#^" + E3 + "|C]]", "^" + E1, "",
+    "#### B", "- equals: [[#^" + E1 + "|A]]", "^" + E2, "",
+    "#### C", "- equals: [[#^" + E1 + "|A]]", "^" + E3,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+  const multiple = parseLocalModel(canonicalMultiple)!;
+  assert.equal(multiple.findings.filter((f) => f.code.startsWith("equals.")).length, 0,
+    "canonical importer comma-separated multiple equals links remain valid and reciprocal");
+  assert.equal(multiple.records.find((r) => r.localId === E1)?.equals.length, 2);
 });
 
 test("the current W-384 schema fixtures parse without warnings", () => {
