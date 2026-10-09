@@ -46,7 +46,7 @@ const run = async () => {
   const state = JSON.parse(await read("99_System/11_Import/Import State.json")) as Record<string, any>;
   const localSchema = await read("99_System/03_Schemas/local-model.yaml");
   check(/^schemaVersion:\s*["']?0\.5["']?\s*$/m.test(localSchema), "Runtime local-model.yaml is not schema 0.5");
-  check(/^writableVersion:\s*["']?0\.5["']?\s*$/m.test(localSchema), "Runtime schema is not writable 0.5");
+  check(/^[ \t]*writableVersion:\s*["']?0\.5["']?[ \t]*$/m.test(localSchema), "Runtime schema is not writable 0.5");
   check(state.status === "IMPORT_COMPLETE", "Import State must be IMPORT_COMPLETE");
   check(state.runStatus?.write === "WRITE_PASS", "Import State write gate must be WRITE_PASS");
   check(state.runStatus?.acceptance === "ACCEPTANCE_PENDING", "Semantic acceptance must remain pending before promotion");
