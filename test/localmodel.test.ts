@@ -95,7 +95,7 @@ test("marker errors: missing end, missing start, duplicate, nested, wrong order,
 });
 
 test("unsupported future schema: readable as Markdown, structured use off, no records guessed", () => {
-  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.5"))!;
+  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.6"))!;
   assert.ok(r.findings.some((f) => f.code === "schema.unsupported"));
   assert.equal(r.structured, false);
   assert.deepEqual(r.records, []);
@@ -279,9 +279,9 @@ test("addLink matches by the note a link resolves to, not by its text; removeLin
   assert.ok((fm.hasChild as string[]).includes("[[B/Same Name]]"));
 });
 
-test("the 0.2 schema fixture agrees with the parser's constants", () => {
+test("the 0.5 schema fixture agrees with the parser's constants", () => {
   const yaml = readFileSync(new URL("./fixtures/local-model.yaml", import.meta.url), "utf8");
-  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->"/);
+  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.5 -->"/);
   for (const k of ["part-", "ep-", "conn-", "flow-"]) assert.ok(yaml.includes(`prefix: "${k}"`));
 });
 
