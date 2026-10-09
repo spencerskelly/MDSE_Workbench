@@ -452,3 +452,15 @@ test("relationship schema signature covers edge interpretation fields", () => {
     assert.notEqual(schemaSignature(changedSchema), signature);
   }
 });
+
+test("variantOf invalid YAML survives semantic cache roundtrip", () => {
+  const { index, local, fingerprints } = state();
+  const source = index.notes.get("Assembly.md")!;
+  source.variantOfFormatError = "variantOf must contain exactly one note-level [[Target]] link.";
+  const cache = serializeSemanticState(index, local, fingerprints, schema, scope, "0.1.17");
+  const restored = restoreSemanticState(JSON.parse(JSON.stringify(cache)), schema, scope);
+  assert.equal(restored.index.notes.get("Assembly.md")?.variantOfFormatError, source.variantOfFormatError);
+  const cached = restored.index.notes.get("Assembly.md")!;
+  assert.equal(cached.repeat?.get("dependsOn|Target.md"), 2);
+  assert.equal(cached.broken?.[0].link, "Missing");
+});
