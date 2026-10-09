@@ -374,7 +374,9 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
         const rawEquals = r.fields.get("equals");
         if (rawEquals !== undefined && (
           !r.equals.length ||
-          rawEquals.replace(/\[\[[^\]]*\]\]/g, "").trim() !== "" ||
+          // The importer writes multiple explicit links as "[[...]], [[...]]";
+          // the editor also accepts space-separated links. Nothing else is valid.
+          !/^\[\[[^\]]+\]\](?:\s*(?:,\s*|\s+)\[\[[^\]]+\]\])*$/u.test(rawEquals.trim()) ||
           r.equals.some((link) => !link.blockId)
         )) {
           add("equals.malformed", `${label}: equals must contain only Interface block links with valid ^IDs.`, r);
