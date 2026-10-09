@@ -457,6 +457,31 @@ test("0.5 Interface definitions require Object/interface rather than legacy Port
     "0.5 retains supported definitionless contextual Interfaces");
 });
 
+test("0.5 canonical equals requires reciprocal same-owner Interface links", () => {
+  const binding = (version: "0.4" | "0.5", a: string[], b: string[]) => [
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=" + version + " -->",
+    "### Interfaces", "#### A", ...a, "^" + E1, "",
+    "#### B", ...b, "^" + E2, END,
+  ].join("\n");
+  const aToB = "- equals: [[#^" + E2 + "|B]]";
+  const bToA = "- equals: [[#^" + E1 + "|A]]";
+  const valid = codes(binding("0.5", [aToB], [bToA]));
+  assert.ok(!valid.includes("equals.asymmetric") && !valid.includes("equals.cross-context"),
+    "a reciprocal same-owner BindingConnector is canonical in 0.5");
+  const unilateral = parseLocalModel(binding("0.5", [aToB], []))!;
+  assert.equal(unilateral.findings.filter((f) => f.code === "equals.asymmetric").length, 1,
+    "a single unreciprocated edge is a blocking structural finding");
+  assert.equal(unilateral.findings.find((f) => f.code === "equals.asymmetric")?.severity, "error");
+  assert.ok(codes(binding("0.5", ["- equals: [[Other Assembly#^" + E2 + "|B]]"], [bToA]))
+    .includes("equals.cross-context"), "cross-note binding cannot be written as same-owner equals");
+  const unresolved = codes(binding("0.5", ["- equals: [[#^" + E3 + "|Missing]]"], []));
+  assert.ok(unresolved.includes("ref.local-missing"), "unresolved edges retain the normal missing-reference check");
+  assert.ok(!unresolved.includes("equals.asymmetric"), "missing targets do not create misleading symmetry errors");
+  const historical = codes(binding("0.4", [aToB], []));
+  assert.ok(!historical.includes("equals.asymmetric") && !historical.includes("equals.cross-context"),
+    "0.4 temporary review equals is not silently reinterpreted as 0.5 canonical binding");
+});
+
 test("the current W-384 schema fixtures parse without warnings", () => {
   const current = currentFixtureSchema();
   assert.deepEqual(current.warnings, []);
