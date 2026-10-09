@@ -243,6 +243,7 @@ export class FindingModal extends Modal {
       orphanInverse: "No forward link backs this entry up. Check the owner note by hand before removing anything.",
       offRule: "Imported links stay as findings. Fix the link by hand, or leave it until the post-import review.",
       broken: "The link points at a note that does not exist. Fix the name in the note, or create the missing note.",
+      variantOf: "Review family relation: owner and target must be Objects, exactly one target, without cycles.",
       localModel: "This finding is in a contextual Local Model record. WB-106 Review reports it here but does not rewrite Local Model records.",
     };
     contentEl.createEl("p", { text: explain[f.category] });
