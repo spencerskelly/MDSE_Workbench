@@ -9,14 +9,14 @@ import type { ModelIndex } from "./model";
 
 export type LocalKind = "part" | "endpoint" | "connection" | "flow";
 
-export const READABLE_VERSIONS = ["0.1", "0.2", "0.3", "0.4", "0.5"] as const;
+export const READABLE_VERSIONS = ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"] as const;
 export const WRITABLE_VERSION = "0.5";
 
 const PREFIX: Record<LocalKind, string> = { part: "part-", endpoint: "ep-", connection: "conn-", flow: "flow-" };
 const SECTION_LEGACY: Record<string, LocalKind> = { "part occurrences": "part", "local interfaces": "endpoint", connections: "connection" };
 const SECTION_04: Record<string, LocalKind> = { parts: "part", interfaces: "endpoint", connections: "connection" };
 const sectionFor = (version: string, title: string): LocalKind | null =>
-  (((version === "0.4" || version === "0.5") ? SECTION_04 : SECTION_LEGACY)[title.toLowerCase()] ?? null);
+  (((version === "0.4" || version === "0.5" || version === "0.6") ? SECTION_04 : SECTION_LEGACY)[title.toLowerCase()] ?? null);
 const FLOW_ROLES = ["transmit", "receive", "exchange", "unspecified"];
 const USAGES = ["standard", "variant", "option"];
 /** A 30-character global identity token: 17 digits then 13 letters or hyphens (schema 0.2). */
@@ -64,6 +64,8 @@ export interface LocalRecord {
   roleA: string | null;
   roleB: string | null;
   multiplicity: string | null;
+  quantity: string | null;
+  unitOfMeasure: string | null;
   endpointKind: string | null;
   /** A flow's owning connection (its local ID), or null. */
   connectionId: string | null;
@@ -117,7 +119,7 @@ function blank(kind: LocalKind, identifier: string, line: number, version: strin
   return {
     kind, localId: "", identifier, line, fields: new Map(), definition: null, usage: "standard", usageExplicit: false,
     part: null, parent: null, exposes: [], equals: [], endpointA: null, endpointB: null, roleA: null, roleB: null,
-    multiplicity: null, endpointKind: null, connectionId: null, sourceSchemaVersion: version,
+    multiplicity: null, quantity: null, unitOfMeasure: null, endpointKind: null, connectionId: null, sourceSchemaVersion: version,
   };
 }
 
@@ -149,6 +151,8 @@ function finish(r: LocalRecord): void {
     r.endpointB = links("endpointB")[0] ?? null;
   }
   r.multiplicity = (f.get("multiplicity") ?? "").trim() || null;
+  r.quantity = (f.get("quantity") ?? "").trim() || null;
+  r.unitOfMeasure = (f.get("unitOfMeasure") ?? "").trim() || null;
   r.endpointKind = (f.get("kind") ?? "").trim() || null;
 }
 
@@ -158,6 +162,12 @@ const ALLOWED_FIELDS_LEGACY: Record<LocalKind, string[]> = {
   connection: ["endpointA", "endpointB", "definition", "identifier"],
   flow: ["definition", "identifier", "endpointA", "endpointB"],
 };
+const ALLOWED_FIELDS_06: Record<LocalKind, string[]> = {
+  part: ["definition", "usage", "identifier", "multiplicity", "quantity", "unitOfMeasure"],
+  endpoint: ["definition", "usage", "identifier", "part", "parent", "equals", "multiplicity", "kind"],
+  connection: ["endpointA", "endpointB", "definition", "identifier", "exposes"],
+  flow: ["definition", "endpointA", "endpointB", "identifier"],
+};
 const ALLOWED_FIELDS_04: Record<LocalKind, string[]> = {
   part: ["definition", "usage", "identifier", "multiplicity"],
   endpoint: ["definition", "usage", "identifier", "part", "parent", "equals", "multiplicity", "kind"],
@@ -165,7 +175,7 @@ const ALLOWED_FIELDS_04: Record<LocalKind, string[]> = {
   flow: ["definition", "identifier", "endpointA", "endpointB"],
 };
 const allowedFields = (version: string, kind: LocalKind): readonly string[] =>
-  ((version === "0.4" || version === "0.5") ? ALLOWED_FIELDS_04 : ALLOWED_FIELDS_LEGACY)[kind];
+  (version === "0.6" ? ALLOWED_FIELDS_06 : ((version === "0.4" || version === "0.5") ? ALLOWED_FIELDS_04 : ALLOWED_FIELDS_LEGACY))[kind];
 
 /** Stable FNV-1a fingerprint of the text that can affect Local Model parsing/validation. */
 export function localModelSourceFingerprint(text: string): string | null {
@@ -342,7 +352,7 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
     ) {
       add("record.missing-definition", `${label} has no definition link.`, r);
     }
-    if (r.kind === "endpoint" && (version === "0.4" || version === "0.5") && r.exposes.length) {
+    if (r.kind === "endpoint" && (version === "0.4" || version === "0.5" || version === "0.6") && r.exposes.length) {
       add("exposure.owner-invalid", `${label}: exposes belongs to a Connection in schema 0.4.`, r);
     }
     if (r.definition && r.definition.blockId) add("definition.incompatible", `${label}: the definition must link to a note, not a block.`, r);
@@ -372,7 +382,7 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       if (!r.endpointA || !r.endpointB) add("ref.endpoint-count", `connection "${r.identifier}" needs exactly two endpoints (endpointA and endpointB).`, r);
       needLocal(r, r.endpointA, "endpointA", "endpoint");
       needLocal(r, r.endpointB, "endpointB", "endpoint");
-      if (version === "0.4" || version === "0.5") {
+      if (version === "0.4" || version === "0.5" || version === "0.6") {
         for (const l of r.exposes) {
           if (l.target) {
             add("exposure.cross-context", `connection "${r.identifier}": exposes must target a boundary Interface in this Local Model context.`, r);
