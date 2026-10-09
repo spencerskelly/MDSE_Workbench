@@ -1,3 +1,4 @@
+import { variantOfMetadataFinding } from "../src/core/variantof-format";
 import { resolveAuthoredRelationshipLinks } from "../src/core/relationship-resolution";
 import { variantOfFormatError } from "../src/core/variantof-format";
 import { toFindings, countByCategory } from "../src/core/review";
@@ -84,4 +85,14 @@ test("reresolution retains raw format diagnosis while updating link evidence", (
  index.upsert({...original,fields:resolved.fields,unresolved:resolved.unresolved,broken:resolved.broken,repeat:resolved.repeat});
  assert.equal(index.notes.get("A")?.variantOfFormatError,original.variantOfFormatError);
  assert.ok(validateVariantOf(index).some(x=>x.code==="variant.format"));
+});
+
+test("Obsidian metadata-cache-shaped frontmatter retains malformed variantOf independently of links",()=>{
+ const noLinks={frontmatter:{type:"Object",variantOf:"Family"},frontmatterLinks:[] as unknown[]};
+ assert.ok(variantOfMetadataFinding(noLinks.frontmatter));
+ assert.equal(variantOfMetadataFinding({type:"Object",variantOf:"[[Family]]"}),undefined);
+ assert.ok(variantOfMetadataFinding({type:"Object",variantOf:["[[Family]]","[[Other]]"]}));
+ assert.ok(variantOfMetadataFinding({type:"Object",variantOf:5}));
+ assert.equal(variantOfMetadataFinding({type:"Object"}),undefined);
+ assert.equal(variantOfMetadataFinding(null),undefined);
 });
