@@ -1,3 +1,4 @@
+import { validateVariantOf } from "../core/variantof";
 /**
  * Shared asynchronous model-assurance service (W-346 / RTA-4).
  *
@@ -81,7 +82,7 @@ export class AssuranceManager {
       try {
         const model = this.source.index().findings();
         const local = this.source.localFindings();
-        const all = toFindings(model, local);
+        const all = toFindings(model, local, validateVariantOf(this.source.index()));
         const stale = this.source.revision() !== revision;
         last = {
           revision,
