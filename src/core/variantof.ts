@@ -2,7 +2,7 @@
 import type { ModelIndex } from "./model";
 
 export interface VariantOfFinding {
-  code: "variant.self" | "variant.multiple" | "variant.target-missing" | "variant.endpoint-invalid" | "variant.cycle" | "variant.duplicate" | "variant.unresolved";
+  code: "variant.self" | "variant.multiple" | "variant.target-missing" | "variant.endpoint-invalid" | "variant.cycle" | "variant.duplicate" | "variant.unresolved" | "variant.format";
   path: string;
   target?: string;
 }
@@ -11,6 +11,7 @@ export function validateVariantOf(index: ModelIndex): VariantOfFinding[] {
   const next = new Map<string, string>();
   for (const note of index.notes.values()) {
     const targets = note.fields.get("variantOf") ?? [];
+    if (note.variantOfFormatError) findings.push({ code: "variant.format", path: note.path });
     const missing = (note.broken ?? []).filter(x => x.field === "variantOf");
     // The resolver collapses repeated links; retain duplicate authored evidence.
     for (const [key, count] of note.repeat ?? []) {
