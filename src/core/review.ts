@@ -1,4 +1,4 @@
-import { validateVariantOf, type VariantOfFinding } from "./variantof";
+import type { VariantOfFinding } from "./variantof";
 /**
  * Review (WB-063, Part C): turns the index's model-health findings into one list that can be
  * counted, filtered and walked with Previous / Next. Pure TypeScript, no Obsidian imports.
