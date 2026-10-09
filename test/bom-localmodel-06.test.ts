@@ -41,3 +41,17 @@ test("0.5 legacy rejects added units; 0.6 retains normal Parts semantics", () =>
   assert.deepEqual(run("0.5", ["- multiplicity: 2"]).findings, []);
   assert.deepEqual(run("0.6", ["- multiplicity: 2"]).findings, []);
 });
+
+test("0.6 explicitly empty values fail rather than being treated as omissions", () => {
+  issue("0.6", ["- quantity: ", "- unitOfMeasure: m"], "part.quantity-invalid");
+  issue("0.6", ["- quantity: 0.5", "- unitOfMeasure: "], "part.unit-required");
+});
+test("0.1 through 0.5 preserve their existing part interpretation", () => {
+  for (const version of ["0.1", "0.2", "0.3", "0.4", "0.5"]) {
+    const result = run(version, ["- multiplicity: 2"]);
+    assert.equal(result.structured, true);
+    assert.equal(result.records[0].multiplicity, "2");
+    assert.equal(result.records[0].quantity, null);
+    assert.equal(result.records[0].unitOfMeasure, null);
+  }
+});
