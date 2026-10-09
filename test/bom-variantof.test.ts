@@ -1,3 +1,4 @@
+import { variantOfFormatError } from "../src/core/variantof-format";
 import { toFindings, countByCategory } from "../src/core/review";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -57,4 +58,18 @@ test("variantOf retains duplicate resolved links and unresolved YAML evidence", 
   assert.ok(review.some(x=>x.category==="variantOf" && x.reason==="variant.duplicate"));
   assert.ok(review.some(x=>x.category==="variantOf" && x.reason==="variant.unresolved"));
   assert.ok(review.some(x=>x.category==="broken" && x.field==="variantOf"));
+});
+
+test("raw YAML format issues survive into Review findings", () => {
+  assert.equal(variantOfFormatError("[[Family]]"),null);
+  assert.equal(variantOfFormatError("[[Family|Alias]]"),null);
+  for (const value of ["Family", "[[A]], [[B]]", ["[[A]]"], 3, true, "[[Family#^block]]"]) {
+    assert.ok(variantOfFormatError(value), String(value));
+  }
+  const {index}=graph([["A","Object"]]);
+  const note=index.notes.get("A")!;
+  note.variantOfFormatError=variantOfFormatError("Family")!;
+  const issues=validateVariantOf(index);
+  assert.ok(issues.some(x=>x.code==="variant.format"));
+  assert.ok(toFindings(index.findings(),[],issues).some(x=>x.category==="variantOf" && x.reason==="variant.format"));
 });
