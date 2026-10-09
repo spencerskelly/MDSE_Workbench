@@ -451,8 +451,9 @@ test("0.5 Interface definitions require Object/interface rather than legacy Port
     "0.5 rejects a non-interface Object subtype");
   assert.ok(check({ type: "Object", subtype: undefined }).includes("definition.incompatible"),
     "0.5 requires the interface subtype");
-  const definitionless = body.replace("- definition: [[CAN Interface]]\\n", "");
-  assert.ok(!vcodes(vault({}, [], { "Control Assembly.md": definitionless })).includes("record.missing-definition"),
+  const definitionless = body.replace("- definition: [[CAN Interface]]", "");
+  const missingCodes = vcodes(vault({}, [], { "Control Assembly.md": definitionless }));
+  assert.ok(!missingCodes.includes("record.missing-definition") && !missingCodes.includes("definition.incompatible"),
     "0.5 retains supported definitionless contextual Interfaces");
 });
 
