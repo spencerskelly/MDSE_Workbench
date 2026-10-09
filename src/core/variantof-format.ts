@@ -8,3 +8,8 @@ export function variantOfFormatError(value: unknown): string | null {
     return "variantOf must contain exactly one note-level [[Target]] link.";
   return null;
 }
+
+/** The metadata-cache boundary: use the raw frontmatter object, not frontmatterLinks. */
+export function variantOfMetadataFinding(frontmatter: Record<string, unknown> | null | undefined): string | undefined {
+  return variantOfFormatError(frontmatter?.variantOf) ?? undefined;
+}
