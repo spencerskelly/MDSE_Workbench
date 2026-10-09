@@ -338,6 +338,27 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       if (key === "usage" && version === "0.1") add("record.unknown-field", `${label}: usage is not part of schema 0.1.`, r, "warning");
       else if (!allowedFields(version, r.kind).includes(key) && key !== "usage") add("record.unknown-field", `${label}: unknown field ${key}.`, r, "warning");
     }
+    if (version === "0.6" && r.kind === "part") {
+      const rawQty = r.fields.get("quantity");
+      const rawUom = r.fields.get("unitOfMeasure");
+      if (rawQty !== undefined) {
+        if (!/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(rawQty.trim()) || !/[1-9]/.test(rawQty)) {
+          add("part.quantity-invalid", `${label}: quantity must be a positive plain decimal without exponent or sign.`, r);
+        }
+        if (rawUom === undefined || !rawUom.trim()) {
+          add("part.unit-required", `${label}: unitOfMeasure is required when quantity is present.`, r);
+        }
+      }
+      if (rawUom !== undefined) {
+        if (rawQty === undefined) add("part.quantity-required", `${label}: quantity is required when unitOfMeasure is present.`, r);
+        else if (!["ea", "in", "m", "kg"].includes(rawUom.trim())) {
+          add("part.unit-unknown", `${label}: unitOfMeasure is not in the provisional allowed set.`, r);
+        }
+      }
+      if (rawQty !== undefined && rawUom?.trim() === "ea" && r.multiplicity !== null) {
+        add("part.ea-double-count", `${label}: an ea quantity alongside multiplicity needs source clarification.`, r);
+      }
+    }
     if (r.fields.has("usage")) {
       if (r.kind === "connection" || r.kind === "flow") add("record.usage-invalid", `${label}: usage is not valid on a ${r.kind}.`, r);
       else if (version !== "0.1" && !USAGES.includes(r.usage)) add("record.usage-invalid", `${label}: usage "${r.usage}" is not standard, variant or option.`, r);
