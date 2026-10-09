@@ -539,7 +539,7 @@ function compatibleDefinition(record: LocalRecord, def: { type?: string; subtype
     const expected = COMPATIBLE[record.kind];
     return expected && def.type !== expected ? expected : null;
   }
-  if (record.sourceSchemaVersion === "0.4") {
+  if (record.sourceSchemaVersion === "0.4" || record.sourceSchemaVersion === "0.5") {
     return def.type === "Object" && def.subtype === "interface" ? null : "Object / interface";
   }
   return def.type === "Port" ? null : "Port";
