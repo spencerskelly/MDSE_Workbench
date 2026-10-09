@@ -3,7 +3,6 @@ name: BOM A01-A14 original artifact checksum audit
 on:
   push:
     branches: [recovery/bom-a01-a14-artifacts-2026-10-09]
-    paths: [".github/workflows/bom-artifact-recovery-audit.yml"]
   workflow_dispatch:
 
 permissions:
