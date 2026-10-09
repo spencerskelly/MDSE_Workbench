@@ -1368,6 +1368,43 @@ test("cancelled endpoint equals edit leaves source and history untouched", async
 });
 
 
+test("rejected 0.5 equals proposals leave note and semantic history untouched", async () => {
+  const source = "ep-20261005010000000skellyspencer";
+  const peer = "ep-20261005010000001skellyspencer";
+  const original = noteWithEditableEquals();
+  const invalid: Array<[string, string, RegExp]> = [
+    ["self", "[[#^" + source + "]]", /cannot equal itself/],
+    ["duplicate", "[[#^" + peer + "]] [[#^" + peer + "|J1]]", /duplicate equals target/i],
+    ["external owner", "[[Other Assembly#^" + peer + "]]", /same Local Model owner/],
+    ["plain text", "not a block link", /only governed Interface block links/],
+  ];
+  for (const [name, value, reason] of invalid) {
+    const store = new MemoryStore(original);
+    const transactions = new TransactionManager();
+    const service = new ModelEditService(store, () => ownerUid, transactions);
+    await assert.rejects(
+      service.stageAndReviewLocalRecordPatch("Assembly.md", source, { fields: { equals: value } }),
+      reason, name,
+    );
+    assert.equal(store.text, original, name + " did not modify source");
+    assert.equal(transactions.history().length, 0, name + " did not enter history");
+  }
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", source, {
+    fields: { equals: "[[#^ep-20261005010000999skellyspencer|Missing]]" },
+  });
+  assert.ok(staged.plan.findings.some((finding) =>
+    finding.code === "ref.local-missing" && finding.severity === "error"
+  ), "unresolved local target must fail validation");
+  assert.equal(store.text, original, "staging a malformed edge is read-only");
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original, "rejected Apply did not write the note");
+  assert.equal(transactions.history().length, 0, "rejected Apply did not enter history");
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
 function noteWithRewirableConnection(): string {
   const endpointA = "ep-20261005012000000skellyspencer";
   const endpointB = "ep-20261005012000001skellyspencer";
