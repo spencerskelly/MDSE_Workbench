@@ -371,7 +371,26 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
       // In 0.5 only, explicit source BindingConnector equals is a symmetric,
       // same-owner edge. Earlier versions retain their original review semantics.
       if (version === "0.5") {
+        const rawEquals = r.fields.get("equals");
+        if (rawEquals !== undefined && (
+          !r.equals.length ||
+          rawEquals.replace(/\[\[[^\]]*\]\]/g, "").trim() !== "" ||
+          r.equals.some((link) => !link.blockId)
+        )) {
+          add("equals.malformed", `${label}: equals must contain only Interface block links with valid ^IDs.`, r);
+        }
+        const seenEquals = new Set<string>();
         for (const l of r.equals) {
+          if (!l.target && l.blockId && l.blockId === r.localId) {
+            add("equals.self", `${label}: an Interface cannot equal itself.`, r);
+          }
+          if (l.blockId) {
+            const key = l.target + "#" + l.blockId;
+            if (seenEquals.has(key)) {
+              add("equals.duplicate", `${label}: duplicate equals link to ^${l.blockId}.`, r);
+            }
+            seenEquals.add(key);
+          }
           if (l.target) {
             add("equals.cross-context", `${label}: equals must target an Interface in the same Local Model owner.`, r);
             continue;
