@@ -37,6 +37,8 @@ export interface NoteRecord {
   abstract?: boolean;
   /** `abstract` was written with a value other than true or false. */
   abstractInvalid?: boolean;
+  /** Malformed raw YAML variantOf value, even if Obsidian emitted no link. */
+  variantOfFormatError?: string;
   /** Relationship-field links that name a block, `[[Note#^local-id]]`: the target is a Local Model record, not just the note (WB-106). */
   localRefs?: Array<{ field: string; path: string; localId: string }>;
 }
