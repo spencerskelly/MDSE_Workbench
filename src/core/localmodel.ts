@@ -363,10 +363,48 @@ export function validateRegion(region: LocalRegion): LocalFinding[] {
   };
   for (const r of region.records) {
     if (r.kind === "endpoint") {
+      const label = `endpoint "${r.identifier}"`;
       for (const [field, , want] of refTargetsKind) needLocal(r, r[field], field, want);
       if (r.part && r.parent) add("ref.part-and-parent", `endpoint "${r.identifier}" has both part and parent; they are mutually exclusive.`, r);
       for (const l of r.exposes) needLocal(r, l, "exposes", "endpoint");
       for (const l of r.equals) needLocal(r, l, "equals", "endpoint");
+      // In 0.5 only, explicit source BindingConnector equals is a symmetric,
+      // same-owner edge. Earlier versions retain their original review semantics.
+      if (version === "0.5") {
+        const rawEquals = r.fields.get("equals");
+        if (rawEquals !== undefined && (
+          !r.equals.length ||
+          // The importer writes multiple explicit links as "[[...]], [[...]]";
+          // the editor also accepts space-separated links. Nothing else is valid.
+          !/^\[\[[^\]]+\]\](?:\s*(?:,\s*|\s+)\[\[[^\]]+\]\])*$/u.test(rawEquals.trim()) ||
+          r.equals.some((link) => !link.blockId)
+        )) {
+          add("equals.malformed", `${label}: equals must contain only Interface block links with valid ^IDs.`, r);
+        }
+        const seenEquals = new Set<string>();
+        for (const l of r.equals) {
+          if (!l.target && l.blockId && l.blockId === r.localId) {
+            add("equals.self", `${label}: an Interface cannot equal itself.`, r);
+          }
+          if (l.blockId) {
+            const key = l.target + "#" + l.blockId;
+            if (seenEquals.has(key)) {
+              add("equals.duplicate", `${label}: duplicate equals link to ^${l.blockId}.`, r);
+            }
+            seenEquals.add(key);
+          }
+          if (l.target) {
+            add("equals.cross-context", `${label}: equals must target an Interface in the same Local Model owner.`, r);
+            continue;
+          }
+          if (!l.blockId) continue; // missing/malformed links are checked by needLocal
+          const target = sameNote(l);
+          if (!target || target.kind !== "endpoint" || !r.localId) continue;
+          if (!target.equals.some((back) => !back.target && back.blockId === r.localId)) {
+            add("equals.asymmetric", `${label}: equals with Interface "${target.identifier}" must be reciprocal.`, r);
+          }
+        }
+      }
     }
     if (r.kind === "connection") {
       if (!r.endpointA || !r.endpointB) add("ref.endpoint-count", `connection "${r.identifier}" needs exactly two endpoints (endpointA and endpointB).`, r);
@@ -539,7 +577,7 @@ function compatibleDefinition(record: LocalRecord, def: { type?: string; subtype
     const expected = COMPATIBLE[record.kind];
     return expected && def.type !== expected ? expected : null;
   }
-  if (record.sourceSchemaVersion === "0.4") {
+  if (record.sourceSchemaVersion === "0.4" || record.sourceSchemaVersion === "0.5") {
     return def.type === "Object" && def.subtype === "interface" ? null : "Object / interface";
   }
   return def.type === "Port" ? null : "Port";

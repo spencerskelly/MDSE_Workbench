@@ -18,7 +18,7 @@ function note(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
@@ -246,7 +246,7 @@ function noteWithEndpointDependency(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
@@ -430,7 +430,7 @@ function noteWithCleanEndpoint(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### Service Port",
     "- definition: [[CAN Port]]",
@@ -476,7 +476,7 @@ test("same-note connection dependency blocks endpoint deletion", async () => {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
@@ -549,7 +549,7 @@ function noteWithTwoEndpoints(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
@@ -658,7 +658,7 @@ function noteWithCleanConnection(includeFlow = false): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
@@ -926,7 +926,7 @@ function noteWithReassignableEndpoint(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
@@ -1039,7 +1039,7 @@ function noteWithParentableEndpoints(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Parts",
     "#### K1",
     "- definition: [[Main Contactor]]",
@@ -1159,7 +1159,7 @@ function noteWithEditableExposures(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### J1", "^" + endpointA, "",
     "#### J2", "^" + endpointB, "",
@@ -1267,7 +1267,7 @@ function noteWithEditableEquals(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### Boundary",
     "- definition: [[CAN Port]]",
@@ -1276,6 +1276,7 @@ function noteWithEditableEquals(): string {
     "",
     "#### J1",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + source + "]]",
     "^" + equalA,
     "",
     "#### J2",
@@ -1304,6 +1305,8 @@ test("staged endpoint equals add stays unwritten until Apply and supports undo/r
 
   await service.applyLocalPatch(staged.transaction.id);
   assert.ok(store.text.includes("- equals: [[#^" + firstId + "|J1]] [[#^" + secondId + "|J2]]"));
+  assert.ok(parseLocalModel(store.text)?.records.find((r) => r.localId === secondId)?.equals.some((l) => l.blockId === sourceId),
+    "new peer receives the reciprocal edge in the same apply");
   assert.equal(transactions.history().at(-1)?.changes[0].kind, "local.patch");
 
   await transactions.undo();
@@ -1365,6 +1368,43 @@ test("cancelled endpoint equals edit leaves source and history untouched", async
 });
 
 
+test("rejected 0.5 equals proposals leave note and semantic history untouched", async () => {
+  const source = "ep-20261005010000000skellyspencer";
+  const peer = "ep-20261005010000001skellyspencer";
+  const original = noteWithEditableEquals();
+  const invalid: Array<[string, string, RegExp]> = [
+    ["self", "[[#^" + source + "]]", /cannot equal itself/],
+    ["duplicate", "[[#^" + peer + "]] [[#^" + peer + "|J1]]", /duplicate equals target/i],
+    ["external owner", "[[Other Assembly#^" + peer + "]]", /same Local Model owner/],
+    ["plain text", "not a block link", /only governed Interface block links/],
+  ];
+  for (const [name, value, reason] of invalid) {
+    const store = new MemoryStore(original);
+    const transactions = new TransactionManager();
+    const service = new ModelEditService(store, () => ownerUid, transactions);
+    await assert.rejects(
+      service.stageAndReviewLocalRecordPatch("Assembly.md", source, { fields: { equals: value } }),
+      reason, name,
+    );
+    assert.equal(store.text, original, name + " did not modify source");
+    assert.equal(transactions.history().length, 0, name + " did not enter history");
+  }
+  const store = new MemoryStore(original);
+  const transactions = new TransactionManager();
+  const service = new ModelEditService(store, () => ownerUid, transactions);
+  const staged = await service.stageAndReviewLocalRecordPatch("Assembly.md", source, {
+    fields: { equals: "[[#^ep-20261005010000999skellyspencer|Missing]]" },
+  });
+  assert.ok(staged.plan.findings.some((finding) =>
+    finding.code === "ref.local-missing" && finding.severity === "error"
+  ), "unresolved local target must fail validation");
+  assert.equal(store.text, original, "staging a malformed edge is read-only");
+  await assert.rejects(service.applyLocalPatch(staged.transaction.id), /blocking Local Model finding/);
+  assert.equal(store.text, original, "rejected Apply did not write the note");
+  assert.equal(transactions.history().length, 0, "rejected Apply did not enter history");
+  service.cancelLocalPatch(staged.transaction.id);
+});
+
 function noteWithRewirableConnection(): string {
   const endpointA = "ep-20261005012000000skellyspencer";
   const endpointB = "ep-20261005012000001skellyspencer";
@@ -1380,7 +1420,7 @@ function noteWithRewirableConnection(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### J1",
     "- definition: [[CAN Port]]",
@@ -1593,7 +1633,7 @@ function noteWithDefinedPartAndEndpoint(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Parts",
     "#### K1",
     "- definition: [[Old Contactor]]",
@@ -1709,7 +1749,7 @@ function noteWithDefinedEndpointAndConnection(): string {
     "# Assembly",
     "",
     "## Local Model",
-    "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Parts",
     "#### K1",
     "- definition: [[Contactor]]",
@@ -1734,6 +1774,7 @@ function noteWithDefinedEndpointAndConnection(): string {
     "",
     "#### J4",
     "- definition: [[CAN Port]]",
+    "- equals: [[#^" + endpointId + "]]",
     "^" + equalsId,
     "",
     "### Connections",
@@ -2009,7 +2050,7 @@ test("first part occurrence can create the governed Local Model region on an emp
   assert.equal(staged.transaction.status, "reviewed");
   assert.equal(store.text, original, "Review must not write the owner note");
   assert.match(staged.plan.after, /## Local Model/);
-  assert.match(staged.plan.after, /<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->/);
+  assert.match(staged.plan.after, /<!-- MDSE:LOCAL-MODEL START schema=0\.5 -->/);
   assert.match(staged.plan.after, /### Parts/);
   assert.match(staged.plan.after, /#### K1/);
   assert.ok(staged.plan.after.includes("^" + partId));
@@ -2154,7 +2195,7 @@ function noteWithMovableFlow(): string {
   const flowId = "flow-20261005025000004skellyspencer";
   return [
     "---", "type: Object", "uid: " + ownerUid, "---", "", "# Assembly", "",
-    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->",
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
     "### Interfaces",
     "#### J1", "- definition: [[CAN Port]]", "^" + endpointA, "",
     "#### J2", "- definition: [[CAN Port]]", "^" + endpointB, "",

@@ -95,7 +95,7 @@ test("marker errors: missing end, missing start, duplicate, nested, wrong order,
 });
 
 test("unsupported future schema: readable as Markdown, structured use off, no records guessed", () => {
-  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.5"))!;
+  const r = parseLocalModel(canonical().replace("schema=0.2", "schema=0.6"))!;
   assert.ok(r.findings.some((f) => f.code === "schema.unsupported"));
   assert.equal(r.structured, false);
   assert.deepEqual(r.records, []);
@@ -279,9 +279,9 @@ test("addLink matches by the note a link resolves to, not by its text; removeLin
   assert.ok((fm.hasChild as string[]).includes("[[B/Same Name]]"));
 });
 
-test("the 0.2 schema fixture agrees with the parser's constants", () => {
+test("the 0.5 schema fixture agrees with the parser's constants", () => {
   const yaml = readFileSync(new URL("./fixtures/local-model.yaml", import.meta.url), "utf8");
-  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.4 -->"/);
+  assert.match(yaml, /startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0\.5 -->"/);
   for (const k of ["part-", "ep-", "conn-", "flow-"]) assert.ok(yaml.includes(`prefix: "${k}"`));
 });
 
@@ -437,6 +437,96 @@ test("0.4 Interface definitions require Object/interface; definitionless Interfa
   assert.ok(!vcodes(none).includes("record.missing-definition"));
 });
 
+
+test("0.5 Interface definitions require Object/interface rather than legacy Port", () => {
+  const body = ["## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->", "### Interfaces",
+    "#### Boundary", "- definition: [[CAN Interface]]", "^" + E3, END].join("\n");
+  const check = (def: Partial<NoteRecord>) =>
+    vcodes(vault({ "CAN Interface.md": def }, [], { "Control Assembly.md": body }));
+  assert.ok(!check({ type: "Object", subtype: "interface" }).includes("definition.incompatible"),
+    "0.5 accepts the governed Object / interface definition");
+  assert.ok(check({ type: "Port" }).includes("definition.incompatible"),
+    "0.5 does not silently accept legacy Port definitions");
+  assert.ok(check({ type: "Object", subtype: "electrical" }).includes("definition.incompatible"),
+    "0.5 rejects a non-interface Object subtype");
+  assert.ok(check({ type: "Object", subtype: undefined }).includes("definition.incompatible"),
+    "0.5 requires the interface subtype");
+  const definitionless = body.replace("- definition: [[CAN Interface]]", "");
+  const missingCodes = vcodes(vault({}, [], { "Control Assembly.md": definitionless }));
+  assert.ok(!missingCodes.includes("record.missing-definition") && !missingCodes.includes("definition.incompatible"),
+    "0.5 retains supported definitionless contextual Interfaces");
+});
+
+test("0.5 canonical equals requires reciprocal same-owner Interface links", () => {
+  const binding = (version: "0.4" | "0.5", a: string[], b: string[]) => [
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=" + version + " -->",
+    "### Interfaces", "#### A", ...a, "^" + E1, "",
+    "#### B", ...b, "^" + E2, END,
+  ].join("\n");
+  const aToB = "- equals: [[#^" + E2 + "|B]]";
+  const bToA = "- equals: [[#^" + E1 + "|A]]";
+  const valid = codes(binding("0.5", [aToB], [bToA]));
+  assert.ok(!valid.includes("equals.asymmetric") && !valid.includes("equals.cross-context"),
+    "a reciprocal same-owner BindingConnector is canonical in 0.5");
+  const unilateral = parseLocalModel(binding("0.5", [aToB], []))!;
+  assert.equal(unilateral.findings.filter((f) => f.code === "equals.asymmetric").length, 1,
+    "a single unreciprocated edge is a blocking structural finding");
+  assert.equal(unilateral.findings.find((f) => f.code === "equals.asymmetric")?.severity, "error");
+  assert.ok(codes(binding("0.5", ["- equals: [[Other Assembly#^" + E2 + "|B]]"], [bToA]))
+    .includes("equals.cross-context"), "cross-note binding cannot be written as same-owner equals");
+  const unresolved = codes(binding("0.5", ["- equals: [[#^" + E3 + "|Missing]]"], []));
+  assert.ok(unresolved.includes("ref.local-missing"), "unresolved edges retain the normal missing-reference check");
+  assert.ok(!unresolved.includes("equals.asymmetric"), "missing targets do not create misleading symmetry errors");
+  const historical = codes(binding("0.4", [aToB], []));
+  assert.ok(!historical.includes("equals.asymmetric") && !historical.includes("equals.cross-context"),
+    "0.4 temporary review equals is not silently reinterpreted as 0.5 canonical binding");
+});
+
+test("0.5 source validator rejects self, duplicate, and malformed equals without changing 0.4 semantics", () => {
+  const build = (version: "0.4" | "0.5", raw: string, reciprocal = true) => [
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=" + version + " -->",
+    "### Interfaces",
+    "#### A", "- equals: " + raw, "^" + E1, "",
+    "#### B", ...(reciprocal ? ["- equals: [[#^" + E1 + "|A]]"] : []), "^" + E2,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+  const duplicate = "[[#^" + E2 + "|B]] [[#^" + E2 + "|B again]]";
+  const examples: Array<[string, string, string]> = [
+    ["self", "[[#^" + E1 + "|A]]", "equals.self"],
+    ["duplicate same ID with different aliases", duplicate, "equals.duplicate"],
+    ["text outside links", "[[#^" + E2 + "|B]] stray-text", "equals.malformed"],
+    ["trailing comma", "[[#^" + E2 + "|B]],", "equals.malformed"],
+    ["empty comma entry", "[[#^" + E2 + "|B]],, [[#^" + E2 + "|B]]", "equals.malformed"],
+    ["semicolon separator", "[[#^" + E2 + "|B]]; [[#^" + E2 + "|B]]", "equals.malformed"],
+    ["note-only reference", "[[CAN Interface]]", "equals.malformed"],
+    ["unterminated wikilink", "[[#^" + E2 + "|B]", "equals.malformed"],
+    ["empty value", "", "equals.malformed"],
+    ["malformed local fragment", "[[#^]]", "equals.malformed"],
+  ];
+  for (const [name, value, code] of examples) {
+    const bad = parseLocalModel(build("0.5", value))!;
+    assert.ok(bad.findings.some((f) => f.code === code && f.severity === "error" && f.localId === E1),
+      name + " must be a blocking source finding for 0.5");
+    const historical = parseLocalModel(build("0.4", value))!;
+    assert.ok(!historical.findings.some((f) => ["equals.self", "equals.duplicate", "equals.malformed"].includes(f.code)),
+      name + " must not redefine 0.4 temporary equals semantics");
+  }
+  const good = parseLocalModel(build("0.5", "[[#^" + E2 + "|B]]"))!;
+  assert.equal(good.findings.filter((f) => f.code.startsWith("equals.")).length, 0,
+    "a valid reciprocal 0.5 binding remains free of equals findings");
+  const canonicalMultiple = [
+    "## Local Model", "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->",
+    "### Interfaces", "#### A",
+    "- equals: [[#^" + E2 + "|B]], [[#^" + E3 + "|C]]", "^" + E1, "",
+    "#### B", "- equals: [[#^" + E1 + "|A]]", "^" + E2, "",
+    "#### C", "- equals: [[#^" + E1 + "|A]]", "^" + E3,
+    "<!-- MDSE:LOCAL-MODEL END -->",
+  ].join("\n");
+  const multiple = parseLocalModel(canonicalMultiple)!;
+  assert.equal(multiple.findings.filter((f) => f.code.startsWith("equals.")).length, 0,
+    "canonical importer comma-separated multiple equals links remain valid and reciprocal");
+  assert.equal(multiple.records.find((r) => r.localId === E1)?.equals.length, 2);
+});
 
 test("the current W-384 schema fixtures parse without warnings", () => {
   const current = currentFixtureSchema();

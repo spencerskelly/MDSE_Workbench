@@ -83,7 +83,47 @@ export function planLocalRecordPatch(text: string, localId: string, patch: Local
 
   const range = recordLineRange(editable, record);
   const rendered = renderRecord(record.kind, nextHeading, record.localId, fields);
-  const nextLines = [...editable.lines.slice(0, range.start), ...rendered, ...editable.lines.slice(range.end)];
+  const edits = [{ start: range.start, end: range.end, lines: rendered }];
+  const reciprocalIds: string[] = [];
+
+  // A canonical 0.5 BindingConnector edit changes both Interface records in a single
+  // planned note snapshot. Review / Apply / Undo / Redo keep that snapshot atomic.
+  if (record.kind === "endpoint" && Object.prototype.hasOwnProperty.call(patch.fields ?? {}, "equals")) {
+    const written = fields.get("equals") ?? "";
+    const wanted = parseLinks(written);
+    if (written.replace(/\[\[[^\]]*\]\]/g, "").trim()) {
+      throw new Error("equals must contain only governed Interface block links.");
+    }
+    const next = new Set<string>();
+    for (const link of wanted) {
+      if (link.target) throw new Error("equals must stay inside the same Local Model owner.");
+      if (!link.blockId) throw new Error("equals requires a native Interface block ID.");
+      if (link.blockId === localId) throw new Error("An Interface cannot equal itself.");
+      if (next.has(link.blockId)) throw new Error("Duplicate equals target ^" + link.blockId + ".");
+      next.add(link.blockId);
+    }
+    const previous = new Set(record.equals.filter((link) => !link.target && link.blockId).map((link) => link.blockId));
+    for (const peerId of new Set([...previous, ...next])) {
+      const peer = editable.region.records.find((item) => item.localId === peerId);
+      if (!peer) continue; // source validator reports invalid proposed missing targets
+      if (peer.kind !== "endpoint") continue; // source validator reports wrong target kind
+      const has = peer.equals.some((link) => !link.target && link.blockId === localId);
+      const wants = next.has(peerId);
+      if (has === wants) continue;
+      const links = peer.equals.filter((link) => link.target || link.blockId !== localId).map((link) => link.text);
+      if (wants) links.push("[[#^" + localId + "]]");
+      const peerFields = new Map(peer.fields);
+      if (links.length) peerFields.set("equals", links.join(" "));
+      else peerFields.delete("equals");
+      const peerRange = recordLineRange(editable, peer);
+      edits.push({ start: peerRange.start, end: peerRange.end, lines: renderRecord(peer.kind, peer.identifier, peer.localId, peerFields) });
+      reciprocalIds.push(peerId);
+    }
+  }
+  const nextLines = [...editable.lines];
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    nextLines.splice(edit.start, edit.end - edit.start, ...edit.lines);
+  }
   const after = nextLines.join(editable.eol);
 
   const parsed = parseLocalModel(after);
@@ -91,7 +131,9 @@ export function planLocalRecordPatch(text: string, localId: string, patch: Local
   const reparsed = parsed.records.find((r) => r.localId === localId);
   if (!reparsed) throw new Error("Planned edit lost Local Model record ^" + localId + ".");
   if (reparsed.kind !== record.kind) throw new Error("Planned edit changed ^" + localId + " from " + record.kind + " to " + reparsed.kind + ".");
-  if (!options.allowInvalidTarget) assertTargetValid(parsed, localId);
+  if (!options.allowInvalidTarget) {
+    for (const editedId of [localId, ...reciprocalIds]) assertTargetValid(parsed, editedId);
+  }
 
   return {
     before: text,
