@@ -1,9 +1,9 @@
-schemaVersion: "0.4"
+schemaVersion: "0.5"
 purpose: "Machine-readable contract for governed Local Model Markdown records. This is a tooling/format schema, not a new first-class MDSE element schema."
 
 compatibility:
-  readableVersions: ["0.1", "0.2", "0.3", "0.4"]
-  writableVersion: "0.4"
+  readableVersions: ["0.1", "0.2", "0.3", "0.4", "0.5"]
+  writableVersion: "0.5"
   version01Normalization: "A 0.1 part or endpoint is standard usage in memory. Reading 0.1 never mutates the file."
   version02Compatibility: "Schema 0.2 remains readable with its original rule that every endpoint requires a reusable Port definition. Reading or editing 0.2 never silently reinterprets it as 0.3 or 0.4."
   version03Compatibility: "Schema 0.3 remains readable with Part Occurrences / Local Interfaces headings and optional endpoint definitions. Reading 0.3 never rewrites headings or changes endpoint semantics unless explicitly upgraded to 0.4."
@@ -12,7 +12,7 @@ compatibility:
 region:
   heading: "Local Model"
   headingLevel: 2
-  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.4 -->"
+  startMarker: "<!-- MDSE:LOCAL-MODEL START schema=0.5 -->"
   endMarker: "<!-- MDSE:LOCAL-MODEL END -->"
   maxPerNote: 1
   markerErrorsBlockStructuredEditing: true
@@ -93,7 +93,7 @@ records:
       identifier: {value: "text"}
       part: {value: "localBlockLink", targetLocalKind: "part"}
       parent: {value: "localBlockLink", targetLocalKind: "endpoint"}
-      equals: {value: "localBlockLinkOrList", targetLocalKind: "endpoint", temporary: true, symmetricMeaning: true}
+      equals: {value: "localBlockLinkOrList", targetLocalKind: "endpoint", symmetricMeaning: true}
       multiplicity: {value: "positiveIntegerOrSourceMultiplicity"}
       kind: {value: "text"}
     rules:
@@ -106,7 +106,7 @@ records:
       - "a standard occurrence with a definition cannot point at abstract: true."
       - "variant/option candidates are derived transitively from subtypeOf and are not stored here."
       - "nested inherited members are materialized only when local context needs independent addressability."
-      - "temporary equals preserves unresolved EA BindingConnector meaning; it is not automatically exposure."
+      - "equals is a canonical symmetric relation between same-context Interface occurrences when source binding semantics require equality and no stronger Connection.exposes topology is resolved."
 
   connection:
     headingLevel: 4
@@ -171,5 +171,5 @@ validation:
   - "A connection has exactly two valid endpoint references."
   - "Every connection exposes reference resolves to an assembly-boundary endpoint occurrence owned by the same Local Model context."
   - "A flow is nested under one connection and has valid endpoint roles."
-  - "Temporary equals is a review finding."
+  - "equals is symmetric: every persisted equals reference must have the reciprocal reference."
   - "Source provenance is not embedded in engineering records."
