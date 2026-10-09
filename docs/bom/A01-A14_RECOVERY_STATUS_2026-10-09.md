@@ -4,6 +4,14 @@
 
 This is an evidence record, not a new source contract. All existing MDSE/BOM proposal decisions retain their original provenance.
 
+## Original 76,602-byte archive recovered and verified (2026-10-09)
+
+The user supplied `BOM_A01_A14_Git_Handoff.tar.gz` directly. Its SHA-256 is `afec22098e7a6aa8c84a392c51d8ab4e04485708cdc04fe4642f507cd022f5af`. The archive contains all **31** frozen-inventory artifacts, each with the exact original SHA-256, **0 mismatches**, plus 17 disposable-vault internal files. The three original ZIPs passed CRC integrity checks; the archived `BOM_RUN_LOG.md` matches the frozen checksum and differs from the later Library revision.
+
+See [complete archive verification evidence](A01-A14_ORIGINAL_HANDOFF_ARCHIVE_VERIFICATION_2026-10-09.md).
+
+**Distinguish two states:** the historical archive is **31/31 VERIFIED**, but this Git branch still contains only **27/31 original artifact files**. The four recovered exact-byte files have been prepared in an extraction/upload packet and must be copied into this recovery branch before asserting Git recovery complete or merging draft PR #15. Its existing GitHub audit must then confirm **31/31**.
+
 ## Verified location of original project files
 
 The original files are visible in the user's ChatGPT file Library at `/BOM Work`, including:
