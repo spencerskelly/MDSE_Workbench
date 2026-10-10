@@ -1,63 +1,45 @@
 # BOM A-01–A-14 exact-original recovery status — 2026-10-09
 
-**Status: PARTIAL RECOVERY — NOT COMPLETE AND NOT APPROVED FOR MERGE OR A-15.**
+**Status: RECOVERED — all 31 frozen original artifacts are persisted in GitHub with verified SHA-256 integrity.**
 
-This is an evidence record, not a new source contract. All existing MDSE/BOM proposal decisions retain their original provenance.
+**Scope:** Original BOM A-01–A-14 handoff files only. **This does not approve the BOM implementation, Local Model 0.6, `variantOf`, runtime acceptance, or a release.** This evidence document is not a new governing schema or model contract.
 
-## Original 76,602-byte archive recovered and verified (2026-10-09)
+## Completed GitHub source-integrity verification
 
-The user supplied `BOM_A01_A14_Git_Handoff.tar.gz` directly. Its SHA-256 is `afec22098e7a6aa8c84a392c51d8ab4e04485708cdc04fe4642f507cd022f5af`. The archive contains all **31** frozen-inventory artifacts, each with the exact original SHA-256, **0 mismatches**, plus 17 disposable-vault internal files. The three original ZIPs passed CRC integrity checks; the archived `BOM_RUN_LOG.md` matches the frozen checksum and differs from the later Library revision.
+The user uploaded the four remaining original files to the isolated branch `recovery/bom-a01-a14-artifacts-2026-10-09`, under `docs/bom/a01-a14/`. The branch now contains **all 31** frozen-inventory files, including the exact historical `BOM_RUN_LOG.md` and all three original binary ZIPs.
 
-See [complete archive verification evidence](A01-A14_ORIGINAL_HANDOFF_ARCHIVE_VERIFICATION_2026-10-09.md).
+- Original authority: [A-01–A-14 SHA-256 inventory](A01-A14_ARTIFACT_SHA256.md), written on the original BOM proposal before source artifact recovery.
+- [GitHub audit 38008742547](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/38008742547): **31/31 exact hash matches, 0 missing, 0 hash errors**, against commit `160f1066b7fac47d7879c252b5e69f2e0d66249e`.
+- [Hardened fail-closed GitHub audit 38008828655](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/38008828655): **PASS, 31/31, 0 missing, 0 mismatches**. The workflow now fails if the original inventory changes count, a required file disappears, or its bytes differ from the frozen SHA-256. No blanket approval is based on this integrity check.
+- [Draft source-recovery PR #15](https://github.com/spencerskelly/MDSE_Workbench/pull/15) targets the **existing BOM proposal branch**, never `main`. Its artifact-recovery blocker is resolved; it remains draft for review and controlled integration.
 
-**Distinguish two states:** the historical archive is **31/31 VERIFIED**, but this Git branch still contains only **27/31 original artifact files**. The four recovered exact-byte files have been prepared in an extraction/upload packet and must be copied into this recovery branch before asserting Git recovery complete or merging draft PR #15. Its existing GitHub audit must then confirm **31/31**.
+## Original handoff provenance and exact source bytes
 
-## Verified location of original project files
+The uploaded original `BOM_A01_A14_Git_Handoff.tar.gz` was **76,602 bytes**, SHA-256 `afec22098e7a6aa8c84a392c51d8ab4e04485708cdc04fe4642f507cd022f5af`. Independent sandbox inspection found 31 frozen inventory artifacts plus 17 disposable-vault member files. All 31 source hashes matched. The three source ZIP archives passed internal CRC checks. See [original archive verification](A01-A14_ORIGINAL_HANDOFF_ARCHIVE_VERIFICATION_2026-10-09.md).
 
-The original files are visible in the user's ChatGPT file Library at `/BOM Work`, including:
+The four final recovered originals were:
 
-- `BOM_A01_A14_Git_Handoff.tar.gz` (76,602 bytes; present, raw export is not authorized by the current Files connector)
-- 28 individual original text documents (including `BOM_RUN_LOG.md`)
-- `BOM_A06_Fixtures.zip`, `BOM_A11_Canonical_Examples.zip`, and `BOM_A14_Disposable_Obsidian_Vault.zip`
+| Filename | Original bytes | SHA-256 |
+|---|---:|---|
+| `BOM_A06_Fixtures.zip` | 3,319 | `a2fd27132588ad5c343efed0bccfb653f72bb715eb4345165d0fa3fb2e2d040f` |
+| `BOM_A11_Canonical_Examples.zip` | 3,876 | `7219f43f29a409ba321f076d5e23a5e388ba3deb334f30359359b7918e457afa` |
+| `BOM_A14_Disposable_Obsidian_Vault.zip` | 6,061 | `28cabfaebed97629732ad39f94f2f786251c002388ef1cd4456549254d81932c` |
+| `BOM_RUN_LOG.md` | 18,936 | `0142c0c616cf17f745d3d499629b70a998bebfc75334c9d980c00bcbce331514` |
 
-The three binary ZIPs and handoff TAR.GZ are **located**, but no raw-byte SHA check was possible; do not claim archive verification from a filename or size.
+The archived `BOM_RUN_LOG.md` is the *frozen original*; its checksum differs from the later version also visible in the user's Library (`63ee9d799c78403a4b2c131fa75257ad8ed17b21fd1b76578de3d9b03094ae2f`). The later file was **not** substituted into the recovered source archive.
 
-## Independent checksum verification of text files
+## Recovery timeline (historical, superseded states)
 
-The Library's text representation omits one final newline for these documents. Restoring one newline in each extracted text document and computing SHA-256 against the **already frozen** `docs/bom/A01-A14_ARTIFACT_SHA256.md` results in:
+1. Original handoff documents, ZIPs and TAR.GZ were located in the user's ChatGPT Library at `/BOM Work`, resolving concern that source files were permanently lost.
+2. Twenty-seven text originals were recovered and independently matched against frozen hashes after restoration of their original final newline, then committed to this isolated branch. [Partial 27/31 audit 37980805384](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/37980805384) showed no hash errors and four pending files.
+3. The user attached the original TAR.GZ; independent SHA-256 validation confirmed all 31 frozen files. A four-file transfer packet was prepared from exact original bytes, not recreated approximations.
+4. The user uploaded the final four binaries/text to GitHub; both the first complete audit and the stricter 31/31-required audit passed. The historic *27/31* status is superseded by **31/31 complete in GitHub**.
 
-- **27 text documents with exact original SHA-256**.
-- **One text mismatch:** `BOM_RUN_LOG.md`.
-  - Frozen archive inventory SHA: `0142c0c616cf17f745d3d499629b70a998bebfc75334c9d980c00bcbce331514`.
-  - SHA of the currently readable Library version (one terminal newline restored): `63ee9d799c78403a4b2c131fa75257ad8ed17b21fd1b76578de3d9b03094ae2f`.
-  - **Do not overwrite/replace the frozen log** with this different revision. Extract the archived log from the original handoff TAR.GZ once raw bytes can be obtained.
+## Remaining engineering gates (unrelated to recovery)
 
-## GitHub persistence: 27 source originals verified
+- Review draft PR #15's complete source provenance and integrate it into the **BOM proposal branch only** when appropriate. Original BOM feature and `main` histories remain preserved.
+- Reconcile read-only Local Model 0.6 + `quantity`, `unitOfMeasure`, and `variantOf` model semantics with governing `Test_Vault_/99_System/03_Schemas`, retaining the importer's 0.5 writer constraint.
+- On *committed integrated source*, amend the old future-unsupported-schema negative test from 0.6 to 0.7; rerun the previously rehearsed **462-test** Workbench suite, typecheck, build, and paired importer model checks.
+- Perform real Obsidian UI startup, note editing/restart persistence, Bootstrap pin/lock and controlled Base Vault release acceptance. No release or `main` merge was approved through source integrity verification.
 
-A separate recovery branch, `recovery/bom-a01-a14-artifacts-2026-10-09`, forks from BOM proposal head `87cb615876c342a34ce794beee8b5fad80b80520`; original proposal and default branch remain unchanged.
-
-**All 27 verified text originals are now committed** under `docs/bom/a01-a14/`. GitHub Actions [run 37980681944](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/37980681944) checked the exact Git-committed bytes against the frozen inventory and reported:
-
-- Frozen inventory entries: **31**
-- Git-committed byte-for-byte matches: **27**
-- Missing from GitHub recovery branch: **4**
-- Git-committed hash failures: **0**
-
-The 4 missing original files are the **three binary ZIPs** and the **one version-divergent frozen BOM run log**. GitHub CI confirms all recovered text originals match; the original BOM archive recovery and release acceptance remain incomplete.
-
-## Verified recovery transfer packet
-
-A user-accessible conversation artifact `BOM_A01_A14_Verified_Text_Recovery_27_Files.zip` was generated containing the 27 SHA-confirmed original text documents, the structured local checksum record and explicit missing-file list. Its own transfer-packet SHA-256 is:
-
-`e757a96df4b4d62c4d152f0c01c5bcb5bc62c39ad2581f1fe2b7d0f34d0194a1`.
-
-**This transfer packet is not the historical 76,602-byte Git handoff archive and does not include any of the three ZIPs or the original BOM run log.** All 27 text originals have since been verified in GitHub, so it is a redundant offline recovery copy rather than a pending Git transfer.
-
-## Remaining verified recovery gates
-
-1. Preserve the successful [27-of-31 GitHub SHA audit](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/37980681944); do not revert or modify recovered originals.
-2. Transfer the three original binary ZIPs **without reserialization or modification** from the Library/workstation or original handoff archive. Validate each against the frozen SHA inventory before committing.
-3. Extract/check the historical `BOM_RUN_LOG.md` from the true source handoff archive; preserve the differently hashed current Library revision as a separate labeled revision if needed, never as a replacement for the frozen log.
-4. Only then require **31/31 exact source hashes and 0 missing** before BOM A-14 source migration or promotion; separately resolve read-only Local Model 0.6 schema and variantOf governance, the updated 0.7 future-negative test, Obsidian UI acceptance, and controlled release pins.
-
-**No source Workbench/BOM proposal merges or releases occurred in this recovery task.**
+**Verdict: original BOM file preservation is complete and verifiable; BOM functionality/release approval remains separate.**
