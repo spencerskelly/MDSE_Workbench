@@ -26,7 +26,7 @@ jobs:
           root=Path("docs/bom/a01-a14")
           inventory=Path("docs/bom/A01-A14_ARTIFACT_SHA256.md").read_text(encoding="utf-8")
           expected=dict((name,sha) for sha,name in re.findall(r"(?m)^([0-9a-f]{64})\s{2}(\S+)\s*$",inventory))
-          assert len(expected)>=30,(len(expected),"incomplete frozen checksum list")
+          assert len(expected)==31,(len(expected),"frozen inventory should contain exactly 31 originals")
           matched=[];missing=[];failed=[]
           for name,sha in expected.items():
               p=root/name
@@ -44,13 +44,13 @@ jobs:
           if unknown:print("Extra recovery metadata:",", ".join(unknown))
           if failed:print("HASH ERRORS:",json.dumps(failed))
           with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
-              f.write("## BOM A01-A14 source recovery (PARTIAL, NOT APPROVED)\n\n")
+              f.write("## BOM A01-A14 original artifact integrity (complete recovery gate)\n\n")
               f.write(f"- Inventory files: **{len(expected)}**\n")
               f.write(f"- Exact SHA-256 matches in Git: **{len(matched)}**\n")
               f.write(f"- Remaining original files: **{len(missing)}**\n")
               f.write(f"- Hash failures: **{len(failed)}**\n")
-              f.write("- Source and artifact promotion remains **BLOCKED until all originals pass**.\n")
+              f.write("- Source integrity: **PASS only when all 31 original artifacts match exactly**. BOM source/release acceptance remains separate.\n")
           assert not failed,"Refuse digest drift"
-          assert len(matched)>=15,"Verified recovery files unexpectedly lost"
+          assert len(matched)==len(expected),"Refuse missing originals or incomplete recovery"
           assert len(matched)+len(missing)==len(expected)
           PY
