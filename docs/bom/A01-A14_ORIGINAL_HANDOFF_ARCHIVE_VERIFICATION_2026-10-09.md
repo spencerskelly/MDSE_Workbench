@@ -23,17 +23,16 @@ For each of the 31 frozen inventory names, the audit required exactly one matchi
 
 **Important:** this historic `BOM_RUN_LOG.md` is the exact source-inventory version, distinct from the later Library text whose hash did not match the original. The later revision was not substituted.
 
-## Persisted GitHub state — separate from archive verification
+## GitHub persistence and independent final checksum audit — COMPLETE
 
-- [GitHub recovery branch](https://github.com/spencerskelly/MDSE_Workbench/tree/recovery/bom-a01-a14-artifacts-2026-10-09/docs/bom/a01-a14) and [draft PR #15](https://github.com/spencerskelly/MDSE_Workbench/pull/15) already contain the **27** original text artifacts recovered in the previous step.
-- [Latest GitHub SHA audit before this uploaded archive](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/37980805384) proved **27 Git files/31 inventory entries, 0 Git hash mismatches, 4 missing in Git**.
-- **The four originals listed above are now verified from user-provided original archive bytes, but have NOT yet been copied into the GitHub recovery branch.** The GitHub connector exposes text and encoded blob operations, but cannot directly consume the mounted binary file path. Do not conflate 31/31 **archive verified** with 31/31 **Git persisted**.
-- A user-facing transfer package `BOM_Final_Four_Verified_for_GitHub.zip` has been created from **unaltered original member bytes**. Extract it and upload the four contained files **without opening/re-saving them** to the *isolated recovery branch*, folder `docs/bom/a01-a14/`. GitHub Actions must then independently pass at **31/31**. The package's own ZIP hash is not evidence for the individual original hashes; the table above is authoritative.
+- [Recovery branch](https://github.com/spencerskelly/MDSE_Workbench/tree/recovery/bom-a01-a14-artifacts-2026-10-09/docs/bom/a01-a14) and [draft PR #15](https://github.com/spencerskelly/MDSE_Workbench/pull/15) now contain **all 31 exact original artifacts**, including the three ZIPs and the historically frozen run log.
+- The first complete [GitHub audit 38008742547](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/38008742547) proved **31/31 exact hashes, 0 missing, 0 mismatches** against original inventory.
+- The [hardened fail-closed CI audit 38008828655](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/38008828655) independently repeated **31/31 exact hashes, 0 missing, 0 mismatches**. This workflow now **fails** on any missing original, altered bytes, or changed number of frozen inventory entries.
+- The prior [27/31 audit 37980805384](https://github.com/spencerskelly/MDSE_Workbench/actions/runs/37980805384) is historical recovery progress only; it no longer describes current GitHub state.
+- The conversation transfer packet was used to carry exact original bytes; it is no longer required for the handoff.
 
-## Precise remaining gate
+## Final source-integrity verdict and separate acceptance
 
-**Transfer all four original files into the GitHub recovery branch and rerun the existing frozen SHA inventory audit; require `31 exact Git byte matches, 0 missing, 0 mismatches`.**
+**The 31/31 original artifact Git-persistence gate is SATISFIED.** The BOM source recovery can proceed to normal review on draft PR #15 targeting the BOM proposal branch, not `main`. Do not confuse original-artifact integrity with approving proposed Local Model 0.6 read-only semantics, `variantOf` governance, old negative-test updates, Obsidian UI acceptance, Bootstrap or a controlled release.
 
-Only after that gate may the BOM source-artifact recovery PR be considered for merge into the BOM proposal (not into `main`); BOM 0.6 read-only/variantOf schema governance, future-negative-test adjustment, actual Obsidian UI acceptance, Bootstrap and controlled release approval remain independent work.
-
-**No release was promoted and no main branch or source BOM proposal branch was modified by this archive verification.**
+**No release was promoted, no BOM source implementation merged into `Test_Vault_`, and no default branch was changed by archive recovery.**
