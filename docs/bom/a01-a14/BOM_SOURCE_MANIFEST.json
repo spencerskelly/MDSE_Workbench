@@ -1,0 +1,90 @@
+{
+  "manifest_schema": "bom-source-manifest/1.0",
+  "work_unit": "A-01",
+  "generated_at_utc": "2026-10-09T01:47:00Z",
+  "planning_baseline": "2026-10-08",
+  "sources": [
+    {
+      "id": "S1",
+      "file": "AllBOMsProduction.xlsx",
+      "role": "Initial production baseline and preferred active relationship evidence",
+      "sha256": "dccf329de530ba6d7dd1b5d1e29c8bb4e78337006138bcc317b40375d79acf5d",
+      "verification": "DECLARED_FROM_IMPLEMENTATION_PLAN",
+      "available_in_current_runtime": false,
+      "note": "The current runtime does not contain S1, so A-01 preserves the hash frozen during planning but does not claim a fresh byte-for-byte rehash."
+    },
+    {
+      "id": "S2",
+      "file": "Ampure_all_BoMs.xlsx",
+      "role": "Complete available BOM history; recover missing dependency definitions and revisions",
+      "sha256": "d9b37d50d59908cc8a908f68301f2d98b0cc8f474e590416a71593996b1fc1e1",
+      "verification": "REHASHED_CURRENT_UPLOAD_MATCH",
+      "available_in_current_runtime": true,
+      "size_bytes": 48126408
+    }
+  ],
+  "repositories": [
+    {
+      "name": "spencerskelly/Test_Vault_",
+      "role": "MDSE methodology / schemas / governance",
+      "default_branch": "main",
+      "branch_sha": "19f565859e4b9fb7ae63004f1b6f0a7de1b9144e",
+      "head_commit_date_utc": "2026-10-05T16:50:05Z",
+      "head_commit_message": "Set importer corrections as active work window",
+      "registry_file": "00_Workspace/00 - Current State.md",
+      "registry_last_verified": "2026-10-05",
+      "workspace_decision_log_latest_seen_on_main": "W-370",
+      "observed_branches": {
+        "main": "19f565859e4b9fb7ae63004f1b6f0a7de1b9144e",
+        "importer/baseline-contract-2026-10-05": "b382ec79f722b9991dabaec27ed6cfea17070d02",
+        "wb106-release-integration": "c1093cf5f7b5727beef6a0fe6b7cdfbfd39d5105",
+        "ai/importer-v0.8-folder-cap-75": "c82e31ccb4f665aea1f2988a28ec43630ace71b6"
+      }
+    },
+    {
+      "name": "spencerskelly/MDSE_Workbench",
+      "role": "Workbench product / implementation authority",
+      "default_branch": "main",
+      "branch_sha": "59fc6219b1d0586900aa7d38685e7087a9d47fec",
+      "head_commit_date_utc": "2026-10-06T03:36:21Z",
+      "head_commit_message": "WB-128: sync Local Model 0.4 fixture to W-385 authority",
+      "observed_branches": {
+        "main": "59fc6219b1d0586900aa7d38685e7087a9d47fec",
+        "workbench/local-model-0.3": "c05ede6df4f6e120d9e51a99c1b66a8af386a9ef",
+        "workbench/local-model-0.4": "4987652c63e92f7ac16a2db33eda6feb3b5c6e49",
+        "workbench/local-model-0.5": "7052c07b4c95212522ba4b5d274c95be0860bda3",
+        "wb106-occurrence-views": "3a565a7abc8b60d7b3ee7e1a2152556b58e0ec59",
+        "wb106-runtime-build": "e428116f45a114098cd9c1ff46e94af4bf367377"
+      }
+    }
+  ],
+  "registry_drift": [
+    {
+      "severity": "INFO",
+      "area": "Test_Vault_ current-state registry",
+      "finding": "Registry remains explicitly last-verified 2026-10-05 and main HEAD is the 2026-10-05 commit that set the importer-correction work window."
+    },
+    {
+      "severity": "DRIFT",
+      "area": "Workbench",
+      "registry_statement": "Current-state registry names latest built artifact e88d1b40a29d79b988cfb1b40e73717e8c6492a8 through WB-126.",
+      "observed_state": "MDSE_Workbench/main is 59fc6219b1d0586900aa7d38685e7087a9d47fec, WB-128, dated 2026-10-06.",
+      "impact": "Later governance steps must reconcile Workbench's post-registry Local Model work before changing core schema or writer behavior."
+    },
+    {
+      "severity": "DRIFT",
+      "area": "Cross-repository authority",
+      "finding": "Workbench main commit message references W-385 authority, while Test_Vault_/main Workspace Decision Log currently ends at W-370.",
+      "impact": "Do not assume W-371 through W-385 are merged into methodology main. A-03 must resolve decision-number authority before proposing new W decisions."
+    }
+  ],
+  "a01_disposition": {
+    "status": "PASS_WITH_RECORDED_DRIFT",
+    "notes": [
+      "S2 was rehashed in the current runtime and matches the planning hash.",
+      "S1 was not present in the current runtime; its planning hash is frozen but marked not freshly reverified.",
+      "No repository files were modified."
+    ],
+    "next_step": "A-02"
+  }
+}

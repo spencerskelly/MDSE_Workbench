@@ -1,0 +1,56 @@
+name: BOM A01-A14 original artifact checksum audit
+
+on:
+  push:
+    branches: [recovery/bom-a01-a14-artifacts-2026-10-09]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bom-artifact-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check every recovered file against frozen BOM SHA inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,re,os,json
+          root=Path("docs/bom/a01-a14")
+          inventory=Path("docs/bom/A01-A14_ARTIFACT_SHA256.md").read_text(encoding="utf-8")
+          expected=dict((name,sha) for sha,name in re.findall(r"(?m)^([0-9a-f]{64})\s{2}(\S+)\s*$",inventory))
+          assert len(expected)==31,(len(expected),"frozen inventory should contain exactly 31 originals")
+          matched=[];missing=[];failed=[]
+          for name,sha in expected.items():
+              p=root/name
+              if not p.is_file():
+                  missing.append(name);continue
+              actual=hashlib.sha256(p.read_bytes()).hexdigest()
+              if actual==sha:matched.append(name)
+              else:failed.append({"name":name,"expected":sha,"actual":actual})
+          unknown=sorted(set(x.name for x in root.iterdir() if x.is_file())-set(expected)) if root.is_dir() else []
+          print("Original artifact source inventory:",len(expected))
+          print("Byte-for-byte verified originals:",len(matched))
+          print("Unrecovered original files:",len(missing))
+          print("Hash mismatches:",len(failed))
+          print("Missing:",", ".join(sorted(missing)))
+          if unknown:print("Extra recovery metadata:",", ".join(unknown))
+          if failed:print("HASH ERRORS:",json.dumps(failed))
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("## BOM A01-A14 original artifact integrity (complete recovery gate)\n\n")
+              f.write(f"- Inventory files: **{len(expected)}**\n")
+              f.write(f"- Exact SHA-256 matches in Git: **{len(matched)}**\n")
+              f.write(f"- Remaining original files: **{len(missing)}**\n")
+              f.write(f"- Hash failures: **{len(failed)}**\n")
+              f.write("- Source integrity: **PASS only when all 31 original artifacts match exactly**. BOM source/release acceptance remains separate.\n")
+          assert not failed,"Refuse digest drift"
+          assert len(matched)==len(expected),"Refuse missing originals or incomplete recovery"
+          assert len(matched)+len(missing)==len(expected)
+          PY

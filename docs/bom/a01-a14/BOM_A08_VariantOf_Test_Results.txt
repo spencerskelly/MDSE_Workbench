@@ -1,0 +1,11 @@
+PASS | valid Object to Object | []
+PASS | non-Object target rejected | ['invalid-target']
+PASS | non-Object source rejected | ['invalid-source']
+PASS | self link rejected | ['self-reference']
+PASS | directed cycle rejected | ['cycle']
+PASS | two targets rejected | ['multiple-targets']
+PASS | multiple members to family | []
+PASS | omitted relation valid | []
+PASS | dangling target rejected | ['unresolved-target']
+PASS | derived reverse lookup; target remains unchanged
+RESULT: 10/10 PASS (proposed semantic fixture only)
