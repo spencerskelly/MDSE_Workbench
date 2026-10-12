@@ -1,5 +1,21 @@
 # MDSE Workbench
 
+> [!IMPORTANT]
+> **Repository transition (2026-10-11): do not start new development here.**
+>
+> The active MDSE development workspace is **[Test_Vault_](https://github.com/spencerskelly/Test_Vault_)**,
+> with Workbench source at [`55_Workbench/`](https://github.com/spencerskelly/Test_Vault_/tree/consolidation/step22-single-repo-cutover-2026-10-11/55_Workbench).
+> At this date the consolidated changes are still on a [tested draft consolidation branch](https://github.com/spencerskelly/Test_Vault_/tree/consolidation/step22-single-repo-cutover-2026-10-11),
+> not yet approved or merged into `Test_Vault_/main`; MDSE 0.8.0 remains **pre-release**.
+>
+> This repository and its existing branches/PRs are retained for **read-only historical recovery**.
+> Please open new feature branches, fixes, decisions and issues in `Test_Vault_`, not here.
+> Do **not** automatically merge experimental BOM/Local Model candidate branches or alter the
+> frozen plugin-lock source provenance. All original content below is preserved unchanged.
+>
+> [Cutover inventory and reversible archive plan](https://github.com/spencerskelly/Test_Vault_/blob/consolidation/step22-single-repo-cutover-2026-10-11/66_Testing/consolidation/STEP22_SINGLE_REPO_CUTOVER.md)
+
+
 The everyday engineer interface to the MDSE model vault: create model elements, explore them as generated views, and review model health, without editing YAML by hand.
 
 The vault's Markdown and YAML are the model. Workbench reads the vault's own schema (`relationships.yaml`, `element-types.yaml`) and never embeds model rules. If Workbench is turned off, the vault stays complete and readable.
